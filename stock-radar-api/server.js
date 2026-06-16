@@ -221,6 +221,56 @@ app.get("/institutional-trades/:stockCode", async (req, res) => {
   }
 });
 
+app.get("/radar-scores/:stockCode", async (req, res) => {
+  try {
+    const stockCode = req.params.stockCode;
+    const limit = Number(req.query.limit) || 30;
+
+    const scores = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+
+        total_score,
+        foreign_score,
+        investment_trust_score,
+        volume_score,
+        price_position_score,
+        trend_score,
+
+        foreign_status,
+        investment_trust_status,
+        volume_status,
+        price_position_status,
+        radar_note,
+
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM radar_scores
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT ?
+      `,
+      [stockCode, limit],
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      count: scores.length,
+      data: scores,
+    });
+  } catch (error) {
+    console.error("Get radar scores failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get radar scores failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
