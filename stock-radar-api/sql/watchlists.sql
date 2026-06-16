@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS watchlists (
   user_id INT UNSIGNED NOT NULL,
   stock_code VARCHAR(20) NOT NULL,
   note VARCHAR(255) NULL,
+  sort_order INT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_watchlists_user_stock (user_id, stock_code),
   KEY idx_watchlists_user_created (user_id, created_at),
+  KEY idx_watchlists_user_sort (user_id, sort_order, created_at),
   KEY idx_watchlists_stock_code (stock_code),
   CONSTRAINT fk_watchlists_user_id
     FOREIGN KEY (user_id) REFERENCES users(id)

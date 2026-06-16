@@ -1111,3 +1111,210 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* 番外篇：自選股排序與技術圖表 */
+.order-buttons {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.order-btn {
+  min-height: 42px;
+  border: 1px solid rgba(86, 214, 255, 0.28);
+  border-radius: 13px;
+  padding: 9px 11px;
+  color: var(--accent);
+  background: rgba(86, 214, 255, 0.08);
+  font-size: 14px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.order-btn:active {
+  transform: scale(0.98);
+}
+
+.order-btn:disabled {
+  color: var(--muted-2);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.muted-value {
+  color: var(--muted-2);
+  font-size: 14px;
+}
+
+.chart-section {
+  overflow: hidden;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.chart-scroll {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.stock-chart {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+}
+
+.chart-bg {
+  fill: rgba(255, 255, 255, 0.025);
+}
+
+.chart-grid {
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 1;
+}
+
+.chart-axis-text {
+  fill: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.candle-line,
+.candle-body,
+.volume-bar {
+  vector-effect: non-scaling-stroke;
+}
+
+.candle-up,
+.volume-up {
+  fill: var(--danger);
+  stroke: var(--danger);
+}
+
+.candle-down,
+.volume-down {
+  fill: var(--success);
+  stroke: var(--success);
+}
+
+.candle-flat,
+.volume-flat {
+  fill: var(--muted-2);
+  stroke: var(--muted-2);
+}
+
+.candle-line {
+  stroke-width: 1.5;
+}
+
+.ma-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ma-5,
+.legend-ma-5 {
+  color: #7fd8ff;
+  stroke: #7fd8ff;
+}
+
+.ma-10,
+.legend-ma-10 {
+  color: #b997ff;
+  stroke: #b997ff;
+}
+
+.ma-20,
+.legend-ma-20,
+.mv-20,
+.legend-mv-20 {
+  color: #f2b178;
+  stroke: #f2b178;
+}
+
+.ma-60,
+.legend-ma-60 {
+  color: #f2d66d;
+  stroke: #f2d66d;
+}
+
+.ma-120,
+.legend-ma-120 {
+  color: #ff9aaa;
+  stroke: #ff9aaa;
+}
+
+.ma-240,
+.legend-ma-240 {
+  color: #cbd6e4;
+  stroke: #cbd6e4;
+}
+
+.mv-5,
+.legend-mv-5 {
+  color: #7fd8ff;
+  stroke: #7fd8ff;
+}
+
+.chart-note {
+  margin: 9px 0 0;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.chart-empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  padding: 16px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+@media (max-width: 620px) {
+  .order-buttons {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .order-btn {
+    width: 100%;
+  }
+
+  .stock-chart {
+    min-width: 680px;
+  }
+}

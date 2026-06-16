@@ -300,6 +300,303 @@ function createStatusItem(label, value) {
   return createInfoItem(label, chip);
 }
 
+
+const MOVING_AVERAGE_PERIODS = [5, 10, 20, 60, 120, 240];
+const VOLUME_AVERAGE_PERIODS = [5, 20];
+
+function getRowDate(row) {
+  return String(pick(row, ["trade_date", "date"], ""));
+}
+
+function getSortedPriceRows(rows, maxRows = 260) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const uniqueMap = new Map();
+
+  safeRows.forEach((row) => {
+    const date = getRowDate(row);
+    const close = toNumber(pick(row, ["close_price", "closing_price", "close"], null));
+
+    if (!date || close === null) return;
+    uniqueMap.set(date, row);
+  });
+
+  return Array.from(uniqueMap.values())
+    .sort((a, b) => getRowDate(a).localeCompare(getRowDate(b)))
+    .slice(-maxRows);
+}
+
+function averageStrict(values, period) {
+  const safeValues = values.slice(-period).filter((value) => value !== null && Number.isFinite(value));
+
+  if (safeValues.length < period) return null;
+
+  return safeValues.reduce((sum, value) => sum + value, 0) / safeValues.length;
+}
+
+function enrichPriceRows(rows) {
+  const sortedRows = getSortedPriceRows(rows);
+
+  return sortedRows.map((row, index) => {
+    const close = toNumber(pick(row, ["close_price", "closing_price", "close"], null));
+    const open = toNumber(pick(row, ["open_price", "open"], close));
+    const high = toNumber(pick(row, ["high_price", "high"], Math.max(open ?? close ?? 0, close ?? open ?? 0)));
+    const low = toNumber(pick(row, ["low_price", "low"], Math.min(open ?? close ?? 0, close ?? open ?? 0)));
+    const volume = toNumber(pick(row, ["trade_volume", "volume"], null));
+    const closeHistory = sortedRows
+      .slice(0, index + 1)
+      .map((item) => toNumber(pick(item, ["close_price", "closing_price", "close"], null)));
+    const volumeHistory = sortedRows
+      .slice(0, index + 1)
+      .map((item) => toNumber(pick(item, ["trade_volume", "volume"], null)));
+    const ma = {};
+    const mv = {};
+
+    MOVING_AVERAGE_PERIODS.forEach((period) => {
+      ma[`ma${period}`] = averageStrict(closeHistory, period);
+    });
+
+    VOLUME_AVERAGE_PERIODS.forEach((period) => {
+      mv[`mv${period}`] = averageStrict(volumeHistory, period);
+    });
+
+    return {
+      date: getRowDate(row),
+      open: open ?? close,
+      high: high ?? close,
+      low: low ?? close,
+      close,
+      volume,
+      ma,
+      mv,
+    };
+  });
+}
+
+function formatAveragePrice(value, period, availableCount) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return `<span class="muted-value">資料不足 ${availableCount}/${period}</span>`;
+  }
+
+  return formatPrice(value);
+}
+
+function renderMovingAverageItems(enrichedRows) {
+  const latestRow = enrichedRows[enrichedRows.length - 1] || {};
+  const availableCount = enrichedRows.length;
+
+  return MOVING_AVERAGE_PERIODS.map((period) =>
+    createInfoItem(`MA${period}`, formatAveragePrice(latestRow.ma?.[`ma${period}`], period, availableCount)),
+  );
+}
+
+function svgPoint(x, y) {
+  return `${Number(x).toFixed(2)},${Number(y).toFixed(2)}`;
+}
+
+function renderEmptyChart(message) {
+  return `
+    <div class="chart-empty">
+      ${escapeHtml(message)}
+    </div>
+  `;
+}
+
+function renderPriceChart(enrichedRows) {
+  const rows = enrichedRows.slice(-120);
+
+  if (rows.length < 2) {
+    return renderEmptyChart("至少需要 2 筆行情資料，才能畫股價走勢圖。");
+  }
+
+  const width = 900;
+  const height = 320;
+  const left = 54;
+  const right = 22;
+  const top = 22;
+  const bottom = 38;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const valueCandidates = [];
+
+  rows.forEach((row) => {
+    [row.high, row.low, row.close, ...MOVING_AVERAGE_PERIODS.map((period) => row.ma[`ma${period}`])]
+      .filter((value) => value !== null && value !== undefined && Number.isFinite(value))
+      .forEach((value) => valueCandidates.push(value));
+  });
+
+  const minValue = Math.min(...valueCandidates);
+  const maxValue = Math.max(...valueCandidates);
+  const paddingValue = Math.max((maxValue - minValue) * 0.08, maxValue * 0.01, 1);
+  const lowBound = minValue - paddingValue;
+  const highBound = maxValue + paddingValue;
+  const valueRange = highBound - lowBound || 1;
+  const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
+  const candleWidth = Math.max(3, Math.min(9, xStep * 0.48));
+
+  const xFor = (index) => left + index * xStep;
+  const yFor = (value) => top + ((highBound - value) / valueRange) * chartHeight;
+  const gridValues = Array.from({ length: 5 }, (_, index) => lowBound + (valueRange / 4) * index);
+
+  const gridLines = gridValues.map((value) => {
+    const y = yFor(value);
+    return `
+      <line class="chart-grid" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" />
+      <text class="chart-axis-text" x="${left - 8}" y="${y + 4}" text-anchor="end">${formatPrice(value)}</text>
+    `;
+  }).join("");
+
+  const candles = rows.map((row, index) => {
+    const x = xFor(index);
+    const open = row.open ?? row.close;
+    const close = row.close ?? row.open;
+    const high = row.high ?? Math.max(open, close);
+    const low = row.low ?? Math.min(open, close);
+    const yHigh = yFor(high);
+    const yLow = yFor(low);
+    const yOpen = yFor(open);
+    const yClose = yFor(close);
+    const rectY = Math.min(yOpen, yClose);
+    const rectHeight = Math.max(Math.abs(yClose - yOpen), 2);
+    const tone = close > open ? "up" : close < open ? "down" : "flat";
+
+    return `
+      <line class="candle-line candle-${tone}" x1="${x}" y1="${yHigh}" x2="${x}" y2="${yLow}" />
+      <rect class="candle-body candle-${tone}" x="${x - candleWidth / 2}" y="${rectY}" width="${candleWidth}" height="${rectHeight}" rx="1.5" />
+    `;
+  }).join("");
+
+  const maLines = MOVING_AVERAGE_PERIODS.map((period) => {
+    const points = rows
+      .map((row, index) => row.ma[`ma${period}`] === null ? null : svgPoint(xFor(index), yFor(row.ma[`ma${period}`])))
+      .filter(Boolean)
+      .join(" ");
+
+    if (!points) return "";
+
+    return `<polyline class="ma-line ma-${period}" points="${points}" />`;
+  }).join("");
+
+  const firstDate = rows[0]?.date || "";
+  const lastDate = rows[rows.length - 1]?.date || "";
+
+  return `
+    <div class="chart-scroll">
+      <svg class="stock-chart price-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="股價走勢圖">
+        <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18" />
+        ${gridLines}
+        ${candles}
+        ${maLines}
+        <text class="chart-axis-text" x="${left}" y="${height - 10}" text-anchor="start">${escapeHtml(firstDate)}</text>
+        <text class="chart-axis-text" x="${width - right}" y="${height - 10}" text-anchor="end">${escapeHtml(lastDate)}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function renderVolumeChart(enrichedRows) {
+  const rows = enrichedRows.slice(-120);
+
+  if (rows.length < 2) {
+    return renderEmptyChart("至少需要 2 筆行情資料，才能畫成交量走勢圖。");
+  }
+
+  const width = 900;
+  const height = 230;
+  const left = 54;
+  const right = 22;
+  const top = 20;
+  const bottom = 34;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const maxVolume = Math.max(
+    1,
+    ...rows.flatMap((row) => [row.volume, row.mv.mv5, row.mv.mv20].filter((value) => value !== null && Number.isFinite(value))),
+  );
+  const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
+  const barWidth = Math.max(3, Math.min(10, xStep * 0.58));
+  const xFor = (index) => left + index * xStep;
+  const yFor = (value) => top + ((maxVolume - value) / maxVolume) * chartHeight;
+
+  const gridValues = Array.from({ length: 4 }, (_, index) => (maxVolume / 3) * index);
+  const gridLines = gridValues.map((value) => {
+    const y = yFor(value);
+    return `
+      <line class="chart-grid" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" />
+      <text class="chart-axis-text" x="${left - 8}" y="${y + 4}" text-anchor="end">${formatNumber(Math.round(value))}</text>
+    `;
+  }).join("");
+
+  const bars = rows.map((row, index) => {
+    const volume = row.volume ?? 0;
+    const x = xFor(index);
+    const y = yFor(volume);
+    const barHeight = Math.max(top + chartHeight - y, 1);
+    const tone = row.close > row.open ? "up" : row.close < row.open ? "down" : "flat";
+
+    return `<rect class="volume-bar volume-${tone}" x="${x - barWidth / 2}" y="${y}" width="${barWidth}" height="${barHeight}" rx="1.5" />`;
+  }).join("");
+
+  const mvLines = VOLUME_AVERAGE_PERIODS.map((period) => {
+    const points = rows
+      .map((row, index) => row.mv[`mv${period}`] === null ? null : svgPoint(xFor(index), yFor(row.mv[`mv${period}`])))
+      .filter(Boolean)
+      .join(" ");
+
+    if (!points) return "";
+
+    return `<polyline class="ma-line mv-${period}" points="${points}" />`;
+  }).join("");
+
+  const firstDate = rows[0]?.date || "";
+  const lastDate = rows[rows.length - 1]?.date || "";
+
+  return `
+    <div class="chart-scroll">
+      <svg class="stock-chart volume-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="成交量走勢圖">
+        <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18" />
+        ${gridLines}
+        ${bars}
+        ${mvLines}
+        <text class="chart-axis-text" x="${left}" y="${height - 9}" text-anchor="start">${escapeHtml(firstDate)}</text>
+        <text class="chart-axis-text" x="${width - right}" y="${height - 9}" text-anchor="end">${escapeHtml(lastDate)}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function renderChartLegend(items) {
+  return `
+    <div class="chart-legend">
+      ${items.map((item) => `<span class="legend-item ${escapeHtml(item.className || "")}"><span class="legend-dot"></span>${escapeHtml(item.label)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderTechnicalCharts(enrichedRows) {
+  const availableCount = enrichedRows.length;
+  const latestRow = enrichedRows[availableCount - 1] || {};
+  const latestMv5 = latestRow.mv?.mv5;
+  const latestMv20 = latestRow.mv?.mv20;
+
+  return `
+    <section class="detail-section chart-section">
+      <h3>股價走勢圖</h3>
+      ${renderChartLegend(MOVING_AVERAGE_PERIODS.map((period) => ({ label: `MA${period}`, className: `legend-ma-${period}` })))}
+      ${renderPriceChart(enrichedRows)}
+      <p class="chart-note">顯示最近 ${Math.min(availableCount, 120)} 筆行情；MA 是收盤價平均。</p>
+    </section>
+    <section class="detail-section chart-section">
+      <h3>成交量走勢圖</h3>
+      ${renderChartLegend([
+        { label: `MV5 ${latestMv5 !== null && latestMv5 !== undefined ? formatNumber(Math.round(latestMv5)) : `資料不足 ${availableCount}/5`}`, className: "legend-mv-5" },
+        { label: `MV20 ${latestMv20 !== null && latestMv20 !== undefined ? formatNumber(Math.round(latestMv20)) : `資料不足 ${availableCount}/20`}`, className: "legend-mv-20" },
+      ])}
+      ${renderVolumeChart(enrichedRows)}
+      <p class="chart-note">成交量單位依資料庫目前匯入值顯示；若匯入程式為張數，這裡就是張數。</p>
+    </section>
+  `;
+}
+
 function renderLoadingCards() {
   stockList.innerHTML = Array.from({ length: 4 })
     .map(
@@ -364,11 +661,29 @@ function getWatchlistButton(stockCode) {
   `;
 }
 
-function getCardActionButtons(stockCode, detailText = "看明細") {
+function getWatchlistOrderButtons(stockCode, index = -1) {
+  const code = normalizeStockCode(stockCode);
+
+  if (state.page !== "watchlist" || !isAuthenticated() || index < 0) return "";
+
+  const total = state.latestRows.length;
+  const isFirst = index <= 0;
+  const isLast = index >= total - 1;
+
+  return `
+    <div class="order-buttons" aria-label="調整自選股順序">
+      <button class="order-btn" type="button" data-order-action="up" data-code="${escapeHtml(code)}" ${isFirst ? "disabled" : ""}>上移</button>
+      <button class="order-btn" type="button" data-order-action="down" data-code="${escapeHtml(code)}" ${isLast ? "disabled" : ""}>下移</button>
+    </div>
+  `;
+}
+
+function getCardActionButtons(stockCode, detailText = "看明細", index = -1) {
   const code = normalizeStockCode(stockCode);
 
   return `
     <div class="action-buttons">
+      ${getWatchlistOrderButtons(code, index)}
       ${getWatchlistButton(code)}
       <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">${escapeHtml(detailText)}</button>
     </div>
@@ -490,6 +805,49 @@ async function handleWatchlistAction(button) {
     showStatus(`自選股操作失敗：${escapeHtml(error.message)}`, "error");
     button.disabled = false;
     button.textContent = originalText;
+  }
+}
+
+
+async function handleWatchlistOrder(button) {
+  if (state.page !== "watchlist" || !isAuthenticated()) return;
+
+  const stockCode = normalizeStockCode(button.dataset.code);
+  const action = button.dataset.orderAction;
+  const currentIndex = state.latestRows.findIndex((row) => getStockCodeFromRow(row) === stockCode);
+  const targetIndex = action === "up" ? currentIndex - 1 : currentIndex + 1;
+
+  if (!stockCode || currentIndex < 0 || targetIndex < 0 || targetIndex >= state.latestRows.length) return;
+
+  const previousRows = [...state.latestRows];
+  const nextRows = [...state.latestRows];
+  [nextRows[currentIndex], nextRows[targetIndex]] = [nextRows[targetIndex], nextRows[currentIndex]];
+
+  button.disabled = true;
+  state.latestRows = nextRows;
+  stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+  showStatus("正在儲存自選股順序...", "success");
+
+  try {
+    const savedRows = await fetchJson("/watchlist/order", {
+      method: "PATCH",
+      auth: true,
+      body: {
+        stock_codes: nextRows.map(getStockCodeFromRow).filter(Boolean),
+      },
+    });
+
+    if (Array.isArray(savedRows)) {
+      state.latestRows = savedRows;
+    }
+
+    await refreshWatchlistCodes(state.latestRows);
+    stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+    showTemporaryStatus("自選股順序已更新。", "success");
+  } catch (error) {
+    state.latestRows = previousRows;
+    stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+    showStatus(`自選股排序失敗：${escapeHtml(error.message)}`, "error");
   }
 }
 
@@ -775,7 +1133,7 @@ function renderForeignStreakCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        ${getCardActionButtons(code)}
+        ${getCardActionButtons(code, "看明細", index)}
       </div>
     </article>
   `;
@@ -853,7 +1211,7 @@ function renderTrustCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        ${getCardActionButtons(code)}
+        ${getCardActionButtons(code, "看明細", index)}
       </div>
     </article>
   `;
@@ -919,7 +1277,7 @@ function renderStockCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        ${getCardActionButtons(code)}
+        ${getCardActionButtons(code, "看明細", index)}
       </div>
     </article>
   `;
@@ -1231,13 +1589,14 @@ async function openDetail(stockCode) {
   try {
     const [summary, prices, trades, scores] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
-      fetchJson(`/prices/${stockCode}`),
+      fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
     const priceRows = prices.status === "fulfilled" && Array.isArray(prices.value) ? prices.value : [];
+    const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
     const scoreRows = scores.status === "fulfilled" && Array.isArray(scores.value) ? scores.value : [];
 
@@ -1277,6 +1636,8 @@ async function openDetail(stockCode) {
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
+      renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
+      renderTechnicalCharts(enrichedPriceRows),
       renderDetailSection("三大法人", [
         createInfoItem("外資", formatNumber(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"])), getChangeClass(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"]))),
         createInfoItem("投信", formatNumber(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"])), getChangeClass(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"]))),
@@ -1330,6 +1691,12 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const orderButton = event.target.closest("[data-order-action]");
+  if (orderButton) {
+    handleWatchlistOrder(orderButton);
+    return;
+  }
+
   const watchButton = event.target.closest("[data-watch-action]");
   if (watchButton) {
     handleWatchlistAction(watchButton);

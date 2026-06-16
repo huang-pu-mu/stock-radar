@@ -64,18 +64,24 @@ function getInstitutionStatus(label, latestNet, streak, fiveDayNet) {
   return `${label}中性`;
 }
 
-function getVolumeStatus(latestVolume, avg20Volume) {
+function getVolumeStatus(latestVolume, avg20Volume, availableDays, shortAvgVolume) {
   if (!latestVolume) return "量能資料不足";
-  if (!avg20Volume) return "量能歷史不足";
-  if (latestVolume >= avg20Volume * 2) return "爆量";
-  if (latestVolume >= avg20Volume * 1.5) return "明顯量增";
-  if (latestVolume >= avg20Volume * 1.2) return "溫和量增";
-  if (latestVolume < avg20Volume * 0.7) return "量縮";
 
-  return "量能正常";
+  const referenceVolume = avg20Volume || shortAvgVolume;
+
+  if (!referenceVolume) return `量能資料累積中（${availableDays}/20）`;
+
+  const suffix = avg20Volume ? "" : "（短期）";
+
+  if (latestVolume >= referenceVolume * 2) return `爆量${suffix}`;
+  if (latestVolume >= referenceVolume * 1.5) return `明顯量增${suffix}`;
+  if (latestVolume >= referenceVolume * 1.2) return `溫和量增${suffix}`;
+  if (latestVolume < referenceVolume * 0.7) return `量縮${suffix}`;
+
+  return `量能正常${suffix}`;
 }
 
-function getPricePosition(closePrice, ma5, ma10, high20, low20) {
+function getPricePosition(closePrice, ma5, ma10, high20, low20, availableDays, previousClose) {
   if (!closePrice) return "股價資料不足";
 
   if (high20 > 0 && closePrice >= high20) return "突破20日高點";
@@ -83,9 +89,12 @@ function getPricePosition(closePrice, ma5, ma10, high20, low20) {
   if (ma5 > 0 && ma10 > 0 && closePrice >= ma5 && closePrice >= ma10) {
     return "站上短期均線";
   }
+  if (ma5 > 0 && closePrice >= ma5) return "站上MA5";
   if (low20 > 0 && closePrice <= low20 * 1.05) return "低檔整理";
+  if (previousClose > 0 && closePrice > previousClose) return `短線轉強（${availableDays}/20）`;
+  if (previousClose > 0 && closePrice < previousClose) return `短線轉弱（${availableDays}/20）`;
 
-  return "歷史資料不足";
+  return `股價資料累積中（${availableDays}/20）`;
 }
 
 function calculateScore(prices, institutionalRows) {
@@ -109,6 +118,8 @@ function calculateScore(prices, institutionalRows) {
 
   const avg5Volume = average(volumeList.slice(0, 5), 5);
   const avg20Volume = average(volumeList.slice(0, 20), 20);
+  const availableDays = prices.length;
+  const shortAvgVolume = availableDays >= 2 ? average(volumeList.slice(0, Math.min(availableDays, 20)), 2) : 0;
 
   const validHighList = highList.filter((value) => value > 0);
   const validLowList = lowList.filter((value) => value > 0);
@@ -237,8 +248,16 @@ function calculateScore(prices, institutionalRows) {
           ? "自營商賣超"
           : "自營商中性",
     bigHolderStatus: "尚未匯入大戶資料",
-    volumeStatus: getVolumeStatus(latestVolume, avg20Volume),
-    pricePosition: getPricePosition(latestClose, ma5, ma10, high20, low20),
+    volumeStatus: getVolumeStatus(latestVolume, avg20Volume, availableDays, shortAvgVolume),
+    pricePosition: getPricePosition(
+      latestClose,
+      ma5,
+      ma10,
+      high20,
+      low20,
+      availableDays,
+      previousClose,
+    ),
   };
 }
 
@@ -296,7 +315,7 @@ async function main() {
         WHERE stock_code = ?
           AND trade_date <= ?
         ORDER BY trade_date DESC
-        LIMIT 20
+        LIMIT 260
         `,
         [stock.stock_code, tradeDate],
       );

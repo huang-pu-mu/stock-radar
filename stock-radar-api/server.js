@@ -1374,6 +1374,7 @@ async function getWatchlistRows(userId, stockCode = null) {
       w.user_id,
       w.stock_code,
       w.note,
+      w.sort_order,
       DATE_FORMAT(w.created_at, '%Y-%m-%d %H:%i:%s') AS watchlist_created_at,
       DATE_FORMAT(w.updated_at, '%Y-%m-%d %H:%i:%s') AS watchlist_updated_at,
 
@@ -1431,7 +1432,7 @@ async function getWatchlistRows(userId, stockCode = null) {
      AND c.trade_date = p.trade_date
     WHERE w.user_id = ?
       ${stockCondition}
-    ORDER BY w.updated_at DESC, w.created_at DESC, w.stock_code ASC
+    ORDER BY w.sort_order ASC, w.created_at ASC, w.stock_code ASC
     `,
     params,
   );
@@ -1503,15 +1504,25 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       });
     }
 
+    const sortRows = await query(
+      `
+      SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_sort_order
+      FROM watchlists
+      WHERE user_id = ?
+      `,
+      [req.user.id],
+    );
+    const nextSortOrder = Number(sortRows[0]?.next_sort_order || 10);
+
     await query(
       `
-      INSERT INTO watchlists (user_id, stock_code, note)
-      VALUES (?, ?, ?)
+      INSERT INTO watchlists (user_id, stock_code, note, sort_order)
+      VALUES (?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         note = VALUES(note),
         updated_at = CURRENT_TIMESTAMP
       `,
-      [req.user.id, stockCode, note],
+      [req.user.id, stockCode, note, nextSortOrder],
     );
 
     const rows = await getWatchlistRows(req.user.id, stockCode);
@@ -1529,6 +1540,100 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       message: "新增自選股失敗",
       error: error.message,
     });
+  }
+});
+
+
+// ==============================
+// 自選股：調整排序
+// PATCH /watchlist/order
+// body: { stock_codes: ["2330", "2317"] }
+// ==============================
+app.patch("/watchlist/order", requireAuth, async (req, res) => {
+  let conn;
+
+  try {
+    const stockCodes = Array.isArray(req.body?.stock_codes)
+      ? req.body.stock_codes.map(normalizeStockCodeValue).filter(Boolean)
+      : [];
+    const uniqueStockCodes = [...new Set(stockCodes)];
+
+    if (uniqueStockCodes.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "請提供要排序的自選股股票代號。",
+      });
+    }
+
+    const hasInvalidCode = uniqueStockCodes.some((stockCode) => !isValidStockCodeValue(stockCode));
+
+    if (hasInvalidCode) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確。",
+      });
+    }
+
+    const currentRows = await query(
+      `
+      SELECT stock_code
+      FROM watchlists
+      WHERE user_id = ?
+      `,
+      [req.user.id],
+    );
+    const currentCodes = currentRows.map((row) => normalizeStockCodeValue(row.stock_code));
+    const currentCodeSet = new Set(currentCodes);
+    const missingCodes = uniqueStockCodes.filter((stockCode) => !currentCodeSet.has(stockCode));
+
+    if (missingCodes.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `排序清單包含未加入自選股的股票：${missingCodes.join(", ")}`,
+      });
+    }
+
+    const fullOrderCodes = [
+      ...uniqueStockCodes,
+      ...currentCodes.filter((stockCode) => !uniqueStockCodes.includes(stockCode)),
+    ];
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    for (const [index, stockCode] of fullOrderCodes.entries()) {
+      await conn.query(
+        `
+        UPDATE watchlists
+        SET sort_order = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ?
+          AND stock_code = ?
+        `,
+        [(index + 1) * 10, req.user.id, stockCode],
+      );
+    }
+
+    await conn.commit();
+
+    const rows = await getWatchlistRows(req.user.id);
+
+    res.json({
+      success: true,
+      message: "自選股順序已更新",
+      count: rows.length,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    if (conn) await conn.rollback();
+    console.error("調整自選股排序失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "調整自選股排序失敗",
+      error: error.message,
+    });
+  } finally {
+    if (conn) conn.release();
   }
 });
 
