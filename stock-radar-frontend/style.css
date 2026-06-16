@@ -626,7 +626,11 @@ h1 {
 }
 
 .price-flat {
-  color: var(--muted);
+  display: inline-block;
+  color: #111827;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .status-chip {

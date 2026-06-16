@@ -117,6 +117,26 @@ function getChangeClass(value) {
   return numberValue > 0 ? "price-up" : "price-down";
 }
 
+function getPriceDirectionClass(changeValue, closeValue = null, previousCloseValue = null) {
+  const change = toNumber(changeValue);
+
+  if (change !== null) return getChangeClass(change);
+
+  const close = toNumber(closeValue);
+  const previousClose = toNumber(previousCloseValue);
+
+  if (close !== null && previousClose !== null) {
+    return getChangeClass(close - previousClose);
+  }
+
+  return "price-flat";
+}
+
+function formatDirectionalClosePrice(closeValue, changeValue, previousCloseValue = null) {
+  const directionClass = getPriceDirectionClass(changeValue, closeValue, previousCloseValue);
+  return `<strong class="${directionClass}">${formatPrice(closeValue)}</strong>`;
+}
+
 function getScoreClass(score) {
   const numberValue = toNumber(score);
   if (numberValue === null) return "score-low";
@@ -342,9 +362,11 @@ function enrichPriceRows(rows) {
     const high = toNumber(pick(row, ["high_price", "high"], Math.max(open ?? close ?? 0, close ?? open ?? 0)));
     const low = toNumber(pick(row, ["low_price", "low"], Math.min(open ?? close ?? 0, close ?? open ?? 0)));
     const volume = toNumber(pick(row, ["trade_volume", "volume"], null));
+    const change = toNumber(pick(row, ["price_change", "change", "change_price"], null));
     const closeHistory = sortedRows
       .slice(0, index + 1)
       .map((item) => toNumber(pick(item, ["close_price", "closing_price", "close"], null)));
+    const previousClose = closeHistory.length >= 2 ? closeHistory[closeHistory.length - 2] : null;
     const volumeHistory = sortedRows
       .slice(0, index + 1)
       .map((item) => toNumber(pick(item, ["trade_volume", "volume"], null)));
@@ -365,6 +387,8 @@ function enrichPriceRows(rows) {
       high: high ?? close,
       low: low ?? close,
       close,
+      previousClose,
+      change,
       volume,
       ma,
       mv,
@@ -457,7 +481,8 @@ function renderPriceChart(enrichedRows) {
     const yClose = yFor(close);
     const rectY = Math.min(yOpen, yClose);
     const rectHeight = Math.max(Math.abs(yClose - yOpen), 2);
-    const tone = close > open ? "up" : close < open ? "down" : "flat";
+    const toneClass = getPriceDirectionClass(row.change, row.close, row.previousClose);
+    const tone = toneClass === "price-up" ? "up" : toneClass === "price-down" ? "down" : "flat";
 
     return `
       <line class="candle-line candle-${tone}" x1="${x}" y1="${yHigh}" x2="${x}" y2="${yLow}" />
@@ -531,7 +556,8 @@ function renderVolumeChart(enrichedRows) {
     const x = xFor(index);
     const y = yFor(volume);
     const barHeight = Math.max(top + chartHeight - y, 1);
-    const tone = row.close > row.open ? "up" : row.close < row.open ? "down" : "flat";
+    const toneClass = getPriceDirectionClass(row.change, row.close, row.previousClose);
+    const tone = toneClass === "price-up" ? "up" : toneClass === "price-down" ? "down" : "flat";
 
     return `<rect class="volume-bar volume-${tone}" x="${x - barWidth / 2}" y="${y}" width="${barWidth}" height="${barHeight}" rx="1.5" />`;
   }).join("");
@@ -1268,7 +1294,7 @@ function renderStockCard(row, index) {
 
       <div class="quick-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">收盤 ${formatPrice(closePrice)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
       </div>
 
       <div class="info-grid">
@@ -1329,7 +1355,7 @@ function renderSearchResult(summaryData) {
 
       <div class="quick-summary search-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">收盤 ${formatPrice(closePrice)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
       </div>
 
       ${renderDetailSection("最新行情", [
@@ -1337,7 +1363,7 @@ function renderSearchResult(summaryData) {
         createInfoItem("開盤", formatPrice(pick(summaryData, ["open_price"]))),
         createInfoItem("最高", formatPrice(pick(summaryData, ["high_price"]))),
         createInfoItem("最低", formatPrice(pick(summaryData, ["low_price"]))),
-        createInfoItem("收盤", formatPrice(closePrice)),
+        createInfoItem("收盤", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
         createInfoItem("漲跌", formatPrice(change), changeClass),
         createInfoItem("成交量", formatNumber(pick(summaryData, ["volume", "trade_volume"]))),
         createInfoItem("成交金額", formatNumber(pick(summaryData, ["transaction_amount"]))),
@@ -1632,7 +1658,7 @@ async function openDetail(stockCode) {
       `,
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
-        createInfoItem("收盤價", formatPrice(closePrice)),
+        createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
