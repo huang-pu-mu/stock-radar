@@ -16,38 +16,44 @@
 <body>
   <div class="app-shell">
     <header class="app-header">
-      <div>
-        <p class="eyebrow">Stock Radar PWA</p>
+      <div class="brand-block">
+        <p class="eyebrow">每日股票觀察</p>
         <h1>雷達之星</h1>
-        <p class="subtitle">每日籌碼雷達，快速篩選值得觀察的股票</p>
+        <p class="subtitle">用大字卡片顯示籌碼強弱，先看重點，再看明細。</p>
       </div>
-      <button id="installBtn" class="install-btn hidden">安裝 APP</button>
+      <button id="installBtn" class="install-btn hidden" type="button">安裝 APP</button>
     </header>
 
     <main>
-      <section class="panel">
+      <section class="panel" aria-label="股票雷達功能區">
         <div class="section-title-row">
           <div>
+            <p class="section-kicker">目前頁面</p>
             <h2 id="pageTitle">今日雷達</h2>
             <p id="pageDesc">依籌碼分數排序，顯示全市場高分股</p>
           </div>
-          <button id="refreshBtn" class="ghost-btn">重新整理</button>
+          <button id="refreshBtn" class="ghost-btn" type="button">重新整理</button>
         </div>
 
         <div class="tab-row" role="tablist" aria-label="功能切換">
-          <button class="tab-btn active" data-page="radar">今日雷達</button>
-          <button class="tab-btn" data-page="foreign">外資排行</button>
+          <button class="tab-btn active" type="button" data-page="radar">今日雷達</button>
+          <button class="tab-btn" type="button" data-page="foreign">外資排行</button>
         </div>
 
         <div class="market-row" aria-label="市場切換">
-          <button class="market-btn active" data-market="">全部</button>
-          <button class="market-btn" data-market="上市">上市</button>
-          <button class="market-btn" data-market="上櫃">上櫃</button>
+          <button class="market-btn active" type="button" data-market="">全部</button>
+          <button class="market-btn" type="button" data-market="上市">上市</button>
+          <button class="market-btn" type="button" data-market="上櫃">上櫃</button>
+        </div>
+
+        <div class="help-card" aria-label="使用說明">
+          <strong>簡單看法：</strong>
+          <span>分數越高代表籌碼越強；點「看明細」可以查看外資、投信、成交量。</span>
         </div>
       </section>
 
       <section id="statusBox" class="status-box hidden"></section>
-      <section id="stockList" class="stock-list"></section>
+      <section id="stockList" class="stock-list" aria-label="股票列表"></section>
     </main>
   </div>
 
@@ -59,7 +65,7 @@
           <p class="eyebrow">股票明細</p>
           <h2 id="detailTitle">載入中</h2>
         </div>
-        <button id="closeDetailBtn" class="close-btn" aria-label="關閉">×</button>
+        <button id="closeDetailBtn" class="close-btn" type="button" aria-label="關閉">×</button>
       </div>
       <div id="detailContent" class="detail-content"></div>
     </div>

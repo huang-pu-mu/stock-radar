@@ -94,6 +94,14 @@ function getScoreClass(score) {
   return "score-low";
 }
 
+function getScoreText(score) {
+  const numberValue = toNumber(score);
+  if (numberValue === null) return "尚無分數";
+  if (numberValue >= 80) return "優先觀察";
+  if (numberValue >= 60) return "可以觀察";
+  return "普通觀察";
+}
+
 function getStatusTone(value) {
   const text = String(value ?? "");
   if (!text || text === "-") return "";
@@ -154,12 +162,12 @@ function updatePageText() {
 
   if (state.page === "foreign") {
     pageTitle.textContent = "外資排行";
-    pageDesc.textContent = `${marketText}外資買超排序，觀察法人資金流向`;
+    pageDesc.textContent = `${marketText}外資買超排行，先看外資今天買最多的股票。`;
     return;
   }
 
   pageTitle.textContent = "今日雷達";
-  pageDesc.textContent = `${marketText}籌碼分數排序，優先觀察高分標的`;
+  pageDesc.textContent = `${marketText}籌碼分數排行，先看分數高、狀態偏多的股票。`;
 }
 
 function createInfoItem(label, value, extraClass = "") {
@@ -206,13 +214,12 @@ function renderStockCard(row, index) {
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
+  const scoreText = getScoreText(score);
 
   const radarItems = [
-    createInfoItem("收盤價", formatPrice(closePrice)),
-    createInfoItem("漲跌", formatPrice(change), changeClass),
-    createStatusItem("外資狀態", pick(row, ["foreign_status", "foreign_investor_status"])),
-    createStatusItem("投信狀態", pick(row, ["investment_trust_status", "trust_status"])),
-    createStatusItem("成交量狀態", pick(row, ["volume_status"])),
+    createStatusItem("外資", pick(row, ["foreign_status", "foreign_investor_status"])),
+    createStatusItem("投信", pick(row, ["investment_trust_status", "trust_status"])),
+    createStatusItem("成交量", pick(row, ["volume_status"])),
     createStatusItem("股價位置", pick(row, ["price_position_status", "price_position"])),
   ].join("");
 
@@ -222,10 +229,8 @@ function renderStockCard(row, index) {
 
   const foreignItems = [
     createInfoItem("外資買超", formatNumber(foreignValue), getChangeClass(foreignValue)),
-    createInfoItem("投信買賣超", formatNumber(trustValue), getChangeClass(trustValue)),
-    createInfoItem("自營商買賣超", formatNumber(dealerValue), getChangeClass(dealerValue)),
-    createInfoItem("收盤價", formatPrice(closePrice)),
-    createInfoItem("漲跌", formatPrice(change), changeClass),
+    createInfoItem("投信", formatNumber(trustValue), getChangeClass(trustValue)),
+    createInfoItem("自營商", formatNumber(dealerValue), getChangeClass(dealerValue)),
     createInfoItem("市場別", escapeHtml(market)),
   ].join("");
 
@@ -233,7 +238,7 @@ function renderStockCard(row, index) {
     <article class="stock-card">
       <div class="stock-top">
         <div class="stock-main">
-          <span class="rank-badge">#${index + 1}</span>
+          <span class="rank-badge">第 ${index + 1} 名</span>
           <div class="stock-name">
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
@@ -246,13 +251,18 @@ function renderStockCard(row, index) {
         </div>
       </div>
 
+      <div class="quick-summary">
+        <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
+        <span class="summary-text">收盤 ${formatPrice(closePrice)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+      </div>
+
       <div class="info-grid">
         ${state.page === "foreign" ? foreignItems : radarItems}
       </div>
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        <button class="detail-btn" data-code="${escapeHtml(code)}">查看明細</button>
+        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
       </div>
     </article>
   `;
@@ -270,13 +280,13 @@ async function loadList() {
 
     if (state.latestRows.length === 0) {
       stockList.innerHTML = "";
-      showStatus("目前沒有資料，請確認後端 API 是否已有匯入資料。", "error");
+      showStatus("目前沒有股票資料，請確認後端 API 是否已有匯入資料。", "error");
       return;
     }
 
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
-    showStatus(`已載入 ${state.latestRows.length} 檔股票。`, "success");
-    window.setTimeout(hideStatus, 1200);
+    showStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
+    window.setTimeout(hideStatus, 1300);
   } catch (error) {
     stockList.innerHTML = "";
     showStatus(
@@ -372,9 +382,9 @@ async function openDetail(stockCode) {
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
       renderDetailSection("籌碼狀態", [
-        createStatusItem("外資狀態", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
-        createStatusItem("投信狀態", pick(latestScore, ["investment_trust_status", "trust_status"])),
-        createStatusItem("成交量狀態", pick(latestScore, ["volume_status"])),
+        createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
+        createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),
+        createStatusItem("成交量", pick(latestScore, ["volume_status"])),
         createStatusItem("股價位置", pick(latestScore, ["price_position_status", "price_position"])),
       ]),
       renderDetailSection("分數拆解", [
