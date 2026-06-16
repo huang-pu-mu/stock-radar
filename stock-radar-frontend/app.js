@@ -26,6 +26,8 @@ const state = {
   lastSearchData: null,
   authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
   user: null,
+  watchlistCodes: new Set(),
+  watchlistLoaded: false,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -227,10 +229,18 @@ function updatePageText() {
   const marketText = state.market || "全市場";
   const isSearchPage = state.page === "search";
   const isAccountPage = state.page === "account";
+  const isWatchlistPage = state.page === "watchlist";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+
+  if (state.page === "watchlist") {
+    pageTitle.textContent = "自選股";
+    pageDesc.textContent = "登入後，每個 Google 帳號都會看到自己的自選股票清單。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡只顯示你自己加入的股票；想移除就按「已自選」。</span>`;
+    return;
+  }
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
@@ -324,6 +334,166 @@ function renderSearchIntro() {
 }
 
 
+function isAuthenticated() {
+  return Boolean(state.authToken && state.user);
+}
+
+function getStockCodeFromRow(row) {
+  return normalizeStockCode(pick(row, ["stock_code", "code"], ""));
+}
+
+function getWatchlistButton(stockCode) {
+  const code = normalizeStockCode(stockCode);
+
+  if (!code || code === "-") return "";
+
+  if (!isAuthenticated()) {
+    return `
+      <button class="watch-btn login-required" type="button" data-watch-action="login" data-code="${escapeHtml(code)}">
+        加入自選
+      </button>
+    `;
+  }
+
+  const isWatched = state.watchlistCodes.has(code);
+
+  return `
+    <button class="watch-btn ${isWatched ? "watched" : ""}" type="button" data-watch-action="${isWatched ? "remove" : "add"}" data-code="${escapeHtml(code)}">
+      ${isWatched ? "已自選" : "加入自選"}
+    </button>
+  `;
+}
+
+function getCardActionButtons(stockCode, detailText = "看明細") {
+  const code = normalizeStockCode(stockCode);
+
+  return `
+    <div class="action-buttons">
+      ${getWatchlistButton(code)}
+      <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">${escapeHtml(detailText)}</button>
+    </div>
+  `;
+}
+
+async function refreshWatchlistCodes(rows = null) {
+  if (!isAuthenticated()) {
+    state.watchlistCodes = new Set();
+    state.watchlistLoaded = false;
+    return [];
+  }
+
+  const watchlistRows = rows || await fetchJson("/watchlist", {
+    method: "GET",
+    auth: true,
+  });
+
+  const safeRows = Array.isArray(watchlistRows) ? watchlistRows : [];
+  state.watchlistCodes = new Set(safeRows.map(getStockCodeFromRow).filter(Boolean));
+  state.watchlistLoaded = true;
+  return safeRows;
+}
+
+function rerenderCurrentContent() {
+  if (state.page === "search" && state.lastSearchData) {
+    renderSearchResult(state.lastSearchData);
+    return;
+  }
+
+  if (["radar", "foreign", "foreignStreak", "trust"].includes(state.page) && state.latestRows.length > 0) {
+    stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+    return;
+  }
+
+  if (state.page === "account") {
+    renderAccountPage();
+  }
+}
+
+function renderWatchlistLoginPrompt() {
+  stockList.innerHTML = `
+    <article class="search-intro-card watchlist-login-card">
+      <div class="intro-icon">⭐</div>
+      <h3>請先登入 Google 帳號</h3>
+      <p>登入後就可以把股票加入自選股，而且每個 Google 帳號看到的清單都不一樣。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-account="true">前往登入</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderEmptyWatchlist() {
+  stockList.innerHTML = `
+    <article class="search-intro-card watchlist-empty-card">
+      <div class="intro-icon">⭐</div>
+      <h3>目前還沒有自選股</h3>
+      <p>可以先到「今日雷達」或「個股查詢」，看到想追蹤的股票後按「加入自選」。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-page="radar">看今日雷達</button>
+        <button class="example-btn" type="button" data-go-page="search">去個股查詢</button>
+      </div>
+    </article>
+  `;
+}
+
+async function handleWatchlistAction(button) {
+  const action = button.dataset.watchAction;
+  const stockCode = normalizeStockCode(button.dataset.code);
+
+  if (!stockCode) return;
+
+  if (action === "login") {
+    showStatus("請先使用 Google 帳號登入，登入後就能加入自選股。", "error");
+    switchPage("account");
+    return;
+  }
+
+  if (!isAuthenticated()) {
+    showStatus("請先使用 Google 帳號登入。", "error");
+    switchPage("account");
+    return;
+  }
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = action === "remove" ? "移除中..." : "加入中...";
+
+  try {
+    if (action === "remove") {
+      await fetchJson(`/watchlist/${encodeURIComponent(stockCode)}`, {
+        method: "DELETE",
+        auth: true,
+      });
+      state.watchlistCodes.delete(stockCode);
+
+      if (state.page === "watchlist") {
+        await loadList();
+      } else {
+        rerenderCurrentContent();
+      }
+
+      showTemporaryStatus(`已移除自選股：${escapeHtml(stockCode)}`, "success");
+      return;
+    }
+
+    await fetchJson("/watchlist", {
+      method: "POST",
+      auth: true,
+      body: {
+        stock_code: stockCode,
+      },
+    });
+    state.watchlistCodes.add(stockCode);
+    rerenderCurrentContent();
+    showTemporaryStatus(`已加入自選股：${escapeHtml(stockCode)}`, "success");
+  } catch (error) {
+    showStatus(`自選股操作失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+
 
 function getGoogleClientId() {
   const config = window.STOCK_RADAR_CONFIG || {};
@@ -361,6 +531,8 @@ function renderAuthHeader() {
 function saveAuthSession(authData) {
   state.authToken = authData?.token || "";
   state.user = authData?.user || null;
+  state.watchlistCodes = new Set();
+  state.watchlistLoaded = false;
 
   if (state.authToken) {
     window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.authToken);
@@ -372,6 +544,8 @@ function saveAuthSession(authData) {
 function clearAuthSession(showMessage = true) {
   state.authToken = "";
   state.user = null;
+  state.watchlistCodes = new Set();
+  state.watchlistLoaded = false;
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
   renderAuthHeader();
 
@@ -392,6 +566,14 @@ async function loadCurrentUser() {
       auth: true,
     });
     state.user = data.user || null;
+
+    if (state.user) {
+      try {
+        await refreshWatchlistCodes();
+      } catch (watchlistError) {
+        console.warn("Load watchlist codes failed:", watchlistError);
+      }
+    }
   } catch (error) {
     clearAuthSession(false);
   } finally {
@@ -415,6 +597,7 @@ async function handleGoogleCredential(response) {
     });
 
     saveAuthSession(data);
+    await refreshWatchlistCodes();
     renderAccountPage();
     showTemporaryStatus(`登入成功：${escapeHtml(getUserDisplayName())}`, "success");
   } catch (error) {
@@ -493,7 +676,7 @@ function renderAccountPage() {
           ${createInfoItem("最後登入", escapeHtml(state.user.last_login_at || "剛剛"))}
         </div>
         <div class="result-note">
-          <strong>下一步：</strong>完成自選股後，這個 Google 帳號會看到自己的股票清單，不會和其他使用者混在一起。
+          <strong>自選股已可使用：</strong>這個 Google 帳號會看到自己的股票清單，不會和其他使用者混在一起。
         </div>
         <div class="account-actions">
           <button class="detail-btn" type="button" data-logout="true">登出</button>
@@ -568,7 +751,7 @@ function renderForeignStreakCard(row, index) {
     <article class="stock-card">
       <div class="stock-top">
         <div class="stock-main">
-          <span class="rank-badge">第 ${index + 1} 名</span>
+          <span class="rank-badge">${state.page === "watchlist" ? "自選股" : `第 ${index + 1} 名`}</span>
           <div class="stock-name">
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
@@ -592,7 +775,7 @@ function renderForeignStreakCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        ${getCardActionButtons(code)}
       </div>
     </article>
   `;
@@ -670,7 +853,7 @@ function renderTrustCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        ${getCardActionButtons(code)}
       </div>
     </article>
   `;
@@ -712,7 +895,7 @@ function renderStockCard(row, index) {
     <article class="stock-card">
       <div class="stock-top">
         <div class="stock-main">
-          <span class="rank-badge">第 ${index + 1} 名</span>
+          <span class="rank-badge">${state.page === "watchlist" ? "自選股" : `第 ${index + 1} 名`}</span>
           <div class="stock-name">
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
@@ -736,7 +919,7 @@ function renderStockCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        ${getCardActionButtons(code)}
       </div>
     </article>
   `;
@@ -833,7 +1016,7 @@ function renderSearchResult(summaryData) {
 
       <div class="card-actions search-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看更多明細</button>
+        ${getCardActionButtons(code, "看更多明細")}
       </div>
     </article>
   `;
@@ -961,6 +1144,38 @@ async function loadList() {
     } else {
       renderSearchIntro();
     }
+    return;
+  }
+
+  if (state.page === "watchlist") {
+    if (!isAuthenticated()) {
+      setLoading(false);
+      renderWatchlistLoginPrompt();
+      return;
+    }
+
+    setLoading(true);
+    renderLoadingCards();
+
+    try {
+      const rows = await refreshWatchlistCodes();
+      state.latestRows = rows;
+
+      if (state.latestRows.length === 0) {
+        renderEmptyWatchlist();
+        showTemporaryStatus("目前還沒有自選股。", "success");
+        return;
+      }
+
+      stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+      showTemporaryStatus(`已更新 ${state.latestRows.length} 檔自選股。`, "success");
+    } catch (error) {
+      stockList.innerHTML = "";
+      showStatus(`自選股讀取失敗：${escapeHtml(error.message)}`, "error");
+    } finally {
+      setLoading(false);
+    }
+
     return;
   }
 
@@ -1115,6 +1330,24 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const watchButton = event.target.closest("[data-watch-action]");
+  if (watchButton) {
+    handleWatchlistAction(watchButton);
+    return;
+  }
+
+  const goAccountButton = event.target.closest("[data-go-account]");
+  if (goAccountButton) {
+    switchPage("account");
+    return;
+  }
+
+  const goPageButton = event.target.closest("[data-go-page]");
+  if (goPageButton) {
+    switchPage(goPageButton.dataset.goPage);
+    return;
+  }
+
   const logoutButton = event.target.closest("[data-logout]");
   if (logoutButton) {
     clearAuthSession(true);

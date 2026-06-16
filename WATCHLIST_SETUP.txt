@@ -1,0 +1,44 @@
+第 6 項：自選股功能設定
+
+一、這次新增內容
+1. MariaDB 新增 watchlists 自選股資料表
+2. API 新增：
+   GET /watchlist
+   POST /watchlist
+   DELETE /watchlist/:stockCode
+3. 前端新增「自選股」分頁
+4. 今日雷達、外資排行、外資連買、投信排行、個股查詢結果都可加入 / 移除自選股
+5. 自選股依 Google 登入後的 users.id 分開保存
+
+二、必做步驟
+1. 用 HeidiSQL 執行：
+   stock-radar-api/sql/watchlists.sql
+
+2. 覆蓋檔案到：
+   D:\code\stock-radar
+
+3. 上傳 GitHub：
+   cd D:\code\stock-radar
+   git status
+   git add stock-radar-api/server.js
+   git add stock-radar-api/sql/watchlists.sql
+   git add stock-radar-frontend/index.html
+   git add stock-radar-frontend/app.js
+   git add stock-radar-frontend/style.css
+   git add stock-radar-frontend/service-worker.js
+   git add WATCHLIST_SETUP.txt
+   git commit -m "新增自選股功能"
+   git push
+
+三、測試順序
+1. 打開前端 PWA
+2. 確認 Google 已登入
+3. 到「今日雷達」按某檔股票的「加入自選」
+4. 到「自選股」分頁，確認該股票出現
+5. 按「已自選」確認可移除
+6. 換另一個 Google 帳號登入，確認看到不同自選股清單
+
+四、注意
+1. 沒登入時按「加入自選」會引導到「我的」登入頁。
+2. API 需要既有 GOOGLE_CLIENT_ID 與 JWT_SECRET。
+3. 如果沒有執行 watchlists.sql，自選股會讀取失敗。

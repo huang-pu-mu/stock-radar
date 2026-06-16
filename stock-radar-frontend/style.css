@@ -142,7 +142,7 @@ h1 {
 }
 
 .tab-row {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   padding: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.055);
@@ -674,6 +674,51 @@ h1 {
   font-weight: 950;
 }
 
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.watch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(248, 214, 109, 0.32);
+  border-radius: 15px;
+  padding: 12px 15px;
+  color: var(--accent-2);
+  background: rgba(248, 214, 109, 0.09);
+  font-size: 16px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.watch-btn.watched {
+  color: #06111e;
+  border-color: transparent;
+  background: var(--accent-2);
+}
+
+.watch-btn.login-required {
+  color: var(--muted);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.watch-btn:active {
+  transform: scale(0.98);
+}
+
+.watchlist-login-card,
+.watchlist-empty-card {
+  border-color: rgba(248, 214, 109, 0.28);
+  background: rgba(248, 214, 109, 0.07);
+}
+
 .loading-card {
   min-height: 174px;
 }
@@ -870,8 +915,16 @@ h1 {
   }
 
   .detail-btn,
-  .search-btn {
+  .search-btn,
+  .watch-btn {
     width: 100%;
+    justify-content: center;
+  }
+
+  .action-buttons {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .search-input {
@@ -1028,7 +1081,7 @@ code {
 
 @media (min-width: 621px) {
   .tab-row {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 }
 

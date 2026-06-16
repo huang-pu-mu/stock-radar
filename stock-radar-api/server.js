@@ -1349,6 +1349,232 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
   }
 });
 
+
+function normalizeStockCodeValue(value) {
+  return String(value || "").trim().replace(/\s+/g, "").toUpperCase();
+}
+
+function isValidStockCodeValue(value) {
+  return /^[0-9A-Z]{2,10}$/.test(String(value || ""));
+}
+
+async function getWatchlistRows(userId, stockCode = null) {
+  const params = [userId];
+  let stockCondition = "";
+
+  if (stockCode) {
+    stockCondition = "AND w.stock_code = ?";
+    params.push(stockCode);
+  }
+
+  return query(
+    `
+    SELECT
+      w.id AS watchlist_id,
+      w.user_id,
+      w.stock_code,
+      w.note,
+      DATE_FORMAT(w.created_at, '%Y-%m-%d %H:%i:%s') AS watchlist_created_at,
+      DATE_FORMAT(w.updated_at, '%Y-%m-%d %H:%i:%s') AS watchlist_updated_at,
+
+      s.stock_name,
+      s.market_type,
+      s.industry,
+
+      DATE_FORMAT(p.trade_date, '%Y-%m-%d') AS trade_date,
+      p.open_price,
+      p.high_price,
+      p.low_price,
+      p.close_price,
+      p.price_change,
+      CAST(p.volume AS CHAR) AS volume,
+      CAST(p.transaction_amount AS CHAR) AS transaction_amount,
+      CAST(p.transaction_count AS CHAR) AS transaction_count,
+
+      CAST(i.foreign_buy AS CHAR) AS foreign_buy,
+      CAST(i.foreign_sell AS CHAR) AS foreign_sell,
+      CAST(i.foreign_net AS CHAR) AS foreign_net,
+      CAST(i.investment_trust_buy AS CHAR) AS investment_trust_buy,
+      CAST(i.investment_trust_sell AS CHAR) AS investment_trust_sell,
+      CAST(i.investment_trust_net AS CHAR) AS investment_trust_net,
+      CAST(i.dealer_net AS CHAR) AS dealer_net,
+      CAST(i.total_net AS CHAR) AS total_net,
+
+      c.chip_score,
+      c.foreign_score,
+      c.investment_trust_score,
+      c.dealer_score,
+      c.big_holder_score,
+      c.volume_score,
+      c.price_score,
+      c.foreign_status,
+      c.investment_trust_status,
+      c.dealer_status,
+      c.big_holder_status,
+      c.volume_status,
+      c.price_position
+    FROM watchlists w
+    INNER JOIN stocks s
+      ON w.stock_code = s.stock_code
+    LEFT JOIN daily_prices p
+      ON w.stock_code = p.stock_code
+     AND p.trade_date = (
+        SELECT MAX(dp.trade_date)
+        FROM daily_prices dp
+        WHERE dp.stock_code = w.stock_code
+     )
+    LEFT JOIN institutional_trades i
+      ON w.stock_code = i.stock_code
+     AND i.trade_date = p.trade_date
+    LEFT JOIN chip_scores c
+      ON w.stock_code = c.stock_code
+     AND c.trade_date = p.trade_date
+    WHERE w.user_id = ?
+      ${stockCondition}
+    ORDER BY w.updated_at DESC, w.created_at DESC, w.stock_code ASC
+    `,
+    params,
+  );
+}
+
+// ==============================
+// 自選股：取得目前登入者的自選股
+// GET /watchlist
+// ==============================
+app.get("/watchlist", requireAuth, async (req, res) => {
+  try {
+    const rows = await getWatchlistRows(req.user.id);
+
+    res.json({
+      success: true,
+      count: rows.length,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢自選股失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢自選股失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// 自選股：新增股票
+// POST /watchlist
+// body: { stock_code: "2330", note: "可省略" }
+// ==============================
+app.post("/watchlist", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.body?.stock_code);
+    const note = String(req.body?.note || "").trim().slice(0, 255) || null;
+
+    if (!stockCode) {
+      return res.status(400).json({
+        success: false,
+        message: "請提供股票代號。",
+      });
+    }
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確。",
+      });
+    }
+
+    const stocks = await query(
+      `
+      SELECT stock_code
+      FROM stocks
+      WHERE stock_code = ?
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    if (stocks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "查不到這檔股票，請確認股票代號是否正確。",
+      });
+    }
+
+    await query(
+      `
+      INSERT INTO watchlists (user_id, stock_code, note)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        note = VALUES(note),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [req.user.id, stockCode, note],
+    );
+
+    const rows = await getWatchlistRows(req.user.id, stockCode);
+
+    res.json({
+      success: true,
+      message: "已加入自選股",
+      data: convertBigIntToString(rows[0] || { stock_code: stockCode }),
+    });
+  } catch (error) {
+    console.error("新增自選股失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "新增自選股失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// 自選股：移除股票
+// DELETE /watchlist/:stockCode
+// ==============================
+app.delete("/watchlist/:stockCode", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!stockCode || !isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確。",
+      });
+    }
+
+    const result = await query(
+      `
+      DELETE FROM watchlists
+      WHERE user_id = ?
+        AND stock_code = ?
+      `,
+      [req.user.id, stockCode],
+    );
+
+    res.json({
+      success: true,
+      message: "已移除自選股",
+      affected_rows: Number(result?.affectedRows || 0),
+      data: {
+        stock_code: stockCode,
+      },
+    });
+  } catch (error) {
+    console.error("移除自選股失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "移除自選股失敗",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
