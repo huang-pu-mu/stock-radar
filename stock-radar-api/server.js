@@ -492,6 +492,152 @@ app.get("/radar/foreign-buy-ranking", async (req, res) => {
   }
 });
 
+app.get("/radar/investment-trust-ranking", async (req, res) => {
+  try {
+    const queryDate = req.query.date || null;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+
+    let targetDate = queryDate;
+
+    if (!targetDate) {
+      const latestDateRows = await query(`
+        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
+        FROM institutional_trades
+      `);
+
+      targetDate = latestDateRows[0].latest_date;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        trade_date: null,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(it.trade_date, '%Y-%m-%d') AS trade_date,
+        it.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        CAST(it.investment_trust_net AS CHAR) AS investment_trust_net
+      FROM institutional_trades it
+      LEFT JOIN stocks s
+        ON it.stock_code = s.stock_code
+      WHERE it.trade_date <= ?
+      ORDER BY it.stock_code ASC, it.trade_date DESC
+      `,
+      [targetDate],
+    );
+
+    const stockMap = new Map();
+
+    rows.forEach((row) => {
+      if (!stockMap.has(row.stock_code)) {
+        stockMap.set(row.stock_code, []);
+      }
+
+      stockMap.get(row.stock_code).push(row);
+    });
+
+    const ranking = [];
+
+    stockMap.forEach((stockRows) => {
+      const latestRow = stockRows[0];
+
+      if (latestRow.trade_date !== targetDate) {
+        return;
+      }
+
+      const todayInvestmentTrustNet = toBigIntValue(
+        latestRow.investment_trust_net,
+      );
+
+      if (todayInvestmentTrustNet <= 0n) {
+        return;
+      }
+
+      let investmentTrustBuyDays = 0;
+      let totalInvestmentTrustNet = 0n;
+
+      for (const row of stockRows) {
+        const investmentTrustNet = toBigIntValue(row.investment_trust_net);
+
+        if (investmentTrustNet > 0n) {
+          investmentTrustBuyDays += 1;
+          totalInvestmentTrustNet += investmentTrustNet;
+        } else {
+          break;
+        }
+      }
+
+      ranking.push({
+        trade_date: targetDate,
+        stock_code: latestRow.stock_code,
+        stock_name: latestRow.stock_name,
+        market_type: latestRow.market_type,
+        industry: latestRow.industry,
+
+        investment_trust_buy_days: investmentTrustBuyDays,
+
+        today_investment_trust_net_shares: todayInvestmentTrustNet.toString(),
+        today_investment_trust_net_lots: sharesToLotsString(
+          todayInvestmentTrustNet,
+        ),
+
+        total_investment_trust_net_shares: totalInvestmentTrustNet.toString(),
+        total_investment_trust_net_lots: sharesToLotsString(
+          totalInvestmentTrustNet,
+        ),
+      });
+    });
+
+    ranking.sort((a, b) => {
+      if (b.investment_trust_buy_days !== a.investment_trust_buy_days) {
+        return b.investment_trust_buy_days - a.investment_trust_buy_days;
+      }
+
+      const totalDiff =
+        BigInt(b.total_investment_trust_net_shares) -
+        BigInt(a.total_investment_trust_net_shares);
+
+      if (totalDiff > 0n) return 1;
+      if (totalDiff < 0n) return -1;
+
+      const todayDiff =
+        BigInt(b.today_investment_trust_net_shares) -
+        BigInt(a.today_investment_trust_net_shares);
+
+      if (todayDiff > 0n) return 1;
+      if (todayDiff < 0n) return -1;
+
+      return a.stock_code.localeCompare(b.stock_code);
+    });
+
+    const limitedRanking = ranking.slice(0, limit);
+
+    res.json({
+      success: true,
+      trade_date: targetDate,
+      count: limitedRanking.length,
+      data: limitedRanking,
+    });
+  } catch (error) {
+    console.error("Get investment trust ranking failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get investment trust ranking failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
