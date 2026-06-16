@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="雷達之星" />
+  <title>雷達之星</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Stock Radar PWA</p>
+        <h1>雷達之星</h1>
+        <p class="subtitle">每日籌碼雷達，快速篩選值得觀察的股票</p>
+      </div>
+      <button id="installBtn" class="install-btn hidden">安裝 APP</button>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="section-title-row">
+          <div>
+            <h2 id="pageTitle">今日雷達</h2>
+            <p id="pageDesc">依籌碼分數排序，顯示全市場高分股</p>
+          </div>
+          <button id="refreshBtn" class="ghost-btn">重新整理</button>
+        </div>
+
+        <div class="tab-row" role="tablist" aria-label="功能切換">
+          <button class="tab-btn active" data-page="radar">今日雷達</button>
+          <button class="tab-btn" data-page="foreign">外資排行</button>
+        </div>
+
+        <div class="market-row" aria-label="市場切換">
+          <button class="market-btn active" data-market="">全部</button>
+          <button class="market-btn" data-market="上市">上市</button>
+          <button class="market-btn" data-market="上櫃">上櫃</button>
+        </div>
+      </section>
+
+      <section id="statusBox" class="status-box hidden"></section>
+      <section id="stockList" class="stock-list"></section>
+    </main>
+  </div>
+
+  <div id="detailModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">股票明細</p>
+          <h2 id="detailTitle">載入中</h2>
+        </div>
+        <button id="closeDetailBtn" class="close-btn" aria-label="關閉">×</button>
+      </div>
+      <div id="detailContent" class="detail-content"></div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
