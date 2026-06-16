@@ -126,6 +126,50 @@ app.get("/stocks/:stockCode", async (req, res) => {
   }
 });
 
+app.get("/prices/:stockCode", async (req, res) => {
+  try {
+    const stockCode = req.params.stockCode;
+    const limit = Number(req.query.limit) || 30;
+
+    const prices = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+        open_price,
+        high_price,
+        low_price,
+        close_price,
+        price_change,
+        price_change_percent,
+        CAST(volume AS CHAR) AS volume,
+        CAST(turnover AS CHAR) AS turnover,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM daily_prices
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT ?
+      `,
+      [stockCode, limit],
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      count: prices.length,
+      data: prices,
+    });
+  } catch (error) {
+    console.error("Get prices failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get prices failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
