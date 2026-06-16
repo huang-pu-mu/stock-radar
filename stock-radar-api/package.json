@@ -10,7 +10,8 @@
     "import:twse": "node scripts/importDailyTwse.js",
     "import:tpex": "node scripts/importDailyTpex.js",
     "score": "node scripts/calculateChipScores.js",
-    "daily": "node scripts/dailyTwse.js"
+    "daily": "node scripts/dailyTwse.js",
+    "industries": "node scripts/updateIndustries.js"
   },
   "keywords": [
     "stock",

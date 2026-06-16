@@ -51,7 +51,11 @@ async function main() {
     await runCommand(["scripts/importDailyTpex.js", tradeDate]);
 
     console.log("");
-    console.log("步驟 3：計算上市＋上櫃籌碼分數");
+    console.log("步驟 3：補齊上市＋上櫃產業分類");
+    await runCommand(["scripts/updateIndustries.js"]);
+
+    console.log("");
+    console.log("步驟 4：計算上市＋上櫃籌碼分數");
     await runCommand(["scripts/calculateChipScores.js", tradeDate]);
 
     console.log("");

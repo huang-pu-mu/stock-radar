@@ -161,7 +161,18 @@ app.use(cors());
 app.use(express.json());
 
 function toBigIntValue(value) {
-  return BigInt(value ?? 0);
+  if (value === null || value === undefined || value === "") {
+    return 0n;
+  }
+
+  const text = String(value).replaceAll(",", "").trim();
+  const integerText = text.includes(".") ? text.split(".")[0] : text;
+
+  if (!integerText || integerText === "-" || integerText === "+") {
+    return 0n;
+  }
+
+  return BigInt(integerText);
 }
 
 function sharesToLotsString(shares) {
@@ -1245,6 +1256,281 @@ app.get("/radar/institutional-sync-buying", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢法人同步買超雷達失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+// ==============================
+// 產業分類完成度
+// GET /industries/status
+// ==============================
+app.get("/industries/status", async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT
+        COALESCE(market_type, '未設定') AS market_type,
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN industry IS NULL OR industry = '' OR industry = '未分類' THEN 1 ELSE 0 END) AS unclassified_count,
+        COUNT(DISTINCT CASE WHEN industry IS NOT NULL AND industry <> '' AND industry <> '未分類' THEN industry END) AS industry_count
+      FROM stocks
+      WHERE is_active = 1
+      GROUP BY COALESCE(market_type, '未設定')
+      ORDER BY market_type ASC
+    `);
+
+    const summary = rows.map((row) => {
+      const totalCount = Number(row.total_count || 0);
+      const unclassifiedCount = Number(row.unclassified_count || 0);
+      const classifiedCount = Math.max(totalCount - unclassifiedCount, 0);
+      const classifiedRate = totalCount > 0 ? Number(((classifiedCount / totalCount) * 100).toFixed(2)) : 0;
+
+      return {
+        market_type: row.market_type,
+        total_count: totalCount,
+        classified_count: classifiedCount,
+        unclassified_count: unclassifiedCount,
+        industry_count: Number(row.industry_count || 0),
+        classified_rate: classifiedRate,
+      };
+    });
+
+    res.json({
+      success: true,
+      count: summary.length,
+      data: summary,
+    });
+  } catch (error) {
+    console.error("查詢產業分類完成度失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢產業分類完成度失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// 產業資金流向分析
+// GET /radar/industry-flow?market=上市&limit=30&date=YYYY-MM-DD
+// ==============================
+app.get("/radar/industry-flow", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 50);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    let targetDate = queryDate;
+
+    if (!targetDate) {
+      const latestDateParams = [];
+      let latestDateMarketCondition = "";
+
+      if (market) {
+        latestDateMarketCondition = "WHERE s.market_type = ?";
+        latestDateParams.push(market);
+      }
+
+      const latestDateRows = await query(
+        `
+        SELECT DATE_FORMAT(MAX(i.trade_date), '%Y-%m-%d') AS latest_date
+        FROM institutional_trades i
+        LEFT JOIN stocks s
+          ON i.stock_code = s.stock_code
+        ${latestDateMarketCondition}
+        `,
+        latestDateParams,
+      );
+
+      targetDate = latestDateRows[0].latest_date;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        trade_date: null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const marketCondition = market ? "AND s.market_type = ?" : "";
+    const baseParams = market ? [targetDate, market] : [targetDate];
+
+    const industryRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
+        GROUP_CONCAT(DISTINCT s.market_type ORDER BY s.market_type SEPARATOR '、') AS market_types,
+        COUNT(DISTINCT i.stock_code) AS stock_count,
+        SUM(CASE WHEN COALESCE(i.total_net, 0) > 0 THEN 1 ELSE 0 END) AS net_buy_stock_count,
+        SUM(CASE WHEN COALESCE(i.foreign_net, 0) > 0 THEN 1 ELSE 0 END) AS foreign_buy_stock_count,
+        SUM(CASE WHEN COALESCE(i.investment_trust_net, 0) > 0 THEN 1 ELSE 0 END) AS investment_trust_buy_stock_count,
+        SUM(CASE WHEN COALESCE(p.price_change, 0) > 0 THEN 1 ELSE 0 END) AS up_stock_count,
+        SUM(CASE WHEN COALESCE(p.price_change, 0) < 0 THEN 1 ELSE 0 END) AS down_stock_count,
+        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
+        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
+        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
+        CAST(SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) AS CHAR) AS foreign_trust_net_lots,
+        CAST(SUM(COALESCE(p.volume, 0)) AS CHAR) AS total_volume_lots,
+        CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS total_transaction_amount,
+        ROUND(AVG(c.chip_score), 2) AS avg_chip_score
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      LEFT JOIN chip_scores c
+        ON i.stock_code = c.stock_code
+       AND i.trade_date = c.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
+      GROUP BY i.trade_date, COALESCE(NULLIF(s.industry, ''), '未分類')
+      ORDER BY
+        SUM(COALESCE(i.total_net, 0)) DESC,
+        SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) DESC,
+        SUM(COALESCE(p.transaction_amount, 0)) DESC,
+        industry ASC
+      LIMIT ?
+      `,
+      [...baseParams, limit],
+    );
+
+    const leaderRows = await query(
+      `
+      SELECT
+        COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
+        i.stock_code,
+        s.stock_name,
+        s.market_type,
+        p.close_price,
+        p.price_change,
+        c.chip_score,
+        CAST(i.foreign_net AS CHAR) AS foreign_net_lots,
+        CAST(i.investment_trust_net AS CHAR) AS investment_trust_net_lots,
+        CAST(i.dealer_net AS CHAR) AS dealer_net_lots,
+        CAST(i.total_net AS CHAR) AS total_net_lots,
+        CAST((COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) AS CHAR) AS foreign_trust_net_lots
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      LEFT JOIN chip_scores c
+        ON i.stock_code = c.stock_code
+       AND i.trade_date = c.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
+      ORDER BY
+        industry ASC,
+        COALESCE(i.total_net, 0) DESC,
+        COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0) DESC,
+        COALESCE(c.chip_score, 0) DESC,
+        i.stock_code ASC
+      `,
+      baseParams,
+    );
+
+    const leadersByIndustry = new Map();
+
+    leaderRows.forEach((row) => {
+      if (!leadersByIndustry.has(row.industry)) {
+        leadersByIndustry.set(row.industry, []);
+      }
+
+      const leaders = leadersByIndustry.get(row.industry);
+      if (leaders.length >= 3) return;
+
+      leaders.push({
+        stock_code: row.stock_code,
+        stock_name: row.stock_name,
+        market_type: row.market_type,
+        close_price: row.close_price,
+        price_change: row.price_change,
+        chip_score: row.chip_score,
+        foreign_net_lots: row.foreign_net_lots,
+        investment_trust_net_lots: row.investment_trust_net_lots,
+        dealer_net_lots: row.dealer_net_lots,
+        total_net_lots: row.total_net_lots,
+        foreign_trust_net_lots: row.foreign_trust_net_lots,
+      });
+    });
+
+    const data = industryRows.map((row, index) => {
+      const totalNet = toBigIntValue(row.total_net_lots);
+      const foreignTrustNet = toBigIntValue(row.foreign_trust_net_lots);
+      const stockCount = Number(row.stock_count || 0);
+      const netBuyStockCount = Number(row.net_buy_stock_count || 0);
+      const netBuyRatio = stockCount > 0 ? netBuyStockCount / stockCount : 0;
+
+      let flowDirection = "資金中性";
+      let flowStrength = "觀察中";
+
+      if (totalNet > 0n) {
+        flowDirection = "資金淨流入";
+        flowStrength = totalNet >= 5000n || (foreignTrustNet >= 2000n && netBuyRatio >= 0.5) ? "強勢流入" : "溫和流入";
+      } else if (totalNet < 0n) {
+        flowDirection = "資金淨流出";
+        flowStrength = totalNet <= -5000n ? "明顯流出" : "偏弱流出";
+      }
+
+      return {
+        rank: index + 1,
+        trade_date: row.trade_date,
+        industry: row.industry,
+        market_types: row.market_types || market || "全部",
+        stock_count: stockCount,
+        net_buy_stock_count: netBuyStockCount,
+        foreign_buy_stock_count: Number(row.foreign_buy_stock_count || 0),
+        investment_trust_buy_stock_count: Number(row.investment_trust_buy_stock_count || 0),
+        up_stock_count: Number(row.up_stock_count || 0),
+        down_stock_count: Number(row.down_stock_count || 0),
+        foreign_net_lots: row.foreign_net_lots,
+        investment_trust_net_lots: row.investment_trust_net_lots,
+        dealer_net_lots: row.dealer_net_lots,
+        total_net_lots: row.total_net_lots,
+        foreign_trust_net_lots: row.foreign_trust_net_lots,
+        total_volume_lots: row.total_volume_lots,
+        total_transaction_amount: row.total_transaction_amount,
+        avg_chip_score: row.avg_chip_score,
+        net_buy_ratio: Number((netBuyRatio * 100).toFixed(1)),
+        flow_direction: flowDirection,
+        flow_strength: flowStrength,
+        top_stocks: leadersByIndustry.get(row.industry) || [],
+      };
+    });
+
+    res.json({
+      success: true,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: data.length,
+      data: convertBigIntToString(data),
+    });
+  } catch (error) {
+    console.error("查詢產業資金流向失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢產業資金流向失敗",
       error: error.message,
     });
   }

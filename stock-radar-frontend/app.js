@@ -98,6 +98,18 @@ function formatLotsValue(lotsValue, sharesValue) {
   return "-";
 }
 
+function formatAmountYi(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+function formatPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 1 })}%`;
+}
+
 function formatPrice(value) {
   const numberValue = toNumber(value);
   if (numberValue === null) return escapeHtml(value ?? "-");
@@ -245,6 +257,12 @@ function buildListPath() {
     return `/radar/institutional-sync-buying?${params.toString()}`;
   }
 
+  if (state.page === "industryFlow") {
+    params.set("limit", "50");
+    if (state.market) params.set("market", state.market);
+    return `/radar/industry-flow?${params.toString()}`;
+  }
+
   const endpoint = state.page === "foreign" ? "/foreign/top" : "/radar/top";
   params.set("limit", String(state.limit));
   if (state.market) params.set("market", state.market);
@@ -309,6 +327,13 @@ function updatePageText() {
     pageTitle.textContent = "法人同步買超";
     pageDesc.textContent = `${marketText}外資與投信同一天買超排行，優先看法人方向一致的股票。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資和投信同時買超，代表兩種主要法人同向偏多；同步天數越多、合計買超越大，觀察價值越高。</span>`;
+    return;
+  }
+
+  if (state.page === "industryFlow") {
+    pageTitle.textContent = "產業資金流向";
+    pageDesc.textContent = `${marketText}依產業彙總三大法人買賣超，先看資金今天流入哪個產業。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>法人合計買超越大，代表該產業今天資金流入越明顯；再看外資、投信是否同向，以及產業內買超家數。</span>`;
     return;
   }
 
@@ -1353,7 +1378,118 @@ function renderSyncBuyCard(row, index) {
   `;
 }
 
+
+function getIndustryFlowStrengthClass(direction, totalLots) {
+  const lotValue = toNumber(totalLots) || 0;
+  const text = String(direction || "");
+
+  if (text.includes("流出") || lotValue < 0) return "score-low";
+  if (text.includes("流入") && lotValue >= 5000) return "score-high";
+  if (text.includes("流入") || lotValue > 0) return "score-mid";
+  return "score-low";
+}
+
+function renderIndustryTopStocks(topStocks) {
+  const rows = Array.isArray(topStocks) ? topStocks.slice(0, 3) : [];
+
+  if (rows.length === 0) {
+    return `<div class="industry-leaders empty">此產業暫無個股排行資料</div>`;
+  }
+
+  return `
+    <div class="industry-leaders">
+      ${rows.map((stock) => {
+        const code = pick(stock, ["stock_code", "code"], "-");
+        const name = pick(stock, ["stock_name", "name"], "-");
+        const totalLots = formatLotsValue(pick(stock, ["total_net_lots", "total_net"], "-"));
+        const chipScore = pick(stock, ["chip_score", "score"], "-");
+        const change = pick(stock, ["price_change", "change"], "-");
+
+        return `
+          <button class="industry-leader-btn detail-btn" type="button" data-code="${escapeHtml(code)}">
+            <span class="leader-name">${escapeHtml(name)} <small>${escapeHtml(code)}</small></span>
+            <span class="leader-meta">法人 ${totalLots} 張｜分數 ${formatNumber(chipScore)}｜漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderIndustryFlowCard(row, index) {
+  const industry = pick(row, ["industry"], "未分類");
+  const tradeDate = pick(row, ["trade_date", "date"], "-");
+  const marketTypes = pick(row, ["market_types", "market_type", "market"], "全部");
+  const stockCount = pick(row, ["stock_count"], "-");
+  const netBuyCount = pick(row, ["net_buy_stock_count"], "-");
+  const netBuyRatio = pick(row, ["net_buy_ratio"], "-");
+  const upCount = pick(row, ["up_stock_count"], "-");
+  const downCount = pick(row, ["down_stock_count"], "-");
+  const totalNetLots = pick(row, ["total_net_lots", "institutional_net_lots"], "-");
+  const foreignTrustLots = pick(row, ["foreign_trust_net_lots"], "-");
+  const foreignLots = pick(row, ["foreign_net_lots"], "-");
+  const trustLots = pick(row, ["investment_trust_net_lots", "trust_net_lots"], "-");
+  const dealerLots = pick(row, ["dealer_net_lots"], "-");
+  const amount = pick(row, ["total_transaction_amount", "transaction_amount"], "-");
+  const avgScore = pick(row, ["avg_chip_score"], "-");
+  const direction = pick(row, ["flow_direction"], "資金中性");
+  const strength = pick(row, ["flow_strength"], "觀察中");
+  const strengthClass = getIndustryFlowStrengthClass(direction, totalNetLots);
+  const totalNetClass = getChangeClass(totalNetLots);
+
+  const industryItems = [
+    createInfoItem("法人合計", `${formatLotsValue(totalNetLots)} 張`, totalNetClass),
+    createInfoItem("外資＋投信", `${formatLotsValue(foreignTrustLots)} 張`, getChangeClass(foreignTrustLots)),
+    createInfoItem("外資", `${formatLotsValue(foreignLots)} 張`, getChangeClass(foreignLots)),
+    createInfoItem("投信", `${formatLotsValue(trustLots)} 張`, getChangeClass(trustLots)),
+    createInfoItem("自營商", `${formatLotsValue(dealerLots)} 張`, getChangeClass(dealerLots)),
+    createInfoItem("買超家數", `${formatNumber(netBuyCount)} / ${formatNumber(stockCount)}`),
+    createInfoItem("買超比例", formatPercent(netBuyRatio)),
+    createInfoItem("上漲 / 下跌", `${formatNumber(upCount)} / ${formatNumber(downCount)}`),
+    createInfoItem("平均分數", formatNumber(avgScore), getScoreClass(avgScore)),
+    createInfoItem("成交金額", formatAmountYi(amount)),
+  ].join("");
+
+  return `
+    <article class="stock-card industry-flow-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(industry)}</h3>
+            <span class="badge">${escapeHtml(marketTypes)}</span>
+            <span class="badge">${formatNumber(stockCount)} 檔</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatLotsValue(totalNetLots)}</span>
+          <span class="score-label">法人合計張</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(strength)}</span>
+        <span class="summary-text">${escapeHtml(direction)} <strong class="${totalNetClass}">${formatLotsValue(totalNetLots)}</strong> 張，買超家數 ${formatNumber(netBuyCount)} 檔，占 ${formatPercent(netBuyRatio)}</span>
+      </div>
+
+      <div class="info-grid industry-flow-grid">
+        ${industryItems}
+      </div>
+
+      <section class="industry-leader-section">
+        <h4>產業內法人買超前 3 檔</h4>
+        ${renderIndustryTopStocks(row.top_stocks)}
+      </section>
+
+      <div class="card-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+      </div>
+    </article>
+  `;
+}
+
 function renderStockCard(row, index) {
+  if (state.page === "industryFlow") return renderIndustryFlowCard(row, index);
   if (state.page === "foreignStreak") return renderForeignStreakCard(row, index);
   if (state.page === "trust") return renderTrustCard(row, index);
   if (state.page === "syncBuy") return renderSyncBuyCard(row, index);
@@ -1681,8 +1817,8 @@ async function loadList() {
     const rows = await fetchJson(buildListPath());
     let latestRows = Array.isArray(rows) ? rows : [];
 
-    if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy") {
-      if (state.market) {
+    if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow") {
+      if (state.market && state.page !== "industryFlow") {
         latestRows = latestRows.filter((row) => pick(row, ["market_type", "market"], "") === state.market);
       }
 
