@@ -271,6 +271,81 @@ app.get("/radar-scores/:stockCode", async (req, res) => {
   }
 });
 
+app.get("/radar/today", async (req, res) => {
+  try {
+    const queryDate = req.query.date || null;
+    const limit = Number(req.query.limit) || 20;
+
+    let targetDate = queryDate;
+
+    if (!targetDate) {
+      const latestDateRows = await query(`
+        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
+        FROM radar_scores
+      `);
+
+      targetDate = latestDateRows[0].latest_date;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        trade_date: null,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const radarList = await query(
+      `
+      SELECT
+        DATE_FORMAT(rs.trade_date, '%Y-%m-%d') AS trade_date,
+        rs.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+
+        rs.total_score,
+        rs.foreign_score,
+        rs.investment_trust_score,
+        rs.volume_score,
+        rs.price_position_score,
+        rs.trend_score,
+
+        rs.foreign_status,
+        rs.investment_trust_status,
+        rs.volume_status,
+        rs.price_position_status,
+        rs.radar_note,
+
+        DATE_FORMAT(rs.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM radar_scores rs
+      LEFT JOIN stocks s
+        ON rs.stock_code = s.stock_code
+      WHERE rs.trade_date = ?
+      ORDER BY rs.total_score DESC, rs.stock_code ASC
+      LIMIT ?
+      `,
+      [targetDate, limit],
+    );
+
+    res.json({
+      success: true,
+      trade_date: targetDate,
+      count: radarList.length,
+      data: radarList,
+    });
+  } catch (error) {
+    console.error("Get today radar failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get today radar failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
