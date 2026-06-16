@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import crypto from "crypto";
+import { OAuth2Client } from "google-auth-library";
 import pool from "./db.js";
 import { query, testConnection } from "./db.js";
 
@@ -8,6 +10,152 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SESSION_EXPIRE_SECONDS = 60 * 60 * 24 * 7;
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+function getSessionSecret() {
+  return process.env.JWT_SECRET || process.env.SESSION_SECRET || "";
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(JSON.stringify(value))
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function base64UrlEncodeBuffer(buffer) {
+  return buffer
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function base64UrlDecode(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+  return Buffer.from(padded, "base64").toString("utf8");
+}
+
+function createSessionToken(user) {
+  const secret = getSessionSecret();
+
+  if (!secret) {
+    throw new Error("尚未設定 JWT_SECRET，請先在 Vercel 環境變數設定一組登入密鑰。");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "HS256",
+    typ: "JWT",
+  };
+  const payload = {
+    user_id: user.id,
+    email: user.email,
+    display_name: user.display_name,
+    iat: now,
+    exp: now + SESSION_EXPIRE_SECONDS,
+  };
+  const encodedHeader = base64UrlEncode(header);
+  const encodedPayload = base64UrlEncode(payload);
+  const data = `${encodedHeader}.${encodedPayload}`;
+  const signature = crypto.createHmac("sha256", secret).update(data).digest();
+
+  return `${data}.${base64UrlEncodeBuffer(signature)}`;
+}
+
+function verifySessionToken(token) {
+  const secret = getSessionSecret();
+
+  if (!secret) {
+    throw new Error("尚未設定 JWT_SECRET。");
+  }
+
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) {
+    throw new Error("登入狀態格式不正確。");
+  }
+
+  const [encodedHeader, encodedPayload, encodedSignature] = parts;
+  const data = `${encodedHeader}.${encodedPayload}`;
+  const expectedSignature = crypto.createHmac("sha256", secret).update(data).digest();
+  const receivedSignature = Buffer.from(
+    encodedSignature.replace(/-/g, "+").replace(/_/g, "/").padEnd(encodedSignature.length + ((4 - (encodedSignature.length % 4)) % 4), "="),
+    "base64",
+  );
+
+  if (
+    receivedSignature.length !== expectedSignature.length ||
+    !crypto.timingSafeEqual(receivedSignature, expectedSignature)
+  ) {
+    throw new Error("登入狀態驗證失敗。");
+  }
+
+  const payload = JSON.parse(base64UrlDecode(encodedPayload));
+  const now = Math.floor(Date.now() / 1000);
+
+  if (!payload.exp || payload.exp < now) {
+    throw new Error("登入狀態已過期，請重新登入。");
+  }
+
+  return payload;
+}
+
+function getBearerToken(req) {
+  const authorization = req.headers.authorization || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : "";
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const token = getBearerToken(req);
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "請先登入 Google 帳號。",
+      });
+    }
+
+    const payload = verifySessionToken(token);
+    const users = await query(
+      `
+      SELECT
+        id,
+        google_id,
+        email,
+        display_name,
+        picture_url,
+        role,
+        is_active,
+        DATE_FORMAT(last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [payload.user_id],
+    );
+
+    if (users.length === 0 || Number(users[0].is_active) !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "這個帳號目前沒有使用權限。",
+      });
+    }
+
+    req.user = users[0];
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: error.message || "登入狀態驗證失敗，請重新登入。",
+    });
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -71,6 +219,133 @@ app.get("/", (req, res) => {
     success: true,
     message: "Stock Radar API is running",
     version: "stock-radar-api-v1",
+  });
+});
+
+
+app.post("/auth/google", async (req, res) => {
+  try {
+    const credential = req.body?.credential;
+    const googleClientId = process.env.GOOGLE_CLIENT_ID;
+    if (!googleClientId) {
+      return res.status(500).json({
+        success: false,
+        message: "尚未設定 GOOGLE_CLIENT_ID，請先在 API 環境變數設定 Google OAuth Client ID。",
+      });
+    }
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: "缺少 Google 登入憑證，請重新登入。",
+      });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: googleClientId,
+    });
+    const payload = ticket.getPayload();
+    const googleId = payload?.sub;
+    const email = String(payload?.email || "").trim().toLowerCase();
+    const displayName = payload?.name || email.split("@")[0] || "Google 使用者";
+    const pictureUrl = payload?.picture || null;
+
+    if (!googleId || !email) {
+      return res.status(401).json({
+        success: false,
+        message: "Google 帳號資料不完整，請重新登入。",
+      });
+    }
+
+    if (payload?.email_verified !== true) {
+      return res.status(403).json({
+        success: false,
+        message: "這個 Google Email 尚未完成驗證，請先完成 Google 帳號驗證。",
+      });
+    }
+
+    await query(
+      `
+      INSERT INTO users (
+        google_id,
+        email,
+        display_name,
+        picture_url,
+        role,
+        is_active,
+        last_login_at
+      ) VALUES (?, ?, ?, ?, 'user', 1, NOW())
+      ON DUPLICATE KEY UPDATE
+        google_id = VALUES(google_id),
+        display_name = VALUES(display_name),
+        picture_url = VALUES(picture_url),
+        last_login_at = NOW(),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [googleId, email, displayName, pictureUrl],
+    );
+
+    const users = await query(
+      `
+      SELECT
+        id,
+        google_id,
+        email,
+        display_name,
+        picture_url,
+        role,
+        is_active,
+        DATE_FORMAT(last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at
+      FROM users
+      WHERE email = ?
+      LIMIT 1
+      `,
+      [email],
+    );
+
+    if (users.length === 0 || Number(users[0].is_active) !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "這個帳號目前沒有使用權限。",
+      });
+    }
+
+    const user = users[0];
+    const token = createSessionToken(user);
+
+    res.json({
+      success: true,
+      message: "Google 登入成功",
+      data: {
+        token,
+        user: convertBigIntToString(user),
+      },
+    });
+  } catch (error) {
+    console.error("Google login failed:", error);
+
+    res.status(401).json({
+      success: false,
+      message: "Google 登入失敗，請確認 Client ID、Google 帳號狀態與資料表是否正確。",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/auth/me", requireAuth, async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      user: convertBigIntToString(req.user),
+    },
+  });
+});
+
+app.post("/auth/logout", (req, res) => {
+  res.json({
+    success: true,
+    message: "已登出",
   });
 });
 

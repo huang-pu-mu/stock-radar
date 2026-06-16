@@ -15,6 +15,7 @@ function resolveApiBaseUrl() {
 
 const API_BASE_URL = resolveApiBaseUrl();
 const RECENT_SEARCH_STORAGE_KEY = "STOCK_RADAR_RECENT_SEARCHES";
+const AUTH_TOKEN_STORAGE_KEY = "STOCK_RADAR_AUTH_TOKEN";
 
 const state = {
   page: "radar",
@@ -23,6 +24,8 @@ const state = {
   latestRows: [],
   lastSearchCode: "",
   lastSearchData: null,
+  authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
+  user: null,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -43,9 +46,11 @@ const detailTitle = document.getElementById("detailTitle");
 const detailContent = document.getElementById("detailContent");
 const closeDetailBtn = document.getElementById("closeDetailBtn");
 const installBtn = document.getElementById("installBtn");
+const authMiniCard = document.getElementById("authMiniCard");
 
 let deferredInstallPrompt = null;
 let hideStatusTimer = null;
+let googleButtonRenderTimer = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -162,12 +167,27 @@ function setSearchLoading(isLoading) {
   stockSearchBtn.textContent = isLoading ? "查詢中..." : "查詢";
 }
 
-async function fetchJson(path) {
+async function fetchJson(path, options = {}) {
   if (!API_BASE_URL || API_BASE_URL.includes("你的-api網址")) {
     throw new Error("尚未設定正式 API 網址。請打開 config.js，把 PRODUCTION_API_BASE_URL 改成你的 Node.js API 網址。");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`);
+  const { auth = false, body, ...fetchOptions } = options;
+  const headers = new Headers(fetchOptions.headers || {});
+
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json");
+    fetchOptions.body = JSON.stringify(body);
+  }
+
+  if (auth && state.authToken) {
+    headers.set("Authorization", `Bearer ${state.authToken}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...fetchOptions,
+    headers,
+  });
   let result = null;
 
   try {
@@ -181,11 +201,9 @@ async function fetchJson(path) {
   }
 
   if (Array.isArray(result)) return result;
-  if (Array.isArray(result.data)) return result.data;
   if (result.data) return result.data;
   return result;
 }
-
 function buildListPath() {
   const params = new URLSearchParams();
 
@@ -208,10 +226,18 @@ function buildListPath() {
 function updatePageText() {
   const marketText = state.market || "全市場";
   const isSearchPage = state.page === "search";
+  const isAccountPage = state.page === "account";
 
-  refreshBtn.classList.toggle("hidden", isSearchPage);
-  marketRow.classList.toggle("hidden", isSearchPage);
+  refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+
+  if (state.page === "account") {
+    pageTitle.textContent = "我的帳號";
+    pageDesc.textContent = "使用 Google 帳號登入後，之後自選股就能依照不同使用者分開保存。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>任何 Google 帳號都可以登入；登入後，自己的自選股會和其他使用者分開保存。</span>`;
+    return;
+  }
 
   if (state.page === "search") {
     pageTitle.textContent = "個股查詢";
@@ -297,6 +323,201 @@ function renderSearchIntro() {
   `;
 }
 
+
+
+function getGoogleClientId() {
+  const config = window.STOCK_RADAR_CONFIG || {};
+  return String(config.GOOGLE_CLIENT_ID || "").trim();
+}
+
+function isGoogleClientConfigured() {
+  const clientId = getGoogleClientId();
+  return Boolean(clientId && !clientId.includes("請填入") && clientId.includes(".apps.googleusercontent.com"));
+}
+
+function getUserDisplayName() {
+  return state.user?.display_name || state.user?.email || "使用者";
+}
+
+function renderAuthHeader() {
+  if (!authMiniCard) return;
+
+  if (state.user) {
+    authMiniCard.innerHTML = `
+      <span class="auth-dot online"></span>
+      <span>${escapeHtml(getUserDisplayName())}</span>
+    `;
+    authMiniCard.classList.add("logged-in");
+    return;
+  }
+
+  authMiniCard.innerHTML = `
+    <span class="auth-dot"></span>
+    <span>登入</span>
+  `;
+  authMiniCard.classList.remove("logged-in");
+}
+
+function saveAuthSession(authData) {
+  state.authToken = authData?.token || "";
+  state.user = authData?.user || null;
+
+  if (state.authToken) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.authToken);
+  }
+
+  renderAuthHeader();
+}
+
+function clearAuthSession(showMessage = true) {
+  state.authToken = "";
+  state.user = null;
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  renderAuthHeader();
+
+  if (showMessage) {
+    showTemporaryStatus("已登出。", "success");
+  }
+}
+
+async function loadCurrentUser() {
+  if (!state.authToken) {
+    renderAuthHeader();
+    return;
+  }
+
+  try {
+    const data = await fetchJson("/auth/me", {
+      method: "GET",
+      auth: true,
+    });
+    state.user = data.user || null;
+  } catch (error) {
+    clearAuthSession(false);
+  } finally {
+    renderAuthHeader();
+  }
+}
+
+async function handleGoogleCredential(response) {
+  try {
+    const credential = response?.credential;
+
+    if (!credential) {
+      throw new Error("沒有收到 Google 登入憑證，請重新登入。");
+    }
+
+    showStatus("正在確認 Google 帳號...", "success");
+
+    const data = await fetchJson("/auth/google", {
+      method: "POST",
+      body: { credential },
+    });
+
+    saveAuthSession(data);
+    renderAccountPage();
+    showTemporaryStatus(`登入成功：${escapeHtml(getUserDisplayName())}`, "success");
+  } catch (error) {
+    showStatus(`Google 登入失敗：${escapeHtml(error.message)}`, "error");
+    renderGoogleButton();
+  }
+}
+
+function renderGoogleButton() {
+  const buttonBox = document.getElementById("googleSignInButton");
+  const messageBox = document.getElementById("googleLoginMessage");
+
+  if (!buttonBox) return;
+
+  if (!isGoogleClientConfigured()) {
+    buttonBox.innerHTML = "";
+    if (messageBox) {
+      messageBox.innerHTML = `
+        <strong>尚未設定 Google Client ID。</strong><br />
+        請先打開 <code>config.js</code>，把 <code>GOOGLE_CLIENT_ID</code> 改成你的 OAuth Client ID。
+      `;
+    }
+    return;
+  }
+
+  if (!window.google?.accounts?.id) {
+    if (messageBox) messageBox.textContent = "Google 登入元件載入中，請稍候。";
+    if (googleButtonRenderTimer) window.clearTimeout(googleButtonRenderTimer);
+    googleButtonRenderTimer = window.setTimeout(renderGoogleButton, 500);
+    return;
+  }
+
+  buttonBox.innerHTML = "";
+  window.google.accounts.id.initialize({
+    client_id: getGoogleClientId(),
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: true,
+  });
+  window.google.accounts.id.renderButton(buttonBox, {
+    type: "standard",
+    theme: "outline",
+    size: "large",
+    shape: "pill",
+    text: "signin_with",
+    width: 300,
+  });
+
+  if (messageBox) {
+    messageBox.textContent = "點上方按鈕，選擇你的 Google 帳號登入。";
+  }
+}
+
+function renderAccountPage() {
+  hideStatus();
+
+  if (state.user) {
+    const picture = state.user.picture_url
+      ? `<img class="profile-avatar" src="${escapeHtml(state.user.picture_url)}" alt="${escapeHtml(getUserDisplayName())}" />`
+      : `<div class="profile-avatar placeholder">${escapeHtml(String(getUserDisplayName()).slice(0, 1))}</div>`;
+
+    stockList.innerHTML = `
+      <article class="account-card">
+        <div class="profile-row">
+          ${picture}
+          <div class="profile-main">
+            <p class="eyebrow">目前登入</p>
+            <h3>${escapeHtml(getUserDisplayName())}</h3>
+            <p>${escapeHtml(state.user.email || "-")}</p>
+          </div>
+        </div>
+        <div class="account-info-grid">
+          ${createInfoItem("帳號狀態", "已登入")}
+          ${createInfoItem("登入方式", "Google 帳號")}
+          ${createInfoItem("權限", escapeHtml(state.user.role || "user"))}
+          ${createInfoItem("最後登入", escapeHtml(state.user.last_login_at || "剛剛"))}
+        </div>
+        <div class="result-note">
+          <strong>下一步：</strong>完成自選股後，這個 Google 帳號會看到自己的股票清單，不會和其他使用者混在一起。
+        </div>
+        <div class="account-actions">
+          <button class="detail-btn" type="button" data-logout="true">登出</button>
+        </div>
+      </article>
+    `;
+    return;
+  }
+
+  stockList.innerHTML = `
+    <article class="account-card login-card">
+      <div class="intro-icon">🔐</div>
+      <h3>使用 Google 帳號登入</h3>
+      <p>登入後，之後的自選股會依照 Google 帳號分開保存。每個人看到自己的清單。</p>
+      <div id="googleSignInButton" class="google-signin-box"></div>
+      <p id="googleLoginMessage" class="login-message">準備載入 Google 登入按鈕。</p>
+      <div class="result-note">
+        <strong>管理提醒：</strong>API 端只需要設定 <code>GOOGLE_CLIENT_ID</code> 與 <code>JWT_SECRET</code>。
+      </div>
+    </article>
+  `;
+
+  renderGoogleButton();
+}
 
 
 function getForeignStreakStrengthClass(days) {
@@ -727,6 +948,12 @@ async function loadList() {
   updatePageText();
   hideStatus();
 
+  if (state.page === "account") {
+    setLoading(false);
+    renderAccountPage();
+    return;
+  }
+
   if (state.page === "search") {
     setLoading(false);
     if (state.lastSearchData) {
@@ -866,12 +1093,15 @@ function closeDetail() {
   detailModal.setAttribute("aria-hidden", "true");
 }
 
+function switchPage(page) {
+  tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.page === page));
+  state.page = page;
+  loadList();
+}
+
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    tabButtons.forEach((btn) => btn.classList.remove("active"));
-    button.classList.add("active");
-    state.page = button.dataset.page;
-    loadList();
+    switchPage(button.dataset.page);
   });
 });
 
@@ -885,6 +1115,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const logoutButton = event.target.closest("[data-logout]");
+  if (logoutButton) {
+    clearAuthSession(true);
+    renderAccountPage();
+    return;
+  }
+
   const detailButton = event.target.closest(".detail-btn");
   if (detailButton) {
     openDetail(detailButton.dataset.code);
@@ -912,6 +1149,10 @@ recentSearches.addEventListener("click", (event) => {
 searchPanel.addEventListener("submit", (event) => {
   event.preventDefault();
   searchStock();
+});
+
+authMiniCard?.addEventListener("click", () => {
+  switchPage("account");
 });
 
 refreshBtn.addEventListener("click", loadList);
@@ -945,4 +1186,9 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-loadList();
+async function initApp() {
+  await loadCurrentUser();
+  loadList();
+}
+
+initApp();

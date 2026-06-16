@@ -1,0 +1,31 @@
+Google 帳號登入設定摘要
+
+登入規則：
+任何 Google 帳號都可以登入。
+系統會用 Google Email 自動建立使用者資料，之後自選股會依照各自 Google 帳號分開保存。
+
+1. MariaDB 先執行：
+   stock-radar-api/sql/google-auth-users.sql
+
+2. API 專案安裝套件：
+   cd D:\code\stock-radar\stock-radar-api
+   npm install google-auth-library
+
+3. API Vercel 環境變數新增：
+   GOOGLE_CLIENT_ID=596345765350-f4beqp72m6188rdr6v6bu4vftdbuaog9.apps.googleusercontent.com
+   JWT_SECRET=一組很長的隨機字串
+
+4. 前端 config.js 設定：
+   GOOGLE_CLIENT_ID: "596345765350-f4beqp72m6188rdr6v6bu4vftdbuaog9.apps.googleusercontent.com"
+
+5. Google Cloud Console OAuth Client 類型：
+   Web application
+
+6. Authorized JavaScript origins 至少加入：
+   你的前端正式網址，例如 https://stock-radar-frontend.vercel.app
+   本機測試網址，例如 http://localhost:5500 或你的 Live Server 網址
+
+7. 完成後重新部署 API 與前端。
+
+
+注意：用戶端密鑰不需要放進前端或 GitHub。本壓縮檔只寫入用戶端 ID，沒有寫入用戶端密鑰。

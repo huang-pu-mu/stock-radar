@@ -142,7 +142,7 @@ h1 {
 }
 
 .tab-row {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   padding: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.055);
@@ -881,6 +881,180 @@ h1 {
   }
 
   .detail-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.auth-mini-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 10px 13px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.065);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.auth-mini-card.logged-in {
+  border-color: rgba(84, 217, 156, 0.35);
+  background: rgba(84, 217, 156, 0.09);
+}
+
+.auth-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--muted-2);
+  box-shadow: 0 0 0 4px rgba(142, 165, 191, 0.12);
+}
+
+.auth-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(84, 217, 156, 0.14);
+}
+
+.account-card {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 22px 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.login-card {
+  text-align: center;
+}
+
+.account-card h3 {
+  margin-bottom: 9px;
+  color: var(--text);
+  font-size: 25px;
+}
+
+.account-card p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.profile-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.profile-avatar {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(86, 214, 255, 0.25);
+  border-radius: 22px;
+  object-fit: cover;
+  background: rgba(86, 214, 255, 0.08);
+}
+
+.profile-avatar.placeholder {
+  display: grid;
+  place-items: center;
+  color: #06111e;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  font-size: 30px;
+  font-weight: 950;
+}
+
+.profile-main {
+  min-width: 0;
+}
+
+.profile-main h3 {
+  margin-bottom: 5px;
+}
+
+.profile-main p {
+  margin-bottom: 0;
+  word-break: break-word;
+}
+
+.account-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.account-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 15px;
+}
+
+.google-signin-box {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: 18px;
+}
+
+.login-message {
+  margin: 12px auto 0;
+  max-width: 560px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+code {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: var(--accent-2);
+  background: rgba(255, 255, 255, 0.065);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+@media (min-width: 621px) {
+  .tab-row {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .header-actions {
+    width: 100%;
+  }
+
+  .auth-mini-card,
+  .install-btn {
+    flex: 1 1 150px;
+    justify-content: center;
+  }
+
+  .profile-row,
+  .account-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .profile-avatar {
+    width: 76px;
+    height: 76px;
+  }
+
+  .account-info-grid {
     grid-template-columns: 1fr;
   }
 }

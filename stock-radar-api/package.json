@@ -4,14 +4,14 @@
   "description": "台股籌碼雷達 APP API",
   "type": "module",
   "main": "server.js",
- "scripts": {
-  "start": "node server.js",
-  "dev": "nodemon server.js",
-  "import:twse": "node scripts/importDailyTwse.js",
-  "import:tpex": "node scripts/importDailyTpex.js",
-  "score": "node scripts/calculateChipScores.js",
-  "daily": "node scripts/dailyTwse.js"
-},
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "import:twse": "node scripts/importDailyTwse.js",
+    "import:tpex": "node scripts/importDailyTpex.js",
+    "score": "node scripts/calculateChipScores.js",
+    "daily": "node scripts/dailyTwse.js"
+  },
   "keywords": [
     "stock",
     "taiwan",
@@ -25,7 +25,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "mariadb": "^3.4.5"
+    "mariadb": "^3.4.5",
+    "google-auth-library": "^10.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"
