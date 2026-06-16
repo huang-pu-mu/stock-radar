@@ -38,15 +38,34 @@
         <div class="tab-row" role="tablist" aria-label="功能切換">
           <button class="tab-btn active" type="button" data-page="radar">今日雷達</button>
           <button class="tab-btn" type="button" data-page="foreign">外資排行</button>
+          <button class="tab-btn" type="button" data-page="search">個股查詢</button>
         </div>
 
-        <div class="market-row" aria-label="市場切換">
+        <form id="searchPanel" class="search-panel hidden" aria-label="個股查詢" novalidate>
+          <label class="search-label" for="stockSearchInput">輸入股票代號</label>
+          <div class="search-row">
+            <input
+              id="stockSearchInput"
+              class="search-input"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              placeholder="例如：2330"
+              aria-describedby="searchHelp"
+            />
+            <button id="stockSearchBtn" class="search-btn" type="submit">查詢</button>
+          </div>
+          <p id="searchHelp" class="search-help">輸入股票代號後按查詢，例如 2330、2317、0050。</p>
+          <div id="recentSearches" class="recent-searches" aria-label="最近查詢"></div>
+        </form>
+
+        <div id="marketRow" class="market-row" aria-label="市場切換">
           <button class="market-btn active" type="button" data-market="">全部</button>
           <button class="market-btn" type="button" data-market="上市">上市</button>
           <button class="market-btn" type="button" data-market="上櫃">上櫃</button>
         </div>
 
-        <div class="help-card" aria-label="使用說明">
+        <div id="helpCard" class="help-card" aria-label="使用說明">
           <strong>簡單看法：</strong>
           <span>分數越高代表籌碼越強；點「看明細」可以查看外資、投信、成交量。</span>
         </div>

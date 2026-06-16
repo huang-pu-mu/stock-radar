@@ -14,12 +14,15 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+const RECENT_SEARCH_STORAGE_KEY = "STOCK_RADAR_RECENT_SEARCHES";
 
 const state = {
   page: "radar",
   market: "",
   limit: 20,
   latestRows: [],
+  lastSearchCode: "",
+  lastSearchData: null,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -29,6 +32,12 @@ const statusBox = document.getElementById("statusBox");
 const refreshBtn = document.getElementById("refreshBtn");
 const tabButtons = document.querySelectorAll(".tab-btn");
 const marketButtons = document.querySelectorAll(".market-btn");
+const marketRow = document.getElementById("marketRow");
+const helpCard = document.getElementById("helpCard");
+const searchPanel = document.getElementById("searchPanel");
+const stockSearchInput = document.getElementById("stockSearchInput");
+const stockSearchBtn = document.getElementById("stockSearchBtn");
+const recentSearches = document.getElementById("recentSearches");
 const detailModal = document.getElementById("detailModal");
 const detailTitle = document.getElementById("detailTitle");
 const detailContent = document.getElementById("detailContent");
@@ -36,6 +45,7 @@ const closeDetailBtn = document.getElementById("closeDetailBtn");
 const installBtn = document.getElementById("installBtn");
 
 let deferredInstallPrompt = null;
+let hideStatusTimer = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -111,18 +121,31 @@ function getStatusTone(value) {
 }
 
 function showStatus(message, type = "") {
+  if (hideStatusTimer) window.clearTimeout(hideStatusTimer);
   statusBox.innerHTML = message;
   statusBox.className = `status-box ${type}`.trim();
   statusBox.classList.remove("hidden");
 }
 
 function hideStatus() {
+  if (hideStatusTimer) window.clearTimeout(hideStatusTimer);
   statusBox.classList.add("hidden");
+}
+
+function showTemporaryStatus(message, type = "success", delay = 1300) {
+  showStatus(message, type);
+  hideStatusTimer = window.setTimeout(hideStatus, delay);
 }
 
 function setLoading(isLoading) {
   refreshBtn.disabled = isLoading;
   refreshBtn.textContent = isLoading ? "讀取中..." : "重新整理";
+}
+
+function setSearchLoading(isLoading) {
+  stockSearchBtn.disabled = isLoading;
+  stockSearchInput.disabled = isLoading;
+  stockSearchBtn.textContent = isLoading ? "查詢中..." : "查詢";
 }
 
 async function fetchJson(path) {
@@ -159,15 +182,31 @@ function buildListPath() {
 
 function updatePageText() {
   const marketText = state.market || "全市場";
+  const isSearchPage = state.page === "search";
+
+  refreshBtn.classList.toggle("hidden", isSearchPage);
+  marketRow.classList.toggle("hidden", isSearchPage);
+  searchPanel.classList.toggle("hidden", !isSearchPage);
+
+  if (state.page === "search") {
+    pageTitle.textContent = "個股查詢";
+    pageDesc.textContent = "直接輸入股票代號，查看該股票的行情、法人與籌碼分數。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後再看分數、法人買賣超與成交量。</span>`;
+    window.setTimeout(() => stockSearchInput.focus(), 80);
+    renderRecentSearches();
+    return;
+  }
 
   if (state.page === "foreign") {
     pageTitle.textContent = "外資排行";
     pageDesc.textContent = `${marketText}外資買超排行，先看外資今天買最多的股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資買超越大，代表外資今天買進力道越明顯；點「看明細」可以看投信與成交量。</span>`;
     return;
   }
 
   pageTitle.textContent = "今日雷達";
   pageDesc.textContent = `${marketText}籌碼分數排行，先看分數高、狀態偏多的股票。`;
+  helpCard.innerHTML = `<strong>簡單看法：</strong><span>分數越高代表籌碼越強；點「看明細」可以查看外資、投信、成交量。</span>`;
 }
 
 function createInfoItem(label, value, extraClass = "") {
@@ -204,6 +243,21 @@ function renderLoadingCards() {
     .join("");
 }
 
+function renderSearchIntro() {
+  stockList.innerHTML = `
+    <article class="search-intro-card">
+      <div class="intro-icon">🔎</div>
+      <h3>請輸入股票代號</h3>
+      <p>例如輸入 <strong>2330</strong>，就可以查台積電的最新行情、三大法人與籌碼分數。</p>
+      <div class="example-row" aria-label="查詢範例">
+        <button class="example-btn" type="button" data-search-code="2330">查 2330</button>
+        <button class="example-btn" type="button" data-search-code="2317">查 2317</button>
+        <button class="example-btn" type="button" data-search-code="0050">查 0050</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderStockCard(row, index) {
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
@@ -223,9 +277,9 @@ function renderStockCard(row, index) {
     createStatusItem("股價位置", pick(row, ["price_position_status", "price_position"])),
   ].join("");
 
-  const foreignValue = pick(row, ["foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"], "-");
-  const trustValue = pick(row, ["investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"], "-");
-  const dealerValue = pick(row, ["dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"], "-");
+  const foreignValue = pick(row, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"], "-");
+  const trustValue = pick(row, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"], "-");
+  const dealerValue = pick(row, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"], "-");
 
   const foreignItems = [
     createInfoItem("外資買超", formatNumber(foreignValue), getChangeClass(foreignValue)),
@@ -268,9 +322,222 @@ function renderStockCard(row, index) {
   `;
 }
 
+function renderDetailSection(title, rows) {
+  return `
+    <section class="detail-section">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="info-grid">${rows.join("")}</div>
+    </section>
+  `;
+}
+
+function renderSearchResult(summaryData) {
+  const code = pick(summaryData, ["stock_code", "code"], state.lastSearchCode || "-");
+  const name = pick(summaryData, ["stock_name", "name"], "股票");
+  const market = pick(summaryData, ["market_type", "market"], "-");
+  const industry = pick(summaryData, ["industry"], "-");
+  const tradeDate = pick(summaryData, ["trade_date", "date"], "-");
+  const score = pick(summaryData, ["chip_score", "total_score", "score"], "-");
+  const scoreClass = getScoreClass(score);
+  const scoreText = getScoreText(score);
+  const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
+  const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
+  const changeClass = getChangeClass(change);
+  const foreignNet = pick(summaryData, ["foreign_net", "foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"], "-");
+  const trustNet = pick(summaryData, ["investment_trust_net", "investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"], "-");
+  const dealerNet = pick(summaryData, ["dealer_net", "dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"], "-");
+  const totalNet = pick(summaryData, ["total_net"], "-");
+
+  stockList.innerHTML = `
+    <article class="stock-card search-result-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge search-badge">查詢結果</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge">${escapeHtml(industry)}</span>
+          </div>
+        </div>
+        <div class="score-box ${scoreClass}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">籌碼分數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary search-summary">
+        <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
+        <span class="summary-text">收盤 ${formatPrice(closePrice)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+      </div>
+
+      ${renderDetailSection("最新行情", [
+        createInfoItem("資料日", formatDate(tradeDate)),
+        createInfoItem("開盤", formatPrice(pick(summaryData, ["open_price"]))),
+        createInfoItem("最高", formatPrice(pick(summaryData, ["high_price"]))),
+        createInfoItem("最低", formatPrice(pick(summaryData, ["low_price"]))),
+        createInfoItem("收盤", formatPrice(closePrice)),
+        createInfoItem("漲跌", formatPrice(change), changeClass),
+        createInfoItem("成交量", formatNumber(pick(summaryData, ["volume", "trade_volume"]))),
+        createInfoItem("成交金額", formatNumber(pick(summaryData, ["transaction_amount"]))),
+      ])}
+
+      ${renderDetailSection("三大法人", [
+        createInfoItem("外資買超", formatNumber(foreignNet), getChangeClass(foreignNet)),
+        createInfoItem("投信買超", formatNumber(trustNet), getChangeClass(trustNet)),
+        createInfoItem("自營商", formatNumber(dealerNet), getChangeClass(dealerNet)),
+        createInfoItem("法人合計", formatNumber(totalNet), getChangeClass(totalNet)),
+      ])}
+
+      ${renderDetailSection("籌碼狀態", [
+        createStatusItem("外資", pick(summaryData, ["foreign_status", "foreign_investor_status"])),
+        createStatusItem("投信", pick(summaryData, ["investment_trust_status", "trust_status"])),
+        createStatusItem("自營商", pick(summaryData, ["dealer_status"])),
+        createStatusItem("大戶", pick(summaryData, ["big_holder_status"])),
+        createStatusItem("成交量", pick(summaryData, ["volume_status"])),
+        createStatusItem("股價位置", pick(summaryData, ["price_position", "price_position_status"])),
+      ])}
+
+      ${renderDetailSection("分數拆解", [
+        createInfoItem("外資分數", formatNumber(pick(summaryData, ["foreign_score"]))),
+        createInfoItem("投信分數", formatNumber(pick(summaryData, ["investment_trust_score", "trust_score"]))),
+        createInfoItem("自營商分數", formatNumber(pick(summaryData, ["dealer_score"]))),
+        createInfoItem("大戶分數", formatNumber(pick(summaryData, ["big_holder_score"]))),
+        createInfoItem("成交量分數", formatNumber(pick(summaryData, ["volume_score"]))),
+        createInfoItem("股價位置分數", formatNumber(pick(summaryData, ["price_score", "price_position_score"]))),
+      ])}
+
+      <div class="result-note">
+        <strong>提醒：</strong>籌碼分數是觀察工具，不代表一定會上漲；建議搭配趨勢、成交量與風險控管一起看。
+      </div>
+
+      <div class="card-actions search-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看更多明細</button>
+      </div>
+    </article>
+  `;
+}
+
+function getFirstArrayItem(value) {
+  if (Array.isArray(value)) return value[0] || {};
+  if (value && Array.isArray(value.data)) return value.data[0] || {};
+  return value || {};
+}
+
+function normalizeStockCode(value) {
+  return String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+}
+
+function isValidStockCode(stockCode) {
+  return /^[0-9A-Z]{2,10}$/.test(stockCode);
+}
+
+function getRecentSearches() {
+  try {
+    const rows = JSON.parse(window.localStorage.getItem(RECENT_SEARCH_STORAGE_KEY) || "[]");
+    return Array.isArray(rows) ? rows.filter(isValidStockCode).slice(0, 6) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveRecentSearch(stockCode) {
+  const code = normalizeStockCode(stockCode);
+  if (!isValidStockCode(code)) return;
+
+  const nextRows = [code, ...getRecentSearches().filter((item) => item !== code)].slice(0, 6);
+  window.localStorage.setItem(RECENT_SEARCH_STORAGE_KEY, JSON.stringify(nextRows));
+  renderRecentSearches();
+}
+
+function renderRecentSearches() {
+  const rows = getRecentSearches();
+
+  if (rows.length === 0) {
+    recentSearches.innerHTML = "";
+    return;
+  }
+
+  recentSearches.innerHTML = `
+    <span class="recent-label">最近查詢：</span>
+    ${rows.map((code) => `<button class="recent-search-btn" type="button" data-search-code="${escapeHtml(code)}">${escapeHtml(code)}</button>`).join("")}
+  `;
+}
+
+async function searchStock(codeFromButton = "") {
+  const stockCode = normalizeStockCode(codeFromButton || stockSearchInput.value);
+
+  if (!stockCode) {
+    showStatus("請先輸入股票代號，例如 2330。", "error");
+    stockSearchInput.focus();
+    return;
+  }
+
+  if (!isValidStockCode(stockCode)) {
+    showStatus("股票代號格式不正確，請輸入 2 到 10 碼的數字或英文字。", "error");
+    stockSearchInput.focus();
+    return;
+  }
+
+  stockSearchInput.value = stockCode;
+  hideStatus();
+  setSearchLoading(true);
+  stockList.innerHTML = `
+    <article class="stock-card loading-card">
+      <div class="skeleton skeleton-title"></div>
+      <div class="loading-grid">
+        <div class="skeleton skeleton-text"></div>
+        <div class="skeleton skeleton-text"></div>
+        <div class="skeleton skeleton-text"></div>
+        <div class="skeleton skeleton-text"></div>
+      </div>
+    </article>
+  `;
+
+  try {
+    const result = await fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`);
+    const summaryData = getFirstArrayItem(result);
+
+    if (!summaryData || !pick(summaryData, ["stock_code", "code"], "")) {
+      throw new Error("查不到這檔股票，請確認股票代號是否正確。");
+    }
+
+    state.lastSearchCode = stockCode;
+    state.lastSearchData = summaryData;
+    saveRecentSearch(stockCode);
+    renderSearchResult(summaryData);
+    showTemporaryStatus(`已查到 ${escapeHtml(pick(summaryData, ["stock_name", "name"], stockCode))}。`, "success");
+  } catch (error) {
+    const isNotFound = String(error.message).toLowerCase().includes("not found");
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>查不到這檔股票</h3>
+        <p>${isNotFound ? "請確認股票代號是否正確，或確認資料庫是否已匯入這檔股票。" : escapeHtml(error.message)}</p>
+        <button class="retry-btn" type="button" data-focus-search="true">重新輸入</button>
+      </article>
+    `;
+    showStatus(isNotFound ? "查不到這檔股票，請確認股票代號是否正確。" : escapeHtml(error.message), "error");
+  } finally {
+    setSearchLoading(false);
+  }
+}
+
 async function loadList() {
   updatePageText();
   hideStatus();
+
+  if (state.page === "search") {
+    setLoading(false);
+    if (state.lastSearchData) {
+      renderSearchResult(state.lastSearchData);
+    } else {
+      renderSearchIntro();
+    }
+    return;
+  }
+
   setLoading(true);
   renderLoadingCards();
 
@@ -285,8 +552,7 @@ async function loadList() {
     }
 
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
-    showStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
-    window.setTimeout(hideStatus, 1300);
+    showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     stockList.innerHTML = "";
     showStatus(
@@ -303,21 +569,6 @@ async function loadList() {
   } finally {
     setLoading(false);
   }
-}
-
-function renderDetailSection(title, rows) {
-  return `
-    <section class="detail-section">
-      <h3>${escapeHtml(title)}</h3>
-      <div class="info-grid">${rows.join("")}</div>
-    </section>
-  `;
-}
-
-function getFirstArrayItem(value) {
-  if (Array.isArray(value)) return value[0] || {};
-  if (value && Array.isArray(value.data)) return value.data[0] || {};
-  return value || {};
 }
 
 async function openDetail(stockCode) {
@@ -376,9 +627,9 @@ async function openDetail(stockCode) {
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
       renderDetailSection("三大法人", [
-        createInfoItem("外資", formatNumber(pick(latestTrade, ["foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"])), getChangeClass(pick(latestTrade, ["foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"]))),
-        createInfoItem("投信", formatNumber(pick(latestTrade, ["investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"])), getChangeClass(pick(latestTrade, ["investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"]))),
-        createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"]))),
+        createInfoItem("外資", formatNumber(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"])), getChangeClass(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"]))),
+        createInfoItem("投信", formatNumber(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"])), getChangeClass(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"]))),
+        createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
       renderDetailSection("籌碼狀態", [
@@ -392,7 +643,7 @@ async function openDetail(stockCode) {
         createInfoItem("投信分數", formatNumber(pick(latestScore, ["investment_trust_score", "trust_score"]))),
         createInfoItem("自營商分數", formatNumber(pick(latestScore, ["dealer_score"]))),
         createInfoItem("成交量分數", formatNumber(pick(latestScore, ["volume_score"]))),
-        createInfoItem("股價位置分數", formatNumber(pick(latestScore, ["price_position_score"]))),
+        createInfoItem("股價位置分數", formatNumber(pick(latestScore, ["price_score", "price_position_score"]))),
         createInfoItem("大戶分數", formatNumber(pick(latestScore, ["big_holder_score"]))),
       ]),
     ].join("");
@@ -425,9 +676,33 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
-  const button = event.target.closest(".detail-btn");
+  const detailButton = event.target.closest(".detail-btn");
+  if (detailButton) {
+    openDetail(detailButton.dataset.code);
+    return;
+  }
+
+  const exampleButton = event.target.closest("[data-search-code]");
+  if (exampleButton) {
+    searchStock(exampleButton.dataset.searchCode);
+    return;
+  }
+
+  const focusButton = event.target.closest("[data-focus-search]");
+  if (focusButton) {
+    stockSearchInput.focus();
+  }
+});
+
+recentSearches.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-search-code]");
   if (!button) return;
-  openDetail(button.dataset.code);
+  searchStock(button.dataset.searchCode);
+});
+
+searchPanel.addEventListener("submit", (event) => {
+  event.preventDefault();
+  searchStock();
 });
 
 refreshBtn.addEventListener("click", loadList);
