@@ -142,7 +142,7 @@ h1 {
 }
 
 .tab-row {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   padding: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.055);
@@ -568,6 +568,15 @@ h1 {
   color: var(--muted);
   font-size: 15px;
   line-height: 1.5;
+}
+
+.secondary-summary {
+  margin-top: -6px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.sync-buy-card .summary-text strong {
+  font-weight: 950;
 }
 
 .summary-pill.score-high {
@@ -1085,7 +1094,7 @@ code {
 
 @media (min-width: 621px) {
   .tab-row {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(8, minmax(0, 1fr));
   }
 }
 

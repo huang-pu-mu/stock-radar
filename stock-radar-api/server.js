@@ -1008,6 +1008,248 @@ app.get("/radar/investment-trust-ranking", async (req, res) => {
   }
 });
 
+
+// ==============================
+// 法人同步買超雷達：外資、投信同時買超
+// GET /radar/institutional-sync-buying?market=上市&limit=30
+// ==============================
+app.get("/radar/institutional-sync-buying", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    let targetDate = queryDate;
+
+    if (!targetDate) {
+      const latestDateParams = [];
+      let latestDateMarketCondition = "";
+
+      if (market) {
+        latestDateMarketCondition = "WHERE s.market_type = ?";
+        latestDateParams.push(market);
+      }
+
+      const latestDateRows = await query(
+        `
+        SELECT DATE_FORMAT(MAX(i.trade_date), '%Y-%m-%d') AS latest_date
+        FROM institutional_trades i
+        LEFT JOIN stocks s
+          ON i.stock_code = s.stock_code
+        ${latestDateMarketCondition}
+        `,
+        latestDateParams,
+      );
+
+      targetDate = latestDateRows[0].latest_date;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        trade_date: null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const params = [targetDate];
+    let marketCondition = "";
+
+    if (market) {
+      marketCondition = "AND s.market_type = ?";
+      params.push(market);
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        i.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+
+        CAST(i.foreign_buy AS CHAR) AS foreign_buy,
+        CAST(i.foreign_sell AS CHAR) AS foreign_sell,
+        CAST(i.foreign_net AS CHAR) AS foreign_net,
+        CAST(i.investment_trust_buy AS CHAR) AS investment_trust_buy,
+        CAST(i.investment_trust_sell AS CHAR) AS investment_trust_sell,
+        CAST(i.investment_trust_net AS CHAR) AS investment_trust_net,
+        CAST(i.dealer_net AS CHAR) AS dealer_net,
+        CAST(i.total_net AS CHAR) AS total_net,
+        CAST((COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) AS CHAR) AS institutional_sync_net,
+
+        p.close_price,
+        p.price_change,
+        CAST(p.volume AS CHAR) AS volume,
+
+        c.chip_score,
+        c.foreign_score,
+        c.investment_trust_score,
+        c.dealer_score,
+        c.big_holder_score,
+        c.volume_score,
+        c.price_score,
+        c.foreign_status,
+        c.investment_trust_status,
+        c.dealer_status,
+        c.big_holder_status,
+        c.volume_status,
+        c.price_position
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      LEFT JOIN chip_scores c
+        ON i.stock_code = c.stock_code
+       AND i.trade_date = c.trade_date
+      WHERE i.trade_date <= ?
+        ${marketCondition}
+      ORDER BY i.stock_code ASC, i.trade_date DESC
+      `,
+      params,
+    );
+
+    const stockMap = new Map();
+
+    rows.forEach((row) => {
+      if (!stockMap.has(row.stock_code)) {
+        stockMap.set(row.stock_code, []);
+      }
+
+      stockMap.get(row.stock_code).push(row);
+    });
+
+    const ranking = [];
+
+    stockMap.forEach((stockRows) => {
+      const latestRow = stockRows[0];
+
+      if (!latestRow || latestRow.trade_date !== targetDate) {
+        return;
+      }
+
+      const todayForeignNet = toBigIntValue(latestRow.foreign_net);
+      const todayInvestmentTrustNet = toBigIntValue(latestRow.investment_trust_net);
+
+      if (todayForeignNet <= 0n || todayInvestmentTrustNet <= 0n) {
+        return;
+      }
+
+      let syncBuyDays = 0;
+      let totalForeignNet = 0n;
+      let totalInvestmentTrustNet = 0n;
+      let totalSyncNet = 0n;
+
+      for (const row of stockRows) {
+        const foreignNet = toBigIntValue(row.foreign_net);
+        const investmentTrustNet = toBigIntValue(row.investment_trust_net);
+
+        if (foreignNet > 0n && investmentTrustNet > 0n) {
+          syncBuyDays += 1;
+          totalForeignNet += foreignNet;
+          totalInvestmentTrustNet += investmentTrustNet;
+          totalSyncNet += foreignNet + investmentTrustNet;
+        } else {
+          break;
+        }
+      }
+
+      const todaySyncNet = todayForeignNet + todayInvestmentTrustNet;
+
+      ranking.push({
+        trade_date: targetDate,
+        stock_code: latestRow.stock_code,
+        stock_name: latestRow.stock_name,
+        market_type: latestRow.market_type,
+        industry: latestRow.industry,
+
+        sync_buy_days: syncBuyDays,
+        today_foreign_net_lots: todayForeignNet.toString(),
+        today_investment_trust_net_lots: todayInvestmentTrustNet.toString(),
+        today_sync_net_lots: todaySyncNet.toString(),
+        total_foreign_net_lots: totalForeignNet.toString(),
+        total_investment_trust_net_lots: totalInvestmentTrustNet.toString(),
+        total_sync_net_lots: totalSyncNet.toString(),
+
+        foreign_net: latestRow.foreign_net,
+        investment_trust_net: latestRow.investment_trust_net,
+        institutional_sync_net: latestRow.institutional_sync_net,
+        dealer_net: latestRow.dealer_net,
+        total_net: latestRow.total_net,
+
+        close_price: latestRow.close_price,
+        price_change: latestRow.price_change,
+        volume: latestRow.volume,
+
+        chip_score: latestRow.chip_score,
+        foreign_score: latestRow.foreign_score,
+        investment_trust_score: latestRow.investment_trust_score,
+        dealer_score: latestRow.dealer_score,
+        big_holder_score: latestRow.big_holder_score,
+        volume_score: latestRow.volume_score,
+        price_score: latestRow.price_score,
+        foreign_status: latestRow.foreign_status,
+        investment_trust_status: latestRow.investment_trust_status,
+        dealer_status: latestRow.dealer_status,
+        big_holder_status: latestRow.big_holder_status,
+        volume_status: latestRow.volume_status,
+        price_position: latestRow.price_position,
+      });
+    });
+
+    ranking.sort((a, b) => {
+      if (b.sync_buy_days !== a.sync_buy_days) {
+        return b.sync_buy_days - a.sync_buy_days;
+      }
+
+      const totalSyncDiff = BigInt(b.total_sync_net_lots) - BigInt(a.total_sync_net_lots);
+      if (totalSyncDiff > 0n) return 1;
+      if (totalSyncDiff < 0n) return -1;
+
+      const todaySyncDiff = BigInt(b.today_sync_net_lots) - BigInt(a.today_sync_net_lots);
+      if (todaySyncDiff > 0n) return 1;
+      if (todaySyncDiff < 0n) return -1;
+
+      const scoreDiff = Number(b.chip_score || 0) - Number(a.chip_score || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      return a.stock_code.localeCompare(b.stock_code);
+    });
+
+    const limitedRanking = ranking.slice(0, limit);
+
+    res.json({
+      success: true,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: limitedRanking.length,
+      data: convertBigIntToString(limitedRanking),
+    });
+  } catch (error) {
+    console.error("查詢法人同步買超雷達失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢法人同步買超雷達失敗",
+      error: error.message,
+    });
+  }
+});
+
 // ==============================
 // 今日雷達：籌碼分數排行
 // GET /radar/top?market=上市&limit=30

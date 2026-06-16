@@ -239,6 +239,12 @@ function buildListPath() {
     return `/radar/investment-trust-ranking?${params.toString()}`;
   }
 
+  if (state.page === "syncBuy") {
+    params.set("limit", "100");
+    if (state.market) params.set("market", state.market);
+    return `/radar/institutional-sync-buying?${params.toString()}`;
+  }
+
   const endpoint = state.page === "foreign" ? "/foreign/top" : "/radar/top";
   params.set("limit", String(state.limit));
   if (state.market) params.set("market", state.market);
@@ -296,6 +302,13 @@ function updatePageText() {
     pageTitle.textContent = "投信排行";
     pageDesc.textContent = `${marketText}投信連買排行，先看投信連續買進、累計買超大的股票。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>投信連買天數越多、累計買超越大，代表投信近期買進態度越明顯；點「看明細」可以看完整籌碼。</span>`;
+    return;
+  }
+
+  if (state.page === "syncBuy") {
+    pageTitle.textContent = "法人同步買超";
+    pageDesc.textContent = `${marketText}外資與投信同一天買超排行，優先看法人方向一致的股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資和投信同時買超，代表兩種主要法人同向偏多；同步天數越多、合計買超越大，觀察價值越高。</span>`;
     return;
   }
 
@@ -740,7 +753,7 @@ function rerenderCurrentContent() {
     return;
   }
 
-  if (["radar", "foreign", "foreignStreak", "trust"].includes(state.page) && state.latestRows.length > 0) {
+  if (["radar", "foreign", "foreignStreak", "trust", "syncBuy"].includes(state.page) && state.latestRows.length > 0) {
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
     return;
   }
@@ -1243,9 +1256,107 @@ function renderTrustCard(row, index) {
   `;
 }
 
+
+function getSyncBuyStrengthClass(days, totalLots) {
+  const dayValue = toNumber(days);
+  const lotValue = toNumber(totalLots) || 0;
+  if (dayValue === null) return "score-low";
+  if (dayValue >= 3 || lotValue >= 5000) return "score-high";
+  if (dayValue >= 2 || lotValue >= 1000) return "score-mid";
+  return "score-low";
+}
+
+function getSyncBuyStrengthText(days) {
+  const numberValue = toNumber(days);
+  if (numberValue === null) return "尚無資料";
+  if (numberValue >= 3) return "法人同步強買";
+  if (numberValue >= 2) return "連續同步買超";
+  return "今日同步買超";
+}
+
+function renderSyncBuyCard(row, index) {
+  const code = pick(row, ["stock_code", "code"]);
+  const name = pick(row, ["stock_name", "name"]);
+  const market = pick(row, ["market_type", "market"]);
+  const industry = pick(row, ["industry"], "-");
+  const tradeDate = pick(row, ["trade_date", "date"], "-");
+  const syncDays = pick(row, ["sync_buy_days"], "-");
+  const todayForeignLots = formatLotsValue(
+    pick(row, ["today_foreign_net_lots", "foreign_net"], "-"),
+    pick(row, ["today_foreign_net_shares"], "-"),
+  );
+  const todayTrustLots = formatLotsValue(
+    pick(row, ["today_investment_trust_net_lots", "investment_trust_net"], "-"),
+    pick(row, ["today_investment_trust_net_shares"], "-"),
+  );
+  const todaySyncLots = formatLotsValue(
+    pick(row, ["today_sync_net_lots", "institutional_sync_net"], "-"),
+    pick(row, ["today_sync_net_shares"], "-"),
+  );
+  const totalSyncLots = formatLotsValue(
+    pick(row, ["total_sync_net_lots"], "-"),
+    pick(row, ["total_sync_net_shares"], "-"),
+  );
+  const chipScore = pick(row, ["chip_score", "total_score", "score"], "-");
+  const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
+  const change = pick(row, ["price_change", "change", "change_price"], "-");
+  const strengthClass = getSyncBuyStrengthClass(syncDays, pick(row, ["total_sync_net_lots"], 0));
+  const strengthText = getSyncBuyStrengthText(syncDays);
+  const syncDaysText = toNumber(syncDays) === null ? "-" : `${formatNumber(syncDays)} 天`;
+
+  const syncItems = [
+    createInfoItem("同步天數", escapeHtml(syncDaysText), strengthClass),
+    createInfoItem("外資今日", `${todayForeignLots} 張`, "price-up"),
+    createInfoItem("投信今日", `${todayTrustLots} 張`, "price-up"),
+    createInfoItem("法人合計", `${todaySyncLots} 張`, "price-up"),
+    createInfoItem("累計同步", `${totalSyncLots} 張`, "price-up"),
+    createInfoItem("籌碼分數", formatNumber(chipScore), getScoreClass(chipScore)),
+    createInfoItem("市場別", escapeHtml(market)),
+    createInfoItem("產業", escapeHtml(industry)),
+  ].join("");
+
+  return `
+    <article class="stock-card sync-buy-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatNumber(syncDays)}</span>
+          <span class="score-label">同步天數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(strengthText)}</span>
+        <span class="summary-text">外資 <strong class="price-up">${todayForeignLots}</strong> 張＋投信 <strong class="price-up">${todayTrustLots}</strong> 張，同步合計 <strong class="price-up">${todaySyncLots}</strong> 張</span>
+      </div>
+
+      <div class="quick-summary secondary-summary">
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+      </div>
+
+      <div class="info-grid">
+        ${syncItems}
+      </div>
+
+      <div class="card-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+        ${getCardActionButtons(code, "看明細", index)}
+      </div>
+    </article>
+  `;
+}
+
 function renderStockCard(row, index) {
   if (state.page === "foreignStreak") return renderForeignStreakCard(row, index);
   if (state.page === "trust") return renderTrustCard(row, index);
+  if (state.page === "syncBuy") return renderSyncBuyCard(row, index);
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
@@ -1570,7 +1681,7 @@ async function loadList() {
     const rows = await fetchJson(buildListPath());
     let latestRows = Array.isArray(rows) ? rows : [];
 
-    if (state.page === "trust" || state.page === "foreignStreak") {
+    if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy") {
       if (state.market) {
         latestRows = latestRows.filter((row) => pick(row, ["market_type", "market"], "") === state.market);
       }
