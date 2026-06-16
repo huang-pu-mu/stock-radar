@@ -189,6 +189,11 @@ async function fetchJson(path) {
 function buildListPath() {
   const params = new URLSearchParams();
 
+  if (state.page === "foreignStreak") {
+    params.set("limit", "100");
+    return `/radar/foreign-buy-ranking?${params.toString()}`;
+  }
+
   if (state.page === "trust") {
     params.set("limit", "100");
     return `/radar/investment-trust-ranking?${params.toString()}`;
@@ -221,6 +226,13 @@ function updatePageText() {
     pageTitle.textContent = "外資排行";
     pageDesc.textContent = `${marketText}外資買超排行，先看外資今天買最多的股票。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資買超越大，代表外資今天買進力道越明顯；點「看明細」可以看投信與成交量。</span>`;
+    return;
+  }
+
+  if (state.page === "foreignStreak") {
+    pageTitle.textContent = "外資連買";
+    pageDesc.textContent = `${marketText}外資連買排行，先看外資連續買進、累計買超大的股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資連買天數越多、累計買超越大，代表外資近期買進態度越明顯；點「看明細」可以看完整籌碼。</span>`;
     return;
   }
 
@@ -285,6 +297,85 @@ function renderSearchIntro() {
   `;
 }
 
+
+
+function getForeignStreakStrengthClass(days) {
+  const numberValue = toNumber(days);
+  if (numberValue === null) return "score-low";
+  if (numberValue >= 5) return "score-high";
+  if (numberValue >= 2) return "score-mid";
+  return "score-low";
+}
+
+function getForeignStreakStrengthText(days) {
+  const numberValue = toNumber(days);
+  if (numberValue === null) return "尚無資料";
+  if (numberValue >= 5) return "外資強買";
+  if (numberValue >= 2) return "外資偏多";
+  return "單日買超";
+}
+
+function renderForeignStreakCard(row, index) {
+  const code = pick(row, ["stock_code", "code"]);
+  const name = pick(row, ["stock_name", "name"]);
+  const market = pick(row, ["market_type", "market"]);
+  const industry = pick(row, ["industry"], "-");
+  const tradeDate = pick(row, ["trade_date", "date"], "-");
+  const buyDays = pick(row, ["foreign_buy_days", "buy_days"], "-");
+  const todayLots = formatLotsValue(
+    pick(row, ["today_foreign_net_lots", "today_foreign_net_buy_lots"], "-"),
+    pick(row, ["today_foreign_net_shares", "today_foreign_net_buy_shares"], "-"),
+  );
+  const totalLots = formatLotsValue(
+    pick(row, ["total_foreign_net_lots", "total_foreign_net_buy_lots"], "-"),
+    pick(row, ["total_foreign_net_shares", "total_foreign_net_buy_shares"], "-"),
+  );
+  const strengthClass = getForeignStreakStrengthClass(buyDays);
+  const strengthText = getForeignStreakStrengthText(buyDays);
+  const buyDaysText = toNumber(buyDays) === null ? "-" : `${formatNumber(buyDays)} 天`;
+
+  const foreignItems = [
+    createInfoItem("連買天數", escapeHtml(buyDaysText), strengthClass),
+    createInfoItem("今日買超", `${todayLots} 張`, "price-up"),
+    createInfoItem("累計買超", `${totalLots} 張`, "price-up"),
+    createInfoItem("市場別", escapeHtml(market)),
+    createInfoItem("產業", escapeHtml(industry)),
+    createInfoItem("資料日", formatDate(tradeDate)),
+  ].join("");
+
+  return `
+    <article class="stock-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatNumber(buyDays)}</span>
+          <span class="score-label">連買天數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(strengthText)}</span>
+        <span class="summary-text">今日買超 <strong class="price-up">${todayLots}</strong> 張，累計 <strong class="price-up">${totalLots}</strong> 張</span>
+      </div>
+
+      <div class="info-grid">
+        ${foreignItems}
+      </div>
+
+      <div class="card-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+      </div>
+    </article>
+  `;
+}
 
 function getTrustStrengthClass(days) {
   const numberValue = toNumber(days);
@@ -365,6 +456,7 @@ function renderTrustCard(row, index) {
 }
 
 function renderStockCard(row, index) {
+  if (state.page === "foreignStreak") return renderForeignStreakCard(row, index);
   if (state.page === "trust") return renderTrustCard(row, index);
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
@@ -652,7 +744,7 @@ async function loadList() {
     const rows = await fetchJson(buildListPath());
     let latestRows = Array.isArray(rows) ? rows : [];
 
-    if (state.page === "trust") {
+    if (state.page === "trust" || state.page === "foreignStreak") {
       if (state.market) {
         latestRows = latestRows.filter((row) => pick(row, ["market_type", "market"], "") === state.market);
       }
