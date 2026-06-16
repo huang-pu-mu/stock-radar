@@ -1775,3 +1775,226 @@ code {
     white-space: normal;
   }
 }
+
+
+/* 2026-06-17：看明細圖表放大、區間切換、左右拖曳 */
+body.chart-zoom-open {
+  overflow: hidden;
+}
+
+.chart-header-row,
+.chart-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.chart-header-row h3,
+.chart-title-row h3 {
+  margin-bottom: 5px;
+}
+
+.chart-header-row p,
+.chart-title-row span {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chart-expand-btn {
+  flex: 0 0 auto;
+  min-height: 46px;
+  border: 1px solid rgba(86, 214, 255, 0.32);
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: #06111e;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  font-size: 15px;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(86, 214, 255, 0.14);
+}
+
+.chart-expand-btn:active,
+.chart-range-btn:active {
+  transform: scale(0.98);
+}
+
+.chart-zoom-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: stretch;
+  padding: 10px;
+}
+
+.chart-zoom-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.chart-zoom-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1280px, 100%);
+  max-height: calc(100vh - 20px);
+  margin: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 28px;
+  background: rgba(13, 27, 47, 0.985);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.chart-zoom-header {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(13, 27, 47, 0.98);
+}
+
+.chart-zoom-header h2 {
+  margin-bottom: 5px;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.chart-zoom-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.chart-zoom-content {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px 16px 18px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chart-range-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(7, 17, 31, 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.chart-range-btn {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 16px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.chart-range-btn.active {
+  color: #06111e;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+
+.chart-range-btn.reset {
+  color: #c7d8ec;
+}
+
+.chart-zoom-hint {
+  margin-bottom: 12px;
+  border: 1px solid rgba(86, 214, 255, 0.18);
+  border-radius: 18px;
+  padding: 11px 13px;
+  color: var(--muted);
+  background: rgba(86, 214, 255, 0.08);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.chart-zoom-hint strong {
+  color: var(--text);
+}
+
+.chart-zoom-section {
+  margin-bottom: 14px;
+}
+
+.zoom-scroll {
+  overflow: auto;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zoom-scroll .stock-chart {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+}
+
+.chart-zoom-modal .chart-axis-text {
+  font-size: 13px;
+}
+
+.chart-zoom-modal .ma-line {
+  stroke-width: 2.4;
+}
+
+.chart-zoom-modal .candle-line {
+  stroke-width: 1.8;
+}
+
+@media (max-width: 920px) {
+  .chart-zoom-card {
+    max-height: calc(100vh - 12px);
+    border-radius: 22px;
+  }
+
+  .chart-zoom-modal {
+    padding: 6px;
+  }
+
+  .chart-range-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .chart-header-row,
+  .chart-title-row,
+  .chart-zoom-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .chart-expand-btn {
+    width: 100%;
+  }
+
+  .chart-range-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chart-zoom-header h2 {
+    font-size: 23px;
+  }
+}

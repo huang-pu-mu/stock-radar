@@ -28,6 +28,9 @@ const state = {
   user: null,
   watchlistCodes: new Set(),
   watchlistLoaded: false,
+  chartZoomRows: [],
+  chartZoomRange: "60",
+  chartZoomTitle: "技術圖表",
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -47,6 +50,10 @@ const detailModal = document.getElementById("detailModal");
 const detailTitle = document.getElementById("detailTitle");
 const detailContent = document.getElementById("detailContent");
 const closeDetailBtn = document.getElementById("closeDetailBtn");
+const chartZoomModal = document.getElementById("chartZoomModal");
+const chartZoomTitle = document.getElementById("chartZoomTitle");
+const chartZoomContent = document.getElementById("chartZoomContent");
+const closeChartZoomBtn = document.getElementById("closeChartZoomBtn");
 const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
 
@@ -374,6 +381,13 @@ function createStatusItem(label, value) {
 
 const MOVING_AVERAGE_PERIODS = [5, 10, 20, 60, 120, 240];
 const VOLUME_AVERAGE_PERIODS = [5, 20];
+const CHART_RANGE_OPTIONS = [
+  { value: "20", label: "20日" },
+  { value: "60", label: "60日" },
+  { value: "120", label: "120日" },
+  { value: "240", label: "240日" },
+  { value: "all", label: "全部" },
+];
 
 function getRowDate(row) {
   return String(pick(row, ["trade_date", "date"], ""));
@@ -476,19 +490,43 @@ function renderEmptyChart(message) {
   `;
 }
 
-function renderPriceChart(enrichedRows) {
-  const rows = enrichedRows.slice(-120);
+function getChartRowsByRange(enrichedRows, rangeValue = "120") {
+  const safeRows = Array.isArray(enrichedRows) ? enrichedRows : [];
+
+  if (rangeValue === "all") return safeRows;
+
+  const count = Number(rangeValue);
+  if (!Number.isFinite(count) || count <= 0) return safeRows.slice(-120);
+
+  return safeRows.slice(-count);
+}
+
+function getChartRangeLabel(rangeValue) {
+  return CHART_RANGE_OPTIONS.find((item) => item.value === String(rangeValue))?.label || "120日";
+}
+
+function getZoomChartWidth(rowCount, minWidth = 1050) {
+  if (rowCount <= 30) return minWidth;
+  if (rowCount <= 70) return Math.max(minWidth, rowCount * 24);
+  if (rowCount <= 140) return Math.max(minWidth, rowCount * 18);
+  return Math.max(minWidth, rowCount * 14);
+}
+
+function renderPriceChart(enrichedRows, options = {}) {
+  const range = options.range || "120";
+  const isZoom = Boolean(options.zoom);
+  const rows = getChartRowsByRange(enrichedRows, range);
 
   if (rows.length < 2) {
     return renderEmptyChart("至少需要 2 筆行情資料，才能畫股價走勢圖。");
   }
 
-  const width = 900;
-  const height = 320;
-  const left = 54;
-  const right = 22;
-  const top = 22;
-  const bottom = 38;
+  const width = isZoom ? getZoomChartWidth(rows.length, 1120) : 900;
+  const height = isZoom ? 380 : 320;
+  const left = isZoom ? 62 : 54;
+  const right = 28;
+  const top = isZoom ? 28 : 22;
+  const bottom = isZoom ? 46 : 38;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const valueCandidates = [];
@@ -506,7 +544,7 @@ function renderPriceChart(enrichedRows) {
   const highBound = maxValue + paddingValue;
   const valueRange = highBound - lowBound || 1;
   const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
-  const candleWidth = Math.max(3, Math.min(9, xStep * 0.48));
+  const candleWidth = Math.max(isZoom ? 4 : 3, Math.min(isZoom ? 14 : 9, xStep * 0.52));
 
   const xFor = (index) => left + index * xStep;
   const yFor = (value) => top + ((highBound - value) / valueRange) * chartHeight;
@@ -531,7 +569,7 @@ function renderPriceChart(enrichedRows) {
     const yOpen = yFor(open);
     const yClose = yFor(close);
     const rectY = Math.min(yOpen, yClose);
-    const rectHeight = Math.max(Math.abs(yClose - yOpen), 2);
+    const rectHeight = Math.max(Math.abs(yClose - yOpen), isZoom ? 2.4 : 2);
     const toneClass = getPriceDirectionClass(row.change, row.close, row.previousClose);
     const tone = toneClass === "price-up" ? "up" : toneClass === "price-down" ? "down" : "flat";
 
@@ -554,34 +592,38 @@ function renderPriceChart(enrichedRows) {
 
   const firstDate = rows[0]?.date || "";
   const lastDate = rows[rows.length - 1]?.date || "";
+  const zoomClass = isZoom ? " zoom-scroll" : "";
+  const svgStyle = isZoom ? ` style="width:${width}px"` : "";
 
   return `
-    <div class="chart-scroll">
-      <svg class="stock-chart price-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="股價走勢圖">
+    <div class="chart-scroll${zoomClass}" data-chart-scroll="true">
+      <svg class="stock-chart price-chart" viewBox="0 0 ${width} ${height}"${svgStyle} role="img" aria-label="股價走勢圖">
         <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18" />
         ${gridLines}
         ${candles}
         ${maLines}
-        <text class="chart-axis-text" x="${left}" y="${height - 10}" text-anchor="start">${escapeHtml(firstDate)}</text>
-        <text class="chart-axis-text" x="${width - right}" y="${height - 10}" text-anchor="end">${escapeHtml(lastDate)}</text>
+        <text class="chart-axis-text" x="${left}" y="${height - 12}" text-anchor="start">${escapeHtml(firstDate)}</text>
+        <text class="chart-axis-text" x="${width - right}" y="${height - 12}" text-anchor="end">${escapeHtml(lastDate)}</text>
       </svg>
     </div>
   `;
 }
 
-function renderVolumeChart(enrichedRows) {
-  const rows = enrichedRows.slice(-120);
+function renderVolumeChart(enrichedRows, options = {}) {
+  const range = options.range || "120";
+  const isZoom = Boolean(options.zoom);
+  const rows = getChartRowsByRange(enrichedRows, range);
 
   if (rows.length < 2) {
     return renderEmptyChart("至少需要 2 筆行情資料，才能畫成交量走勢圖。");
   }
 
-  const width = 900;
-  const height = 230;
-  const left = 54;
-  const right = 22;
+  const width = isZoom ? getZoomChartWidth(rows.length, 1120) : 900;
+  const height = isZoom ? 260 : 230;
+  const left = isZoom ? 62 : 54;
+  const right = 28;
   const top = 20;
-  const bottom = 34;
+  const bottom = isZoom ? 42 : 34;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const maxVolume = Math.max(
@@ -589,7 +631,7 @@ function renderVolumeChart(enrichedRows) {
     ...rows.flatMap((row) => [row.volume, row.mv.mv5, row.mv.mv20].filter((value) => value !== null && Number.isFinite(value))),
   );
   const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
-  const barWidth = Math.max(3, Math.min(10, xStep * 0.58));
+  const barWidth = Math.max(isZoom ? 4 : 3, Math.min(isZoom ? 16 : 10, xStep * 0.62));
   const xFor = (index) => left + index * xStep;
   const yFor = (value) => top + ((maxVolume - value) / maxVolume) * chartHeight;
 
@@ -626,19 +668,112 @@ function renderVolumeChart(enrichedRows) {
 
   const firstDate = rows[0]?.date || "";
   const lastDate = rows[rows.length - 1]?.date || "";
+  const zoomClass = isZoom ? " zoom-scroll" : "";
+  const svgStyle = isZoom ? ` style="width:${width}px"` : "";
 
   return `
-    <div class="chart-scroll">
-      <svg class="stock-chart volume-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="成交量走勢圖">
+    <div class="chart-scroll${zoomClass}" data-chart-scroll="true">
+      <svg class="stock-chart volume-chart" viewBox="0 0 ${width} ${height}"${svgStyle} role="img" aria-label="成交量走勢圖">
         <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18" />
         ${gridLines}
         ${bars}
         ${mvLines}
-        <text class="chart-axis-text" x="${left}" y="${height - 9}" text-anchor="start">${escapeHtml(firstDate)}</text>
-        <text class="chart-axis-text" x="${width - right}" y="${height - 9}" text-anchor="end">${escapeHtml(lastDate)}</text>
+        <text class="chart-axis-text" x="${left}" y="${height - 11}" text-anchor="start">${escapeHtml(firstDate)}</text>
+        <text class="chart-axis-text" x="${width - right}" y="${height - 11}" text-anchor="end">${escapeHtml(lastDate)}</text>
       </svg>
     </div>
   `;
+}
+
+function renderChartRangeButtons(activeRange) {
+  return `
+    <div class="chart-range-row" aria-label="圖表區間切換">
+      ${CHART_RANGE_OPTIONS.map((item) => `
+        <button class="chart-range-btn ${item.value === String(activeRange) ? "active" : ""}" type="button" data-chart-range="${escapeHtml(item.value)}">
+          ${escapeHtml(item.label)}
+        </button>
+      `).join("")}
+      <button class="chart-range-btn reset" type="button" data-chart-reset="true">重設</button>
+    </div>
+  `;
+}
+
+function renderChartZoomContent() {
+  const rows = state.chartZoomRows || [];
+  const range = state.chartZoomRange || "60";
+  const visibleRows = getChartRowsByRange(rows, range);
+  const availableCount = rows.length;
+  const latestRow = rows[availableCount - 1] || {};
+  const latestMv5 = latestRow.mv?.mv5;
+  const latestMv20 = latestRow.mv?.mv20;
+
+  if (rows.length < 2) {
+    return renderEmptyChart("目前資料不足，還不能放大圖表。");
+  }
+
+  return `
+    ${renderChartRangeButtons(range)}
+    <div class="chart-zoom-hint">
+      目前顯示 <strong>${escapeHtml(getChartRangeLabel(range))}</strong>，共 <strong>${visibleRows.length}</strong> 筆。圖表可左右拖曳，按「重設」會回到 60 日並移到最新資料。
+    </div>
+    <section class="detail-section chart-section chart-zoom-section">
+      <div class="chart-title-row">
+        <h3>股價走勢圖</h3>
+        <span>${escapeHtml(visibleRows[0]?.date || "-")} ～ ${escapeHtml(visibleRows[visibleRows.length - 1]?.date || "-")}</span>
+      </div>
+      ${renderChartLegend(MOVING_AVERAGE_PERIODS.map((period) => ({ label: `MA${period}`, className: `legend-ma-${period}` })))}
+      ${renderPriceChart(rows, { range, zoom: true })}
+    </section>
+    <section class="detail-section chart-section chart-zoom-section">
+      <div class="chart-title-row">
+        <h3>成交量走勢圖</h3>
+        <span>MV5 / MV20</span>
+      </div>
+      ${renderChartLegend([
+        { label: `MV5 ${latestMv5 !== null && latestMv5 !== undefined ? formatNumber(Math.round(latestMv5)) : `資料不足 ${availableCount}/5`}`, className: "legend-mv-5" },
+        { label: `MV20 ${latestMv20 !== null && latestMv20 !== undefined ? formatNumber(Math.round(latestMv20)) : `資料不足 ${availableCount}/20`}`, className: "legend-mv-20" },
+      ])}
+      ${renderVolumeChart(rows, { range, zoom: true })}
+    </section>
+  `;
+}
+
+function scrollChartZoomToEnd() {
+  window.setTimeout(() => {
+    chartZoomContent?.querySelectorAll("[data-chart-scroll]").forEach((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
+  }, 80);
+}
+
+function openChartZoom() {
+  if (!chartZoomModal || !chartZoomContent) return;
+
+  if (!state.chartZoomRows || state.chartZoomRows.length < 2) {
+    showStatus("目前圖表資料不足，無法放大查看。", "error");
+    return;
+  }
+
+  chartZoomTitle.textContent = state.chartZoomTitle || "技術圖表";
+  chartZoomContent.innerHTML = renderChartZoomContent();
+  chartZoomModal.classList.remove("hidden");
+  chartZoomModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("chart-zoom-open");
+  scrollChartZoomToEnd();
+}
+
+function closeChartZoom() {
+  if (!chartZoomModal) return;
+
+  chartZoomModal.classList.add("hidden");
+  chartZoomModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("chart-zoom-open");
+}
+
+function rerenderChartZoom(rangeValue) {
+  state.chartZoomRange = rangeValue;
+  chartZoomContent.innerHTML = renderChartZoomContent();
+  scrollChartZoomToEnd();
 }
 
 function renderChartLegend(items) {
@@ -657,10 +792,16 @@ function renderTechnicalCharts(enrichedRows) {
 
   return `
     <section class="detail-section chart-section">
-      <h3>股價走勢圖</h3>
+      <div class="chart-header-row">
+        <div>
+          <h3>股價走勢圖</h3>
+          <p>預設顯示最近 ${Math.min(availableCount, 120)} 筆行情，點放大可切換區間。</p>
+        </div>
+        <button class="chart-expand-btn" type="button" data-chart-expand="true">放大圖表</button>
+      </div>
       ${renderChartLegend(MOVING_AVERAGE_PERIODS.map((period) => ({ label: `MA${period}`, className: `legend-ma-${period}` })))}
-      ${renderPriceChart(enrichedRows)}
-      <p class="chart-note">顯示最近 ${Math.min(availableCount, 120)} 筆行情；MA 是收盤價平均。</p>
+      ${renderPriceChart(enrichedRows, { range: "120" })}
+      <p class="chart-note">MA 是收盤價平均。若 K 棒太密，請按「放大圖表」切換 20 / 60 / 120 / 240 日。</p>
     </section>
     <section class="detail-section chart-section">
       <h3>成交量走勢圖</h3>
@@ -668,7 +809,7 @@ function renderTechnicalCharts(enrichedRows) {
         { label: `MV5 ${latestMv5 !== null && latestMv5 !== undefined ? formatNumber(Math.round(latestMv5)) : `資料不足 ${availableCount}/5`}`, className: "legend-mv-5" },
         { label: `MV20 ${latestMv20 !== null && latestMv20 !== undefined ? formatNumber(Math.round(latestMv20)) : `資料不足 ${availableCount}/20`}`, className: "legend-mv-20" },
       ])}
-      ${renderVolumeChart(enrichedRows)}
+      ${renderVolumeChart(enrichedRows, { range: "120" })}
       <p class="chart-note">成交量單位依資料庫目前匯入值顯示；若匯入程式為張數，這裡就是張數。</p>
     </section>
   `;
@@ -2064,6 +2205,10 @@ async function openDetail(stockCode) {
     const closePrice = pick(latestPrice, ["close_price", "closing_price", "close"], pick(summaryData, ["close_price", "closing_price", "close"], "-"));
     const change = pick(latestPrice, ["price_change", "change", "change_price"], pick(summaryData, ["price_change", "change", "change_price"], "-"));
 
+    state.chartZoomRows = enrichedPriceRows;
+    state.chartZoomRange = "60";
+    state.chartZoomTitle = `${stockName} ${stockCode} 技術圖表`;
+
     detailTitle.textContent = `${stockName} ${stockCode}`;
 
     detailContent.innerHTML = [
@@ -2119,6 +2264,7 @@ async function openDetail(stockCode) {
 }
 
 function closeDetail() {
+  closeChartZoom();
   detailModal.classList.add("hidden");
   detailModal.setAttribute("aria-hidden", "true");
 }
@@ -2216,8 +2362,42 @@ detailModal.addEventListener("click", (event) => {
   if (event.target.dataset.close === "true") closeDetail();
 });
 
+detailContent.addEventListener("click", (event) => {
+  const expandButton = event.target.closest("[data-chart-expand]");
+  if (expandButton) {
+    openChartZoom();
+  }
+});
+
+chartZoomContent?.addEventListener("click", (event) => {
+  const rangeButton = event.target.closest("[data-chart-range]");
+  if (rangeButton) {
+    rerenderChartZoom(rangeButton.dataset.chartRange);
+    return;
+  }
+
+  const resetButton = event.target.closest("[data-chart-reset]");
+  if (resetButton) {
+    rerenderChartZoom("60");
+  }
+});
+
+closeChartZoomBtn?.addEventListener("click", closeChartZoom);
+
+chartZoomModal?.addEventListener("click", (event) => {
+  if (event.target.dataset.chartZoomClose === "true") closeChartZoom();
+});
+
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeDetail();
+  if (event.key !== "Escape") return;
+
+  if (chartZoomModal && !chartZoomModal.classList.contains("hidden")) {
+    closeChartZoom();
+    return;
+  }
+
+  closeDetail();
 });
 
 window.addEventListener("beforeinstallprompt", (event) => {

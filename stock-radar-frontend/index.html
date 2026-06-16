@@ -100,6 +100,22 @@
     </div>
   </div>
 
+  <div id="chartZoomModal" class="chart-zoom-modal hidden" aria-hidden="true">
+    <div class="chart-zoom-backdrop" data-chart-zoom-close="true"></div>
+    <div class="chart-zoom-card" role="dialog" aria-modal="true" aria-labelledby="chartZoomTitle">
+      <div class="chart-zoom-header">
+        <div>
+          <p class="eyebrow">放大圖表</p>
+          <h2 id="chartZoomTitle">技術圖表</h2>
+          <p class="chart-zoom-subtitle">可切換區間，並左右拖曳查看前後 K 線。</p>
+        </div>
+        <button id="closeChartZoomBtn" class="close-btn" type="button" aria-label="關閉放大圖表">×</button>
+      </div>
+      <div id="chartZoomContent" class="chart-zoom-content"></div>
+    </div>
+  </div>
+
+
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
