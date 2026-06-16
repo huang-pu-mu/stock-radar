@@ -77,6 +77,20 @@ function formatNumber(value) {
   return numberValue.toLocaleString("zh-TW");
 }
 
+function formatLotsValue(lotsValue, sharesValue) {
+  const lots = toNumber(lotsValue);
+  if (lots !== null) {
+    return lots.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+  }
+
+  const shares = toNumber(sharesValue);
+  if (shares !== null) {
+    return (shares / 1000).toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+  }
+
+  return "-";
+}
+
 function formatPrice(value) {
   const numberValue = toNumber(value);
   if (numberValue === null) return escapeHtml(value ?? "-");
@@ -173,8 +187,14 @@ async function fetchJson(path) {
 }
 
 function buildListPath() {
-  const endpoint = state.page === "foreign" ? "/foreign/top" : "/radar/top";
   const params = new URLSearchParams();
+
+  if (state.page === "trust") {
+    params.set("limit", "100");
+    return `/radar/investment-trust-ranking?${params.toString()}`;
+  }
+
+  const endpoint = state.page === "foreign" ? "/foreign/top" : "/radar/top";
   params.set("limit", String(state.limit));
   if (state.market) params.set("market", state.market);
   return `${endpoint}?${params.toString()}`;
@@ -201,6 +221,13 @@ function updatePageText() {
     pageTitle.textContent = "外資排行";
     pageDesc.textContent = `${marketText}外資買超排行，先看外資今天買最多的股票。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資買超越大，代表外資今天買進力道越明顯；點「看明細」可以看投信與成交量。</span>`;
+    return;
+  }
+
+  if (state.page === "trust") {
+    pageTitle.textContent = "投信排行";
+    pageDesc.textContent = `${marketText}投信連買排行，先看投信連續買進、累計買超大的股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>投信連買天數越多、累計買超越大，代表投信近期買進態度越明顯；點「看明細」可以看完整籌碼。</span>`;
     return;
   }
 
@@ -258,7 +285,87 @@ function renderSearchIntro() {
   `;
 }
 
+
+function getTrustStrengthClass(days) {
+  const numberValue = toNumber(days);
+  if (numberValue === null) return "score-low";
+  if (numberValue >= 5) return "score-high";
+  if (numberValue >= 2) return "score-mid";
+  return "score-low";
+}
+
+function getTrustStrengthText(days) {
+  const numberValue = toNumber(days);
+  if (numberValue === null) return "尚無資料";
+  if (numberValue >= 5) return "投信強買";
+  if (numberValue >= 2) return "投信偏多";
+  return "單日買超";
+}
+
+function renderTrustCard(row, index) {
+  const code = pick(row, ["stock_code", "code"]);
+  const name = pick(row, ["stock_name", "name"]);
+  const market = pick(row, ["market_type", "market"]);
+  const industry = pick(row, ["industry"], "-");
+  const tradeDate = pick(row, ["trade_date", "date"], "-");
+  const buyDays = pick(row, ["investment_trust_buy_days", "trust_buy_days", "buy_days"], "-");
+  const todayLots = formatLotsValue(
+    pick(row, ["today_investment_trust_net_lots", "today_trust_net_lots"], "-"),
+    pick(row, ["today_investment_trust_net_shares", "today_trust_net_shares"], "-"),
+  );
+  const totalLots = formatLotsValue(
+    pick(row, ["total_investment_trust_net_lots", "total_trust_net_lots"], "-"),
+    pick(row, ["total_investment_trust_net_shares", "total_trust_net_shares"], "-"),
+  );
+  const strengthClass = getTrustStrengthClass(buyDays);
+  const strengthText = getTrustStrengthText(buyDays);
+  const buyDaysText = toNumber(buyDays) === null ? "-" : `${formatNumber(buyDays)} 天`;
+
+  const trustItems = [
+    createInfoItem("連買天數", escapeHtml(buyDaysText), strengthClass),
+    createInfoItem("今日買超", `${todayLots} 張`, "price-up"),
+    createInfoItem("累計買超", `${totalLots} 張`, "price-up"),
+    createInfoItem("市場別", escapeHtml(market)),
+    createInfoItem("產業", escapeHtml(industry)),
+    createInfoItem("資料日", formatDate(tradeDate)),
+  ].join("");
+
+  return `
+    <article class="stock-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatNumber(buyDays)}</span>
+          <span class="score-label">連買天數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(strengthText)}</span>
+        <span class="summary-text">今日買超 <strong class="price-up">${todayLots}</strong> 張，累計 <strong class="price-up">${totalLots}</strong> 張</span>
+      </div>
+
+      <div class="info-grid">
+        ${trustItems}
+      </div>
+
+      <div class="card-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+        <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderStockCard(row, index) {
+  if (state.page === "trust") return renderTrustCard(row, index);
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
@@ -543,7 +650,17 @@ async function loadList() {
 
   try {
     const rows = await fetchJson(buildListPath());
-    state.latestRows = Array.isArray(rows) ? rows : [];
+    let latestRows = Array.isArray(rows) ? rows : [];
+
+    if (state.page === "trust") {
+      if (state.market) {
+        latestRows = latestRows.filter((row) => pick(row, ["market_type", "market"], "") === state.market);
+      }
+
+      latestRows = latestRows.slice(0, state.limit);
+    }
+
+    state.latestRows = latestRows;
 
     if (state.latestRows.length === 0) {
       stockList.innerHTML = "";
