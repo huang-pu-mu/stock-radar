@@ -1375,8 +1375,9 @@ function renderSyncBuyCard(row, index) {
         <span class="summary-text">外資 <strong class="price-up">${todayForeignLots}</strong> 張＋投信 <strong class="price-up">${todayTrustLots}</strong> 張，同步合計 <strong class="price-up">${todaySyncLots}</strong> 張</span>
       </div>
 
-      <div class="quick-summary secondary-summary">
-        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+      <div class="quick-summary secondary-summary price-summary">
+        <span class="price-metric">收盤 ${formatDirectionalClosePrice(closePrice, change)}</span>
+        <span class="price-metric">漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
       </div>
 
       <div class="info-grid">
@@ -1411,7 +1412,7 @@ function renderIndustryTopStocks(topStocks) {
 
   return `
     <div class="industry-leaders">
-      ${rows.map((stock) => {
+      ${rows.map((stock, leaderIndex) => {
         const code = pick(stock, ["stock_code", "code"], "-");
         const name = pick(stock, ["stock_name", "name"], "-");
         const totalLots = formatLotsValue(pick(stock, ["total_net_lots", "total_net"], "-"));
@@ -1420,8 +1421,16 @@ function renderIndustryTopStocks(topStocks) {
 
         return `
           <button class="industry-leader-btn detail-btn" type="button" data-code="${escapeHtml(code)}">
-            <span class="leader-name">${escapeHtml(name)} <small>${escapeHtml(code)}</small></span>
-            <span class="leader-meta">法人 ${totalLots} 張｜分數 ${formatNumber(chipScore)}｜漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+            <span class="leader-left">
+              <span class="leader-rank">TOP ${leaderIndex + 1}</span>
+              <span class="leader-name">${escapeHtml(name)}</span>
+              <span class="leader-code">${escapeHtml(code)}</span>
+            </span>
+            <span class="leader-stats">
+              <span>法人 <strong class="${getChangeClass(totalLots)}">${totalLots}</strong> 張</span>
+              <span>分數 <strong>${formatNumber(chipScore)}</strong></span>
+              <span>漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+            </span>
           </button>
         `;
       }).join("")}
@@ -1639,8 +1648,9 @@ function renderMajorHolderCard(row, index) {
         <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange)}">${formatPercent(largeRatio)}</strong>，本週變化 <strong class="${getChangeClass(largeRatioChange)}">${formatSignedPercent(largeRatioChange)}</strong></span>
       </div>
 
-      <div class="quick-summary secondary-summary">
-        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+      <div class="quick-summary secondary-summary price-summary">
+        <span class="price-metric">收盤 ${formatDirectionalClosePrice(closePrice, change)}</span>
+        <span class="price-metric">漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
       </div>
 
       <div class="info-grid major-holder-grid">
