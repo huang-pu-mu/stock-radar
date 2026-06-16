@@ -170,6 +170,57 @@ app.get("/prices/:stockCode", async (req, res) => {
   }
 });
 
+app.get("/institutional-trades/:stockCode", async (req, res) => {
+  try {
+    const stockCode = req.params.stockCode;
+    const limit = Number(req.query.limit) || 30;
+
+    const trades = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+
+        CAST(foreign_buy AS CHAR) AS foreign_buy,
+        CAST(foreign_sell AS CHAR) AS foreign_sell,
+        CAST(foreign_net AS CHAR) AS foreign_net,
+
+        CAST(investment_trust_buy AS CHAR) AS investment_trust_buy,
+        CAST(investment_trust_sell AS CHAR) AS investment_trust_sell,
+        CAST(investment_trust_net AS CHAR) AS investment_trust_net,
+
+        CAST(dealer_buy AS CHAR) AS dealer_buy,
+        CAST(dealer_sell AS CHAR) AS dealer_sell,
+        CAST(dealer_net AS CHAR) AS dealer_net,
+
+        CAST(total_net AS CHAR) AS total_net,
+
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM institutional_trades
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT ?
+      `,
+      [stockCode, limit],
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      count: trades.length,
+      data: trades,
+    });
+  } catch (error) {
+    console.error("Get institutional trades failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get institutional trades failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
