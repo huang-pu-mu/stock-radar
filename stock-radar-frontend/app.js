@@ -263,6 +263,12 @@ function buildListPath() {
     return `/radar/industry-flow?${params.toString()}`;
   }
 
+  if (state.page === "majorHolder") {
+    params.set("limit", "100");
+    if (state.market) params.set("market", state.market);
+    return `/radar/major-holder?${params.toString()}`;
+  }
+
   const endpoint = state.page === "foreign" ? "/foreign/top" : "/radar/top";
   params.set("limit", String(state.limit));
   if (state.market) params.set("market", state.market);
@@ -334,6 +340,13 @@ function updatePageText() {
     pageTitle.textContent = "產業資金流向";
     pageDesc.textContent = `${marketText}依產業彙總三大法人買賣超，先看資金今天流入哪個產業。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>法人合計買超越大，代表該產業今天資金流入越明顯；再看外資、投信是否同向，以及產業內買超家數。</span>`;
+    return;
+  }
+
+  if (state.page === "majorHolder") {
+    pageTitle.textContent = "主力籌碼分析";
+    pageDesc.textContent = `${marketText}用 TDCC 集保股權分散資料，看 400 張以上大戶持股是否增加。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>大戶比重上升、散戶比重下降，代表籌碼可能更集中；這是每週資料，不是每日即時資料。</span>`;
     return;
   }
 
@@ -1488,7 +1501,162 @@ function renderIndustryFlowCard(row, index) {
   `;
 }
 
+function formatSignedPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatSignedLots(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`;
+}
+
+function getMajorHolderStrengthClass(score, ratioChange) {
+  const scoreValue = toNumber(score);
+  const changeValue = toNumber(ratioChange);
+  if ((scoreValue !== null && scoreValue >= 15) || (changeValue !== null && changeValue >= 1)) return "score-high";
+  if ((scoreValue !== null && scoreValue >= 8) || (changeValue !== null && changeValue > 0)) return "score-mid";
+  return "score-low";
+}
+
+function renderMajorHolderTrend(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `<div class="major-holder-history empty">尚無大戶歷史資料。</div>`;
+  }
+
+  return `
+    <div class="major-holder-history">
+      ${rows.slice(0, 8).map((row) => {
+        const ratio = pick(row, ["large_holder_ratio"], "-");
+        const ratioChange = pick(row, ["large_holder_ratio_change"], "-");
+        const smallRatio = pick(row, ["small_holder_ratio"], "-");
+        const shareChange = pick(row, ["large_holder_share_change_lots", "large_holder_share_change"], "-");
+        return `
+          <div class="major-history-row">
+            <strong>${formatDate(pick(row, ["data_date"]))}</strong>
+            <span>大戶 ${formatPercent(ratio)}</span>
+            <span class="${getChangeClass(ratioChange)}">${formatSignedPercent(ratioChange)}</span>
+            <span>散戶 ${formatPercent(smallRatio)}</span>
+            <span class="${getChangeClass(shareChange)}">${formatSignedLots(shareChange)} 張</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderMajorHolderDetailSection(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `
+      <section class="detail-section">
+        <h3>主力 / 大戶籌碼</h3>
+        <div class="status-box">尚未匯入 TDCC 集保大戶資料。</div>
+      </section>
+    `;
+  }
+
+  const latest = rows[0];
+  const score = pick(latest, ["major_holder_score", "big_holder_score"], "-");
+  const ratioChange = pick(latest, ["large_holder_ratio_change"], "-");
+
+  return [
+    renderDetailSection("主力 / 大戶籌碼", [
+      createStatusItem("狀態", pick(latest, ["major_holder_status", "big_holder_status"])),
+      createInfoItem("大戶分數", formatNumber(score), getMajorHolderStrengthClass(score, ratioChange)),
+      createInfoItem("大戶比重", formatPercent(pick(latest, ["large_holder_ratio"])), getChangeClass(ratioChange)),
+      createInfoItem("比重變化", formatSignedPercent(ratioChange), getChangeClass(ratioChange)),
+      createInfoItem("大戶人數", formatNumber(pick(latest, ["large_holder_count"]))),
+      createInfoItem("大戶張數", `${formatNumber(pick(latest, ["large_holder_share_count_lots"]))} 張`),
+      createInfoItem("散戶比重", formatPercent(pick(latest, ["small_holder_ratio"])), getChangeClass(pick(latest, ["small_holder_ratio_change"]))),
+      createInfoItem("千張大戶", formatPercent(pick(latest, ["thousand_lot_ratio"]))),
+      createInfoItem("資料日", formatDate(pick(latest, ["data_date"]))),
+    ]),
+    `
+      <section class="detail-section">
+        <h3>大戶週變化</h3>
+        ${renderMajorHolderTrend(rows)}
+      </section>
+    `,
+  ].join("");
+}
+
+function renderMajorHolderCard(row, index) {
+  const code = pick(row, ["stock_code", "code"]);
+  const name = pick(row, ["stock_name", "name"]);
+  const market = pick(row, ["market_type", "market"]);
+  const industry = pick(row, ["industry"], "-");
+  const dataDate = pick(row, ["data_date"], "-");
+  const tradeDate = pick(row, ["trade_date"], "-");
+  const majorScore = pick(row, ["major_holder_score", "big_holder_score"], "-");
+  const status = pick(row, ["major_holder_status", "big_holder_status"], "大戶資料累積中");
+  const largeRatio = pick(row, ["large_holder_ratio"], "-");
+  const largeRatioChange = pick(row, ["large_holder_ratio_change"], "-");
+  const largeShareLots = pick(row, ["large_holder_share_count_lots"], "-");
+  const largeShareChangeLots = pick(row, ["large_holder_share_change_lots"], "-");
+  const smallRatio = pick(row, ["small_holder_ratio"], "-");
+  const smallRatioChange = pick(row, ["small_holder_ratio_change"], "-");
+  const thousandRatio = pick(row, ["thousand_lot_ratio"], "-");
+  const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
+  const change = pick(row, ["price_change", "change", "change_price"], "-");
+  const chipScore = pick(row, ["chip_score", "total_score", "score"], "-");
+  const strengthClass = getMajorHolderStrengthClass(majorScore, largeRatioChange);
+
+  const items = [
+    createInfoItem("大戶比重", formatPercent(largeRatio), getChangeClass(largeRatioChange)),
+    createInfoItem("比重變化", formatSignedPercent(largeRatioChange), getChangeClass(largeRatioChange)),
+    createInfoItem("大戶張數", `${formatNumber(largeShareLots)} 張`),
+    createInfoItem("張數變化", `${formatSignedLots(largeShareChangeLots)} 張`, getChangeClass(largeShareChangeLots)),
+    createInfoItem("大戶人數", formatNumber(pick(row, ["large_holder_count"]))),
+    createInfoItem("散戶比重", formatPercent(smallRatio), getChangeClass(smallRatioChange)),
+    createInfoItem("千張大戶", formatPercent(thousandRatio)),
+    createInfoItem("籌碼分數", formatNumber(chipScore), getScoreClass(chipScore)),
+  ].join("");
+
+  return `
+    <article class="stock-card major-holder-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge">${escapeHtml(industry)}</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatNumber(majorScore)}</span>
+          <span class="score-label">大戶分數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(status)}</span>
+        <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange)}">${formatPercent(largeRatio)}</strong>，本週變化 <strong class="${getChangeClass(largeRatioChange)}">${formatSignedPercent(largeRatioChange)}</strong></span>
+      </div>
+
+      <div class="quick-summary secondary-summary">
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+      </div>
+
+      <div class="info-grid major-holder-grid">
+        ${items}
+      </div>
+
+      <div class="card-actions">
+        <span class="card-note">集保日：${formatDate(dataDate)}｜行情日：${formatDate(tradeDate)}</span>
+        ${getCardActionButtons(code, "看明細", index)}
+      </div>
+    </article>
+  `;
+}
+
 function renderStockCard(row, index) {
+  if (state.page === "majorHolder") return renderMajorHolderCard(row, index);
   if (state.page === "industryFlow") return renderIndustryFlowCard(row, index);
   if (state.page === "foreignStreak") return renderForeignStreakCard(row, index);
   if (state.page === "trust") return renderTrustCard(row, index);
@@ -1817,7 +1985,7 @@ async function loadList() {
     const rows = await fetchJson(buildListPath());
     let latestRows = Array.isArray(rows) ? rows : [];
 
-    if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow") {
+    if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
       if (state.market && state.page !== "industryFlow") {
         latestRows = latestRows.filter((row) => pick(row, ["market_type", "market"], "") === state.market);
       }
@@ -1860,11 +2028,12 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, prices, trades, scores] = await Promise.allSettled([
+    const [summary, prices, trades, scores, holders] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
+      fetchJson(`/major-holders/${stockCode}?limit=12`),
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
@@ -1872,6 +2041,7 @@ async function openDetail(stockCode) {
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
     const scoreRows = scores.status === "fulfilled" && Array.isArray(scores.value) ? scores.value : [];
+    const holderRows = holders.status === "fulfilled" && Array.isArray(holders.value) ? holders.value : [];
 
     const latestPrice = priceRows[0] || summaryData || {};
     const latestTrade = tradeRows[0] || summaryData || {};
@@ -1917,6 +2087,7 @@ async function openDetail(stockCode) {
         createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
+      renderMajorHolderDetailSection(holderRows),
       renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),

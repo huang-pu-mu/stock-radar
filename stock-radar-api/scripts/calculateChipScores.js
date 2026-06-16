@@ -97,7 +97,64 @@ function getPricePosition(closePrice, ma5, ma10, high20, low20, availableDays, p
   return `股價資料累積中（${availableDays}/20）`;
 }
 
-function calculateScore(prices, institutionalRows) {
+function getBigHolderScore(majorHolderRows) {
+  const latest = majorHolderRows[0];
+  const previous = majorHolderRows[1];
+
+  if (!latest) return 0;
+
+  const latestLargeRatio = number(latest.large_holder_ratio);
+  const previousLargeRatio = previous ? number(previous.large_holder_ratio) : latestLargeRatio;
+  const latestSmallRatio = number(latest.small_holder_ratio);
+  const previousSmallRatio = previous ? number(previous.small_holder_ratio) : latestSmallRatio;
+  const latestLargeShares = number(latest.large_holder_share_count);
+  const previousLargeShares = previous ? number(previous.large_holder_share_count) : latestLargeShares;
+  const latestLargeCount = number(latest.large_holder_count);
+  const previousLargeCount = previous ? number(previous.large_holder_count) : latestLargeCount;
+
+  const largeRatioChange = latestLargeRatio - previousLargeRatio;
+  const smallRatioChange = latestSmallRatio - previousSmallRatio;
+  const largeShareChange = latestLargeShares - previousLargeShares;
+  const largeCountChange = latestLargeCount - previousLargeCount;
+
+  let score = 0;
+
+  if (latestLargeRatio >= 60) score += 6;
+  else if (latestLargeRatio >= 40) score += 4;
+  else if (latestLargeRatio >= 25) score += 2;
+
+  if (largeRatioChange >= 1) score += 8;
+  else if (largeRatioChange >= 0.3) score += 5;
+  else if (largeRatioChange > 0) score += 3;
+
+  if (largeShareChange > 0) score += 4;
+  if (smallRatioChange < -0.3 && largeRatioChange > 0) score += 4;
+  if (largeCountChange > 0 && largeRatioChange > 0) score += 2;
+
+  return clamp(score, 0, 20);
+}
+
+function getBigHolderStatus(majorHolderRows) {
+  const latest = majorHolderRows[0];
+  const previous = majorHolderRows[1];
+
+  if (!latest) return "尚未匯入大戶資料";
+  if (!previous) return "大戶資料累積中";
+
+  const largeRatioChange = number(latest.large_holder_ratio) - number(previous.large_holder_ratio);
+  const smallRatioChange = number(latest.small_holder_ratio) - number(previous.small_holder_ratio);
+  const largeShareChange = number(latest.large_holder_share_count) - number(previous.large_holder_share_count);
+
+  if (largeRatioChange >= 1 && largeShareChange > 0) return "大戶明顯增加";
+  if (largeRatioChange >= 0.3 && smallRatioChange < 0) return "籌碼集中";
+  if (largeRatioChange > 0) return "大戶比重上升";
+  if (largeRatioChange <= -1) return "大戶明顯減少";
+  if (largeRatioChange < 0) return "大戶比重下降";
+
+  return "大戶持股穩定";
+}
+
+function calculateScore(prices, institutionalRows, majorHolderRows = []) {
   const latestPrice = prices[0];
   const previousPrice = prices[1] || null;
 
@@ -208,7 +265,7 @@ function calculateScore(prices, institutionalRows) {
 
   priceScore = clamp(priceScore, 0, 20);
 
-  const bigHolderScore = 0;
+  const bigHolderScore = getBigHolderScore(majorHolderRows);
 
   const chipScore = clamp(
     foreignScore +
@@ -247,7 +304,7 @@ function calculateScore(prices, institutionalRows) {
         : latestDealerNet < 0
           ? "自營商賣超"
           : "自營商中性",
-    bigHolderStatus: "尚未匯入大戶資料",
+    bigHolderStatus: getBigHolderStatus(majorHolderRows),
     volumeStatus: getVolumeStatus(latestVolume, avg20Volume, availableDays, shortAvgVolume),
     pricePosition: getPricePosition(
       latestClose,
@@ -267,6 +324,14 @@ async function main() {
 
   try {
     console.log(`開始計算籌碼分數：${tradeDate}`);
+
+    let hasMajorHolderTable = false;
+    try {
+      await conn.query("SELECT 1 FROM major_holder_stats LIMIT 1");
+      hasMajorHolderTable = true;
+    } catch (error) {
+      console.log("尚未建立 major_holder_stats，這次先不計入大戶分數");
+    }
 
     const stocks = await conn.query(
       `
@@ -349,7 +414,33 @@ async function main() {
         [stock.stock_code, tradeDate],
       );
 
-      const result = calculateScore(prices, institutionalRows);
+      let majorHolderRows = [];
+
+      if (hasMajorHolderTable) {
+        majorHolderRows = await conn.query(
+          `
+          SELECT
+            data_date,
+            large_holder_count,
+            large_holder_share_count,
+            large_holder_ratio,
+            small_holder_count,
+            small_holder_share_count,
+            small_holder_ratio,
+            thousand_lot_holder_count,
+            thousand_lot_share_count,
+            thousand_lot_ratio
+          FROM major_holder_stats
+          WHERE stock_code = ?
+            AND data_date <= ?
+          ORDER BY data_date DESC
+          LIMIT 6
+          `,
+          [stock.stock_code, tradeDate],
+        );
+      }
+
+      const result = calculateScore(prices, institutionalRows, majorHolderRows);
 
       await conn.query(
         `

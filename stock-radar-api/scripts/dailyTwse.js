@@ -55,7 +55,15 @@ async function main() {
     await runCommand(["scripts/updateIndustries.js"]);
 
     console.log("");
-    console.log("步驟 4：計算上市＋上櫃籌碼分數");
+    console.log("步驟 4：匯入 TDCC 集保大戶籌碼資料");
+    try {
+      await runCommand(["scripts/importMajorHolders.js"]);
+    } catch (error) {
+      console.log("集保大戶資料匯入失敗，先保留其他每日資料流程。原因：" + error.message);
+    }
+
+    console.log("");
+    console.log("步驟 5：計算上市＋上櫃籌碼分數");
     await runCommand(["scripts/calculateChipScores.js", tradeDate]);
 
     console.log("");
@@ -66,6 +74,7 @@ async function main() {
     console.log("http://localhost:3000/radar/top");
     console.log("http://localhost:3000/foreign/top");
     console.log("http://localhost:3000/radar/today");
+    console.log("http://localhost:3000/radar/major-holder");
     console.log("====================================");
   } catch (error) {
     console.error("");

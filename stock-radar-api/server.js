@@ -225,6 +225,69 @@ function isValidDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
+
+function toPlainNumber(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  const numberValue = Number(String(value).replaceAll(",", ""));
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function calculateMajorHolderScore(row) {
+  const largeRatio = toPlainNumber(row.large_holder_ratio);
+  const largeRatioChange = toPlainNumber(row.large_holder_ratio_change);
+  const smallRatioChange = toPlainNumber(row.small_holder_ratio_change);
+  const largeShareChange = toPlainNumber(row.large_holder_share_change);
+  const largeCountChange = toPlainNumber(row.large_holder_count_change);
+
+  let score = 0;
+
+  if (largeRatio >= 60) score += 6;
+  else if (largeRatio >= 40) score += 4;
+  else if (largeRatio >= 25) score += 2;
+
+  if (largeRatioChange >= 1) score += 8;
+  else if (largeRatioChange >= 0.3) score += 5;
+  else if (largeRatioChange > 0) score += 3;
+
+  if (largeShareChange > 0) score += 4;
+  if (smallRatioChange < -0.3 && largeRatioChange > 0) score += 4;
+  if (largeCountChange > 0 && largeRatioChange > 0) score += 2;
+
+  return Math.max(0, Math.min(score, 20));
+}
+
+function getMajorHolderStatus(row) {
+  const hasPrevious = Number(row.has_previous || 0) === 1;
+
+  if (!hasPrevious) return "大戶資料累積中";
+
+  const largeRatioChange = toPlainNumber(row.large_holder_ratio_change);
+  const smallRatioChange = toPlainNumber(row.small_holder_ratio_change);
+  const largeShareChange = toPlainNumber(row.large_holder_share_change);
+
+  if (largeRatioChange >= 1 && largeShareChange > 0) return "大戶明顯增加";
+  if (largeRatioChange >= 0.3 && smallRatioChange < 0) return "籌碼集中";
+  if (largeRatioChange > 0) return "大戶比重上升";
+  if (largeRatioChange <= -1) return "大戶明顯減少";
+  if (largeRatioChange < 0) return "大戶比重下降";
+
+  return "大戶持股穩定";
+}
+
+function enrichMajorHolderRow(row) {
+  const majorHolderScore = calculateMajorHolderScore(row);
+
+  return {
+    ...row,
+    major_holder_score: majorHolderScore,
+    major_holder_status: getMajorHolderStatus(row),
+    large_holder_share_change_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_change)),
+    large_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_count)),
+    small_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.small_holder_share_count)),
+    thousand_lot_share_count_lots: sharesToLotsString(toBigIntValue(row.thousand_lot_share_count)),
+  };
+}
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
@@ -1531,6 +1594,288 @@ app.get("/radar/industry-flow", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢產業資金流向失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// 主力籌碼分析：TDCC 集保大戶資料
+// GET /major-holders/status
+// GET /major-holders/:stockCode?limit=12
+// GET /radar/major-holder?market=上市&limit=30&date=YYYY-MM-DD
+// ==============================
+app.get("/major-holders/status", async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT
+        DATE_FORMAT(MAX(data_date), '%Y-%m-%d') AS latest_date,
+        COUNT(DISTINCT stock_code) AS stock_count,
+        COUNT(*) AS row_count,
+        COUNT(DISTINCT data_date) AS date_count
+      FROM major_holder_stats
+    `);
+
+    const byDate = await query(`
+      SELECT
+        DATE_FORMAT(data_date, '%Y-%m-%d') AS data_date,
+        COUNT(DISTINCT stock_code) AS stock_count
+      FROM major_holder_stats
+      GROUP BY data_date
+      ORDER BY data_date DESC
+      LIMIT 8
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        latest_date: rows[0]?.latest_date || null,
+        stock_count: Number(rows[0]?.stock_count || 0),
+        row_count: Number(rows[0]?.row_count || 0),
+        date_count: Number(rows[0]?.date_count || 0),
+        history: convertBigIntToString(byDate),
+      },
+    });
+  } catch (error) {
+    console.error("查詢大戶籌碼狀態失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢大戶籌碼狀態失敗，請先執行 npm run major-holders:import 建立並匯入資料。",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/major-holders/:stockCode", async (req, res) => {
+  try {
+    const stockCode = String(req.params.stockCode || "").trim();
+    const limit = parseLimit(req.query.limit, 12, 60);
+
+    if (!stockCode) {
+      return res.status(400).json({
+        success: false,
+        message: "請輸入股票代號",
+      });
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
+        m.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        m.total_holder_count,
+        CAST(m.total_share_count AS CHAR) AS total_share_count,
+        m.small_holder_count,
+        CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
+        m.small_holder_ratio,
+        m.mid_holder_count,
+        CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
+        m.mid_holder_ratio,
+        m.large_holder_count,
+        CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
+        m.large_holder_ratio,
+        m.thousand_lot_holder_count,
+        CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
+        m.thousand_lot_ratio,
+        m.avg_large_holder_lots,
+        CASE WHEN p.id IS NULL THEN 0 ELSE 1 END AS has_previous,
+        CAST((m.large_holder_count - COALESCE(p.large_holder_count, m.large_holder_count)) AS CHAR) AS large_holder_count_change,
+        CAST((m.large_holder_share_count - COALESCE(p.large_holder_share_count, m.large_holder_share_count)) AS CHAR) AS large_holder_share_change,
+        ROUND(m.large_holder_ratio - COALESCE(p.large_holder_ratio, m.large_holder_ratio), 4) AS large_holder_ratio_change,
+        ROUND(m.small_holder_ratio - COALESCE(p.small_holder_ratio, m.small_holder_ratio), 4) AS small_holder_ratio_change,
+        ROUND(m.thousand_lot_ratio - COALESCE(p.thousand_lot_ratio, m.thousand_lot_ratio), 4) AS thousand_lot_ratio_change
+      FROM major_holder_stats m
+      LEFT JOIN stocks s
+        ON m.stock_code = s.stock_code
+      LEFT JOIN major_holder_stats p
+        ON p.stock_code = m.stock_code
+       AND p.data_date = (
+          SELECT MAX(p2.data_date)
+          FROM major_holder_stats p2
+          WHERE p2.stock_code = m.stock_code
+            AND p2.data_date < m.data_date
+       )
+      WHERE m.stock_code = ?
+      ORDER BY m.data_date DESC
+      LIMIT ?
+      `,
+      [stockCode, limit],
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      count: rows.length,
+      data: convertBigIntToString(rows.map(enrichMajorHolderRow)),
+    });
+  } catch (error) {
+    console.error("查詢個股大戶籌碼失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股大戶籌碼失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/radar/major-holder", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    let targetDate = queryDate;
+
+    if (queryDate) {
+      const latestRows = await query(
+        `
+        SELECT DATE_FORMAT(MAX(data_date), '%Y-%m-%d') AS latest_date
+        FROM major_holder_stats
+        WHERE data_date <= ?
+        `,
+        [queryDate],
+      );
+
+      targetDate = latestRows[0]?.latest_date || null;
+    } else {
+      const latestRows = await query(`
+        SELECT DATE_FORMAT(MAX(data_date), '%Y-%m-%d') AS latest_date
+        FROM major_holder_stats
+      `);
+
+      targetDate = latestRows[0]?.latest_date || null;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        data_date: null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const latestTradeRows = await query(`
+      SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_trade_date
+      FROM daily_prices
+    `);
+    const latestTradeDate = latestTradeRows[0]?.latest_trade_date || targetDate;
+
+    const params = [latestTradeDate, latestTradeDate, targetDate];
+    let marketCondition = "";
+
+    if (market) {
+      marketCondition = "AND s.market_type = ?";
+      params.push(market);
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
+        DATE_FORMAT(dp.trade_date, '%Y-%m-%d') AS trade_date,
+        m.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        m.total_holder_count,
+        CAST(m.total_share_count AS CHAR) AS total_share_count,
+        m.small_holder_count,
+        CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
+        m.small_holder_ratio,
+        m.mid_holder_count,
+        CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
+        m.mid_holder_ratio,
+        m.large_holder_count,
+        CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
+        m.large_holder_ratio,
+        m.thousand_lot_holder_count,
+        CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
+        m.thousand_lot_ratio,
+        m.avg_large_holder_lots,
+        CASE WHEN prev.id IS NULL THEN 0 ELSE 1 END AS has_previous,
+        CAST((m.large_holder_count - COALESCE(prev.large_holder_count, m.large_holder_count)) AS CHAR) AS large_holder_count_change,
+        CAST((m.large_holder_share_count - COALESCE(prev.large_holder_share_count, m.large_holder_share_count)) AS CHAR) AS large_holder_share_change,
+        ROUND(m.large_holder_ratio - COALESCE(prev.large_holder_ratio, m.large_holder_ratio), 4) AS large_holder_ratio_change,
+        ROUND(m.small_holder_ratio - COALESCE(prev.small_holder_ratio, m.small_holder_ratio), 4) AS small_holder_ratio_change,
+        ROUND(m.thousand_lot_ratio - COALESCE(prev.thousand_lot_ratio, m.thousand_lot_ratio), 4) AS thousand_lot_ratio_change,
+        dp.close_price,
+        dp.price_change,
+        CAST(dp.volume AS CHAR) AS volume,
+        cs.chip_score,
+        cs.big_holder_score,
+        cs.big_holder_status
+      FROM major_holder_stats m
+      LEFT JOIN stocks s
+        ON m.stock_code = s.stock_code
+      LEFT JOIN major_holder_stats prev
+        ON prev.stock_code = m.stock_code
+       AND prev.data_date = (
+          SELECT MAX(p2.data_date)
+          FROM major_holder_stats p2
+          WHERE p2.stock_code = m.stock_code
+            AND p2.data_date < m.data_date
+       )
+      LEFT JOIN daily_prices dp
+        ON dp.stock_code = m.stock_code
+       AND dp.trade_date = ?
+      LEFT JOIN chip_scores cs
+        ON cs.stock_code = m.stock_code
+       AND cs.trade_date = ?
+      WHERE m.data_date = ?
+        ${marketCondition}
+        AND s.is_active = 1
+      `,
+      params,
+    );
+
+    const data = rows
+      .map(enrichMajorHolderRow)
+      .sort((a, b) => {
+        if (b.major_holder_score !== a.major_holder_score) return b.major_holder_score - a.major_holder_score;
+        const ratioDiff = toPlainNumber(b.large_holder_ratio_change) - toPlainNumber(a.large_holder_ratio_change);
+        if (ratioDiff !== 0) return ratioDiff;
+        const shareDiff = toPlainNumber(b.large_holder_share_change) - toPlainNumber(a.large_holder_share_change);
+        if (shareDiff !== 0) return shareDiff;
+        const ratioRank = toPlainNumber(b.large_holder_ratio) - toPlainNumber(a.large_holder_ratio);
+        if (ratioRank !== 0) return ratioRank;
+        return String(a.stock_code).localeCompare(String(b.stock_code));
+      })
+      .slice(0, limit)
+      .map((row, index) => ({
+        rank: index + 1,
+        ...row,
+      }));
+
+    res.json({
+      success: true,
+      data_date: targetDate,
+      trade_date: latestTradeDate,
+      market: market || "全部",
+      limit,
+      count: data.length,
+      data: convertBigIntToString(data),
+    });
+  } catch (error) {
+    console.error("查詢主力籌碼分析失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢主力籌碼分析失敗，請先執行 npm run major-holders:import 匯入 TDCC 集保資料。",
       error: error.message,
     });
   }
