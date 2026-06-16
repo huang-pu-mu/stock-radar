@@ -638,6 +638,134 @@ app.get("/radar/investment-trust-ranking", async (req, res) => {
   }
 });
 
+app.get("/stock/:stockCode/summary", async (req, res) => {
+  try {
+    const stockCode = req.params.stockCode;
+
+    const stockRows = await query(
+      `
+      SELECT
+        stock_code,
+        stock_name,
+        market_type,
+        industry,
+        is_active,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM stocks
+      WHERE stock_code = ?
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    if (stockRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    const priceRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+        open_price,
+        high_price,
+        low_price,
+        close_price,
+        price_change,
+        price_change_percent,
+        CAST(volume AS CHAR) AS volume,
+        CAST(turnover AS CHAR) AS turnover,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM daily_prices
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    const institutionalRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+
+        CAST(foreign_buy AS CHAR) AS foreign_buy,
+        CAST(foreign_sell AS CHAR) AS foreign_sell,
+        CAST(foreign_net AS CHAR) AS foreign_net,
+
+        CAST(investment_trust_buy AS CHAR) AS investment_trust_buy,
+        CAST(investment_trust_sell AS CHAR) AS investment_trust_sell,
+        CAST(investment_trust_net AS CHAR) AS investment_trust_net,
+
+        CAST(dealer_buy AS CHAR) AS dealer_buy,
+        CAST(dealer_sell AS CHAR) AS dealer_sell,
+        CAST(dealer_net AS CHAR) AS dealer_net,
+
+        CAST(total_net AS CHAR) AS total_net,
+
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM institutional_trades
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    const radarRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        stock_code,
+
+        total_score,
+        foreign_score,
+        investment_trust_score,
+        volume_score,
+        price_position_score,
+        trend_score,
+
+        foreign_status,
+        investment_trust_status,
+        volume_status,
+        price_position_status,
+        radar_note,
+
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM radar_scores
+      WHERE stock_code = ?
+      ORDER BY trade_date DESC
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      data: {
+        stock: stockRows[0],
+        latest_price: priceRows[0] || null,
+        latest_institutional_trade: institutionalRows[0] || null,
+        latest_radar_score: radarRows[0] || null,
+      },
+    });
+  } catch (error) {
+    console.error("Get stock summary failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get stock summary failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
