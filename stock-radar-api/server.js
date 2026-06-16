@@ -83,6 +83,49 @@ app.get("/stocks", async (req, res) => {
   }
 });
 
+app.get("/stocks/:stockCode", async (req, res) => {
+  try {
+    const stockCode = req.params.stockCode;
+
+    const stocks = await query(
+      `
+      SELECT
+        stock_code,
+        stock_name,
+        market_type,
+        industry,
+        is_active,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM stocks
+      WHERE stock_code = ?
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    if (stocks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: stocks[0],
+    });
+  } catch (error) {
+    console.error("Get stock detail failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Get stock detail failed",
+      error: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);
 });
