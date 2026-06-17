@@ -2470,6 +2470,148 @@ function renderQuarterlyEpsPanel(eps) {
   `;
 }
 
+function hasStockCalendar(calendar) {
+  return calendar && !calendar.error && Array.isArray(calendar.events) && calendar.events.length > 0;
+}
+
+function getCalendarTypeClass(type) {
+  const eventType = String(type || "");
+
+  if (["ex_dividend", "ex_right", "dividend"].includes(eventType)) return "good";
+  if (["shareholders_meeting", "investor_conference"].includes(eventType)) return "warn";
+  if (["book_closure", "earnings"].includes(eventType)) return "score-mid";
+  return "score-low";
+}
+
+function getCalendarImportanceText(value) {
+  if (value === "high") return "重要";
+  if (value === "medium") return "留意";
+  return "一般";
+}
+
+function getRelativeEventText(eventDate, today) {
+  if (!eventDate) return "日期未定";
+  if (!today) return formatDate(eventDate);
+
+  const eventTime = new Date(`${eventDate}T00:00:00+08:00`).getTime();
+  const todayTime = new Date(`${today}T00:00:00+08:00`).getTime();
+
+  if (!Number.isFinite(eventTime) || !Number.isFinite(todayTime)) return formatDate(eventDate);
+
+  const diffDays = Math.round((eventTime - todayTime) / 86400000);
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "明天";
+  if (diffDays > 1) return `${diffDays} 天後`;
+  if (diffDays === -1) return "昨天";
+  return `${Math.abs(diffDays)} 天前`;
+}
+
+function renderCalendarRows(events = [], today = "") {
+  if (!Array.isArray(events) || events.length === 0) {
+    return `<div class="result-note">目前沒有個股行事曆資料。</div>`;
+  }
+
+  return `
+    <div class="calendar-event-list" aria-label="個股行事曆事件列表">
+      ${events.slice(0, 12).map((event) => {
+        const eventDate = pick(event, ["event_date"], "");
+        const type = pick(event, ["event_type"], "other");
+        const typeName = pick(event, ["event_type_name"], "事件");
+        const title = pick(event, ["title"], typeName);
+        const importance = pick(event, ["importance"], "normal");
+
+        return `
+          <div class="calendar-event-row">
+            <div class="calendar-event-date">
+              <strong>${escapeHtml(formatDate(eventDate))}</strong>
+              <small>${escapeHtml(getRelativeEventText(eventDate, today))}</small>
+            </div>
+            <div class="calendar-event-main">
+              <div class="calendar-event-title-row">
+                <span class="summary-pill ${getCalendarTypeClass(type)}">${escapeHtml(typeName)}</span>
+                <span class="calendar-importance">${escapeHtml(getCalendarImportanceText(importance))}</span>
+              </div>
+              <strong>${escapeHtml(title)}</strong>
+              ${pick(event, ["description"], "") ? `<p>${escapeHtml(pick(event, ["description"], ""))}</p>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderStockCalendarPanel(calendar) {
+  const stockCalendar = calendar || {};
+
+  if (!hasStockCalendar(stockCalendar)) {
+    return `
+      <section class="detail-section calendar-section calendar-empty-section">
+        <h3>個股行事曆</h3>
+        <div class="result-note error-note">
+          <strong>個股行事曆暫時讀不到：</strong>${escapeHtml(stockCalendar.error || "資料來源目前沒有回傳行事曆資料。")}
+        </div>
+      </section>
+    `;
+  }
+
+  const nextEvent = stockCalendar.next_event || {};
+  const today = pick(stockCalendar, ["today"], "");
+  const nextType = pick(nextEvent, ["event_type"], "other");
+  const nextDate = pick(nextEvent, ["event_date"], "");
+
+  return `
+    <section class="detail-section calendar-section">
+      <div class="realtime-title-row">
+        <div>
+          <p class="eyebrow">V1.2 第 5 項</p>
+          <h3>個股行事曆</h3>
+        </div>
+        <span class="summary-date-chip">更新：${escapeHtml(pick(stockCalendar, ["updated_at"], "即時查詢"))}</span>
+      </div>
+
+      <div class="quick-summary calendar-summary">
+        <span class="summary-pill ${getCalendarTypeClass(nextType)}">${escapeHtml(pick(nextEvent, ["event_type_name"], "近期事件"))}</span>
+        <span class="summary-text">下一個事件：<strong>${escapeHtml(pick(nextEvent, ["title"], "暫無未來事件"))}</strong>${nextDate ? `，${escapeHtml(getRelativeEventText(nextDate, today))}` : ""}</span>
+      </div>
+
+      <div class="revenue-hero-grid calendar-hero-grid">
+        <div class="revenue-hero-card highlight">
+          <span>下一個日期</span>
+          <strong>${escapeHtml(nextDate ? formatDate(nextDate) : "-")}</strong>
+          <small>${escapeHtml(getRelativeEventText(nextDate, today))}</small>
+        </div>
+        <div class="revenue-hero-card warn">
+          <span>未來事件</span>
+          <strong>${formatNumber(pick(stockCalendar, ["upcoming_count"], 0))}</strong>
+          <small>含配息、股東會、法說會等</small>
+        </div>
+        <div class="revenue-hero-card good">
+          <span>資料筆數</span>
+          <strong>${formatNumber(Array.isArray(stockCalendar.events) ? stockCalendar.events.length : 0)}</strong>
+          <small>${escapeHtml(pick(stockCalendar, ["source"], "Yahoo 股市行事曆"))}</small>
+        </div>
+      </div>
+
+      <div class="info-grid calendar-info-grid">
+        ${createInfoItem("配息 / 除息", formatNumber((stockCalendar.event_type_count?.dividend || 0) + (stockCalendar.event_type_count?.ex_dividend || 0)))}
+        ${createInfoItem("股東會", formatNumber(stockCalendar.event_type_count?.shareholders_meeting || 0))}
+        ${createInfoItem("法說會", formatNumber(stockCalendar.event_type_count?.investor_conference || 0))}
+        ${createInfoItem("資料來源", escapeHtml(pick(stockCalendar, ["source"], "Yahoo 股市行事曆")))}
+      </div>
+
+      <div class="chart-title-row calendar-chart-title">
+        <h3>近期事件</h3>
+        <span>今天：${escapeHtml(formatDate(today))}</span>
+      </div>
+      ${renderCalendarRows(stockCalendar.events, today)}
+
+      <p class="chart-note">個股行事曆用來掌握配息、除權息、股東會與法說會等時間點；遇到除權息或法說會前後，短線波動通常要多留意。</p>
+    </section>
+  `;
+}
+
+
 function renderRealtimeLevelRows(quote) {
   const bids = Array.isArray(quote?.bid_levels) ? quote.bid_levels : [];
   const asks = Array.isArray(quote?.ask_levels) ? quote.ask_levels : [];
@@ -2605,6 +2747,7 @@ function renderSearchResult(summaryData) {
   const realtimeQuote = summaryData.realtime_quote || {};
   const monthlyRevenue = summaryData.monthly_revenue || {};
   const quarterlyEps = summaryData.quarterly_eps || {};
+  const stockCalendar = summaryData.stock_calendar || {};
   const hasRealtime = hasRealtimeQuote(realtimeQuote);
   const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
   const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
@@ -2645,6 +2788,8 @@ function renderSearchResult(summaryData) {
       ${renderMonthlyRevenuePanel(monthlyRevenue)}
 
       ${renderQuarterlyEpsPanel(quarterlyEps)}
+
+      ${renderStockCalendarPanel(stockCalendar)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -2771,11 +2916,12 @@ async function searchStock(codeFromButton = "") {
   `;
 
   try {
-    const [summaryResult, realtimeResult, revenueResult, epsResult] = await Promise.allSettled([
+    const [summaryResult, realtimeResult, revenueResult, epsResult, calendarResult] = await Promise.allSettled([
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`),
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/realtime`),
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/revenue?limit=24`),
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/eps?limit=20`),
+      fetchJson(`/stock/${encodeURIComponent(stockCode)}/calendar?limit=40`),
     ]);
 
     if (summaryResult.status !== "fulfilled") {
@@ -2797,6 +2943,9 @@ async function searchStock(codeFromButton = "") {
     summaryData.quarterly_eps = epsResult.status === "fulfilled"
       ? epsResult.value
       : { error: epsResult.reason?.message || "EPS 讀取失敗" };
+    summaryData.stock_calendar = calendarResult.status === "fulfilled"
+      ? calendarResult.value
+      : { error: calendarResult.reason?.message || "個股行事曆讀取失敗" };
 
     state.lastSearchCode = stockCode;
     state.lastSearchData = summaryData;
@@ -2926,11 +3075,12 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, realtime, revenue, eps, prices, trades, scores, holders] = await Promise.allSettled([
+    const [summary, realtime, revenue, eps, calendar, prices, trades, scores, holders] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
       fetchJson(`/stock/${stockCode}/realtime`),
       fetchJson(`/stock/${stockCode}/revenue?limit=24`),
       fetchJson(`/stock/${stockCode}/eps?limit=20`),
+      fetchJson(`/stock/${stockCode}/calendar?limit=40`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
@@ -2941,6 +3091,7 @@ async function openDetail(stockCode) {
     const realtimeQuote = realtime.status === "fulfilled" ? realtime.value : { error: realtime.reason?.message || "即時行情讀取失敗" };
     const monthlyRevenue = revenue.status === "fulfilled" ? revenue.value : { error: revenue.reason?.message || "每月營收讀取失敗" };
     const quarterlyEps = eps.status === "fulfilled" ? eps.value : { error: eps.reason?.message || "EPS 讀取失敗" };
+    const stockCalendar = calendar.status === "fulfilled" ? calendar.value : { error: calendar.reason?.message || "個股行事曆讀取失敗" };
     const priceRows = prices.status === "fulfilled" && Array.isArray(prices.value) ? prices.value : [];
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
@@ -2984,6 +3135,7 @@ async function openDetail(stockCode) {
       renderRealtimeQuotePanel(realtimeQuote, summaryData),
       renderMonthlyRevenuePanel(monthlyRevenue),
       renderQuarterlyEpsPanel(quarterlyEps),
+      renderStockCalendarPanel(stockCalendar),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
         createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),

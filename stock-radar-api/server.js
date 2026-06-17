@@ -1263,6 +1263,279 @@ async function fetchYahooQuarterlyEps(stockInfo, limit = 20) {
   return fetchYahooEpsQuoteSummary(stockInfo, limit);
 }
 
+function getTaiwanDateText(date = new Date()) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function normalizeCalendarDateText(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
+
+  if (!match) return "";
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  if (!year || !month || !day || month > 12 || day > 31) return "";
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function dateFromYahooRaw(value) {
+  const raw = toFiniteNumber(value?.raw ?? value);
+  if (raw === null) return "";
+  return getTaiwanDateText(new Date(raw * 1000));
+}
+
+function getCalendarEventType(title) {
+  const text = String(title || "");
+
+  if (/除權息|除權交易|除權/.test(text)) return "ex_right";
+  if (/除息|除息交易/.test(text)) return "ex_dividend";
+  if (/配息|發放日|現金股利|股利發放/.test(text)) return "dividend";
+  if (/股東會|股東常會|股東臨時會/.test(text)) return "shareholders_meeting";
+  if (/法說會|法人說明會|業績發表/.test(text)) return "investor_conference";
+  if (/停止過戶|最後過戶|停券|融券/.test(text)) return "book_closure";
+  if (/財報|盈餘|EPS|季報|年報|營收公布|收益/.test(text)) return "earnings";
+  return "other";
+}
+
+function getCalendarEventTypeName(type) {
+  const typeMap = {
+    ex_right: "除權",
+    ex_dividend: "除息",
+    dividend: "配息",
+    shareholders_meeting: "股東會",
+    investor_conference: "法說會",
+    book_closure: "股務事件",
+    earnings: "財報事件",
+    other: "其他事件",
+  };
+
+  return typeMap[type] || typeMap.other;
+}
+
+function getCalendarEventImportance(type) {
+  if (["ex_dividend", "ex_right", "dividend", "shareholders_meeting", "investor_conference"].includes(type)) {
+    return "high";
+  }
+
+  if (["book_closure", "earnings"].includes(type)) return "medium";
+  return "normal";
+}
+
+function cleanCalendarTitle(value) {
+  return decodeBasicHtmlEntities(String(value || ""))
+    .replace(/\s+/g, " ")
+    .replace(/[｜|]{2,}/g, "｜")
+    .replace(/^[-–—｜|:：,，\s]+/, "")
+    .replace(/[-–—｜|:：,，\s]+$/, "")
+    .trim();
+}
+
+function normalizeCalendarEvent(event) {
+  const eventDate = normalizeCalendarDateText(event?.event_date || event?.date || "");
+  const title = cleanCalendarTitle(event?.title || event?.event_name || "");
+
+  if (!eventDate || !title) return null;
+
+  const type = getCalendarEventType(title);
+
+  return {
+    event_date: eventDate,
+    title,
+    event_type: type,
+    event_type_name: getCalendarEventTypeName(type),
+    importance: getCalendarEventImportance(type),
+    description: cleanCalendarTitle(event?.description || ""),
+  };
+}
+
+function dedupeCalendarEvents(events = []) {
+  const seen = new Set();
+
+  return events
+    .map(normalizeCalendarEvent)
+    .filter(Boolean)
+    .filter((event) => {
+      const key = `${event.event_date}|${event.title}|${event.event_type}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.event_date.localeCompare(b.event_date));
+}
+
+function parseYahooCalendarEventsFromText(text, limit = 40) {
+  const normalized = String(text || "")
+    .replace(/\r/g, "\n")
+    .replace(/\\u002F/g, "/")
+    .replace(/\u00a0/g, " ")
+    .replace(/−/g, "-");
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const eventKeywords = /(除權息|除權交易|除權|除息交易|除息|配息|股利發放|發放日|現金股利|股東會|股東常會|股東臨時會|法說會|法人說明會|停止過戶|最後過戶|停券|融券|財報|盈餘|EPS|季報|年報|營收公布)/;
+  const events = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const dateMatch = line.match(/20\d{2}[\/\-.年]\d{1,2}[\/\-.月]\d{1,2}/);
+
+    if (!dateMatch) continue;
+
+    const nearbyText = [line, lines[index + 1] || "", lines[index + 2] || ""]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!eventKeywords.test(nearbyText)) continue;
+
+    const eventDate = normalizeCalendarDateText(dateMatch[0]);
+    const title = cleanCalendarTitle(
+      nearbyText
+        .replace(dateMatch[0], "")
+        .replace(/^(日期|時間|項目|事件|內容)\s*/g, "")
+        .slice(0, 90)
+    );
+
+    events.push({
+      event_date: eventDate,
+      title: title || nearbyText.match(eventKeywords)?.[0] || "個股行事曆事件",
+      description: nearbyText,
+    });
+  }
+
+  const compactText = normalized.replace(/\s+/g, " ");
+  const compactPattern = /(20\d{2}[\/\-.年]\d{1,2}[\/\-.月]\d{1,2})\s*([^。\n]{0,80}?(?:除權息|除權交易|除權|除息交易|除息|配息|股利發放|發放日|現金股利|股東會|股東常會|股東臨時會|法說會|法人說明會|停止過戶|最後過戶|停券|融券|財報|盈餘|EPS|季報|年報|營收公布)[^。\n]{0,80})/g;
+  let match;
+
+  while ((match = compactPattern.exec(compactText)) !== null) {
+    events.push({
+      event_date: normalizeCalendarDateText(match[1]),
+      title: cleanCalendarTitle(match[2].slice(0, 90)),
+      description: cleanCalendarTitle(match[0].slice(0, 120)),
+    });
+
+    if (events.length >= limit * 2) break;
+  }
+
+  return dedupeCalendarEvents(events).slice(0, limit);
+}
+
+function buildYahooQuoteSummaryCalendarEvents(stockInfo, symbol, json) {
+  const result = json?.quoteSummary?.result?.[0] || {};
+  const calendarEvents = result?.calendarEvents || {};
+  const summaryDetail = result?.summaryDetail || {};
+  const events = [];
+
+  const exDividendDate = dateFromYahooRaw(summaryDetail?.exDividendDate || calendarEvents?.exDividendDate);
+  if (exDividendDate) {
+    events.push({
+      event_date: exDividendDate,
+      title: "除息日",
+      description: "Yahoo Finance quoteSummary 提供的除息日期",
+    });
+  }
+
+  const dividendDate = dateFromYahooRaw(summaryDetail?.dividendDate || calendarEvents?.dividendDate);
+  if (dividendDate) {
+    events.push({
+      event_date: dividendDate,
+      title: "股利發放日 / 配息日",
+      description: "Yahoo Finance quoteSummary 提供的股利日期",
+    });
+  }
+
+  const earningsDates = Array.isArray(calendarEvents?.earnings?.earningsDate)
+    ? calendarEvents.earnings.earningsDate
+    : [];
+
+  earningsDates.forEach((item) => {
+    const earningsDate = dateFromYahooRaw(item);
+    if (earningsDate) {
+      events.push({
+        event_date: earningsDate,
+        title: "財報 / 盈餘公布參考日",
+        description: "Yahoo Finance quoteSummary 提供的財報日期",
+      });
+    }
+  });
+
+  return dedupeCalendarEvents(events);
+}
+
+async function fetchYahooCalendarQuoteSummary(stockInfo, limit = 40) {
+  const symbol = getYahooTwSymbol(stockInfo);
+  const sourceUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents,summaryDetail`;
+  const json = await fetchExternalJson(sourceUrl, `${stockInfo.stock_code} 行事曆備援資料`);
+  const events = buildYahooQuoteSummaryCalendarEvents(stockInfo, symbol, json).slice(0, limit);
+
+  if (events.length === 0) {
+    throw new Error("行事曆備援來源暫時沒有回傳可解析資料");
+  }
+
+  return buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl, "Yahoo Finance quoteSummary");
+}
+
+function buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl, source = "Yahoo 股市行事曆") {
+  const todayText = getTaiwanDateText();
+  const normalizedEvents = dedupeCalendarEvents(events);
+  const upcomingEvents = normalizedEvents.filter((event) => event.event_date >= todayText);
+  const pastEvents = normalizedEvents.filter((event) => event.event_date < todayText).reverse();
+  const nextEvent = upcomingEvents[0] || normalizedEvents[normalizedEvents.length - 1] || null;
+  const typeCount = normalizedEvents.reduce((result, event) => {
+    result[event.event_type] = (result[event.event_type] || 0) + 1;
+    return result;
+  }, {});
+
+  return {
+    stock_code: stockInfo.stock_code,
+    stock_name: stockInfo.stock_name,
+    market_type: stockInfo.market_type,
+    industry: stockInfo.industry,
+    symbol,
+    today: todayText,
+    next_event: nextEvent,
+    upcoming_count: upcomingEvents.length,
+    past_count: pastEvents.length,
+    event_type_count: typeCount,
+    events: [...upcomingEvents, ...pastEvents].slice(0, 40),
+    source,
+    source_url: sourceUrl,
+    updated_at: getTaiwanDateTimeText(),
+  };
+}
+
+async function fetchYahooStockCalendar(stockInfo, limit = 40) {
+  const symbol = getYahooTwSymbol(stockInfo);
+  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/calendar`;
+
+  try {
+    const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 個股行事曆`, {
+      Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
+    });
+    const text = htmlToReadableText(html);
+    const events = parseYahooCalendarEventsFromText(text, limit);
+
+    if (events.length > 0) {
+      return buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl);
+    }
+  } catch (error) {
+    // Yahoo 股市頁面解析失敗時，改用 quoteSummary 備援。
+  }
+
+  return fetchYahooCalendarQuoteSummary(stockInfo, limit);
+}
+
+
 app.get("/market/indices/intraday", async (req, res) => {
   try {
     const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
@@ -1399,6 +1672,46 @@ app.get("/stock/:stockCode/eps", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢個股每季 EPS 失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+app.get("/stock/:stockCode/calendar", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確",
+      });
+    }
+
+    const stockInfo = await getStockInfoForRealtime(stockCode);
+
+    if (!stockInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    const limit = parseLimit(req.query.limit, 40, 80);
+    const calendar = await fetchYahooStockCalendar(stockInfo, limit);
+
+    res.json({
+      success: true,
+      message: "個股行事曆讀取完成",
+      data: convertBigIntToString(calendar),
+    });
+  } catch (error) {
+    console.error("查詢個股行事曆失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股行事曆失敗",
       error: error.message,
     });
   }
