@@ -2583,3 +2583,30 @@ body.chart-zoom-open {
     justify-content: space-between;
   }
 }
+
+.etf-badge {
+  color: #06111e;
+  border-color: rgba(248, 214, 109, 0.45);
+  background: rgba(248, 214, 109, 0.86);
+}
+
+.etf-score-box {
+  background: rgba(248, 214, 109, 0.15);
+  border-color: rgba(248, 214, 109, 0.34);
+}
+
+.etf-score-box .score-value {
+  color: var(--accent-2);
+  font-size: 24px;
+}
+
+.etf-info-panel {
+  border-top-color: rgba(248, 214, 109, 0.28);
+}
+
+.panel-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}

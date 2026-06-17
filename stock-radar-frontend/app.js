@@ -303,8 +303,8 @@ function updatePageText() {
 
   if (state.page === "watchlist") {
     pageTitle.textContent = "自選股";
-    pageDesc.textContent = "登入後，每個 Google 帳號都會看到自己的自選股票清單。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡只顯示你自己加入的股票；想移除就按「已自選」。</span>`;
+    pageDesc.textContent = "登入後，每個 Google 帳號都會看到自己的自選股票與 ETF 清單。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡只顯示你自己加入的股票與 ETF；想移除就按「已自選」。</span>`;
     return;
   }
 
@@ -316,9 +316,9 @@ function updatePageText() {
   }
 
   if (state.page === "search") {
-    pageTitle.textContent = "個股查詢";
-    pageDesc.textContent = "直接輸入股票代號，查看即時行情、五檔報價、法人與籌碼分數。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後先看現價、內外盤參考與五檔，再看法人買賣超。</span>`;
+    pageTitle.textContent = "個股 / ETF 查詢";
+    pageDesc.textContent = "直接輸入股票或 ETF 代號，查看即時行情、五檔報價、成交量與明細。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>股票可看法人與籌碼；ETF 先看現價、成交量、漲跌幅，也可以加入自選。</span>`;
     window.setTimeout(() => stockSearchInput.focus(), 80);
     renderRecentSearches();
     return;
@@ -1128,12 +1128,13 @@ function renderSearchIntro() {
   stockList.innerHTML = `
     <article class="search-intro-card">
       <div class="intro-icon">🔎</div>
-      <h3>請輸入股票代號</h3>
-      <p>例如輸入 <strong>2330</strong>，就可以查台積電的最新行情、三大法人與籌碼分數。</p>
+      <h3>請輸入股票或 ETF 代號</h3>
+      <p>例如輸入 <strong>2330</strong> 查個股，或輸入 <strong>0050</strong>、<strong>00878</strong> 查 ETF 即時行情。</p>
       <div class="example-row" aria-label="查詢範例">
         <button class="example-btn" type="button" data-search-code="2330">查 2330</button>
         <button class="example-btn" type="button" data-search-code="2317">查 2317</button>
-        <button class="example-btn" type="button" data-search-code="0050">查 0050</button>
+        <button class="example-btn" type="button" data-search-code="0050">查 0050 ETF</button>
+        <button class="example-btn" type="button" data-search-code="00878">查 00878 ETF</button>
       </div>
     </article>
   `;
@@ -1243,7 +1244,7 @@ function renderWatchlistLoginPrompt() {
     <article class="search-intro-card watchlist-login-card">
       <div class="intro-icon">⭐</div>
       <h3>請先登入 Google 帳號</h3>
-      <p>登入後就可以把股票加入自選股，而且每個 Google 帳號看到的清單都不一樣。</p>
+      <p>登入後就可以把股票或 ETF 加入自選股，而且每個 Google 帳號看到的清單都不一樣。</p>
       <div class="example-row">
         <button class="example-btn" type="button" data-go-account="true">前往登入</button>
       </div>
@@ -1256,7 +1257,7 @@ function renderEmptyWatchlist() {
     <article class="search-intro-card watchlist-empty-card">
       <div class="intro-icon">⭐</div>
       <h3>目前還沒有自選股</h3>
-      <p>可以先到「今日雷達」或「個股查詢」，看到想追蹤的股票後按「加入自選」。</p>
+      <p>可以先到「今日雷達」或「個股 / ETF」，看到想追蹤的股票或 ETF 後按「加入自選」。</p>
       <div class="example-row">
         <button class="example-btn" type="button" data-go-page="radar">看今日雷達</button>
         <button class="example-btn" type="button" data-go-page="search">去個股查詢</button>
@@ -1628,6 +1629,7 @@ function renderForeignStreakCard(row, index) {
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
         <div class="score-box ${strengthClass}">
@@ -2072,6 +2074,7 @@ function renderMajorHolderCard(row, index) {
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
             <span class="badge">${escapeHtml(industry)}</span>
+            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
           </div>
         </div>
         <div class="score-box ${strengthClass}">
@@ -2112,12 +2115,13 @@ function renderStockCard(row, index) {
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
   const score = pick(row, ["total_score", "chip_score", "score"], "-");
-  const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
+  const closePrice = pick(row, ["close_price", "closing_price", "close", "current_price"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
+  const isEtf = isEtfRow(row);
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
-  const scoreText = getScoreText(score);
+  const scoreText = isEtf ? "ETF 即時追蹤" : getScoreText(score);
 
   const radarItems = [
     createStatusItem("外資", pick(row, ["foreign_status", "foreign_investor_status"])),
@@ -2146,21 +2150,24 @@ function renderStockCard(row, index) {
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
-        <div class="score-box ${scoreClass}">
-          <span class="score-value">${formatNumber(score)}</span>
-          <span class="score-label">籌碼分數</span>
-        </div>
+        ${renderScoreBox(row, score, scoreClass)}
       </div>
 
       <div class="quick-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+        <span class="summary-text">${isEtf ? "現價" : "收盤"} ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
       </div>
 
       <div class="info-grid">
-        ${state.page === "foreign" ? foreignItems : radarItems}
+        ${isEtf ? [
+          createInfoItem("類型", "ETF"),
+          createInfoItem("成交量", `${formatNumber(pick(row, ["volume", "trade_volume", "volume_lots"]))} 張`),
+          createInfoItem("漲跌幅", pick(row, ["change_percent"], null) === null ? "-" : formatPercent(pick(row, ["change_percent"])), getChangeClass(pick(row, ["change_percent"]))),
+          createInfoItem("市場別", escapeHtml(market)),
+        ].join("") : (state.page === "foreign" ? foreignItems : radarItems)}
       </div>
 
       <div class="card-actions">
@@ -2743,11 +2750,12 @@ function renderSearchResult(summaryData) {
   const tradeDate = pick(summaryData, ["trade_date", "date"], "-");
   const score = pick(summaryData, ["chip_score", "total_score", "score"], "-");
   const scoreClass = getScoreClass(score);
-  const scoreText = getScoreText(score);
+  const scoreText = isEtfRow(summaryData) ? "ETF 即時追蹤" : getScoreText(score);
   const realtimeQuote = summaryData.realtime_quote || {};
   const monthlyRevenue = summaryData.monthly_revenue || {};
   const quarterlyEps = summaryData.quarterly_eps || {};
   const stockCalendar = summaryData.stock_calendar || {};
+  const isEtf = isEtfRow(summaryData) || isEtfRow(realtimeQuote);
   const hasRealtime = hasRealtimeQuote(realtimeQuote);
   const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
   const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
@@ -2770,12 +2778,10 @@ function renderSearchResult(summaryData) {
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
             <span class="badge">${escapeHtml(industry)}</span>
+            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
           </div>
         </div>
-        <div class="score-box ${scoreClass}">
-          <span class="score-value">${formatNumber(score)}</span>
-          <span class="score-label">籌碼分數</span>
-        </div>
+        ${renderScoreBox(summaryData, score, scoreClass)}
       </div>
 
       <div class="quick-summary search-summary">
@@ -2785,11 +2791,13 @@ function renderSearchResult(summaryData) {
 
       ${renderRealtimeQuotePanel(realtimeQuote, summaryData)}
 
-      ${renderMonthlyRevenuePanel(monthlyRevenue)}
+      ${renderEtfInfoPanel(summaryData, realtimeQuote)}
 
-      ${renderQuarterlyEpsPanel(quarterlyEps)}
+      ${isEtf ? "" : renderMonthlyRevenuePanel(monthlyRevenue)}
 
-      ${renderStockCalendarPanel(stockCalendar)}
+      ${isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps)}
+
+      ${isEtf ? "" : renderStockCalendarPanel(stockCalendar)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -2802,14 +2810,14 @@ function renderSearchResult(summaryData) {
         createInfoItem("成交金額", formatNumber(pick(summaryData, ["transaction_amount"]))),
       ])}
 
-      ${renderDetailSection("三大法人", [
+      ${isEtf ? "" : renderDetailSection("三大法人", [
         createInfoItem("外資買超", formatNumber(foreignNet), getChangeClass(foreignNet)),
         createInfoItem("投信買超", formatNumber(trustNet), getChangeClass(trustNet)),
         createInfoItem("自營商", formatNumber(dealerNet), getChangeClass(dealerNet)),
         createInfoItem("法人合計", formatNumber(totalNet), getChangeClass(totalNet)),
       ])}
 
-      ${renderDetailSection("籌碼狀態", [
+      ${isEtf ? "" : renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(summaryData, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(summaryData, ["investment_trust_status", "trust_status"])),
         createStatusItem("自營商", pick(summaryData, ["dealer_status"])),
@@ -2818,7 +2826,7 @@ function renderSearchResult(summaryData) {
         createStatusItem("股價位置", pick(summaryData, ["price_position", "price_position_status"])),
       ])}
 
-      ${renderDetailSection("分數拆解", [
+      ${isEtf ? "" : renderDetailSection("分數拆解", [
         createInfoItem("外資分數", formatNumber(pick(summaryData, ["foreign_score"]))),
         createInfoItem("投信分數", formatNumber(pick(summaryData, ["investment_trust_score", "trust_score"]))),
         createInfoItem("自營商分數", formatNumber(pick(summaryData, ["dealer_score"]))),
@@ -2828,7 +2836,7 @@ function renderSearchResult(summaryData) {
       ])}
 
       <div class="result-note">
-        <strong>提醒：</strong>籌碼分數是觀察工具，不代表一定會上漲；建議搭配趨勢、成交量與風險控管一起看。
+        <strong>提醒：</strong>${isEtf ? "ETF 屬於指數型商品，這裡先以即時價格、成交量與漲跌幅作為觀察重點。" : "籌碼分數是觀察工具，不代表一定會上漲；建議搭配趨勢、成交量與風險控管一起看。"}
       </div>
 
       <div class="card-actions search-actions">
@@ -2851,6 +2859,74 @@ function normalizeStockCode(value) {
 
 function isValidStockCode(stockCode) {
   return /^[0-9A-Z]{2,10}$/.test(stockCode);
+}
+
+function isLikelyEtfCode(stockCode) {
+  return /^00\d{2,4}[A-Z]?$/.test(normalizeStockCode(stockCode));
+}
+
+function getSecurityType(row = {}) {
+  const securityType = String(pick(row, ["security_type", "instrument_type"], "")).toUpperCase();
+  const industry = String(pick(row, ["industry"], "")).toUpperCase();
+  const market = String(pick(row, ["market_type", "market"], "")).toUpperCase();
+  const code = pick(row, ["stock_code", "code"], "");
+
+  if (securityType === "ETF" || industry === "ETF" || market.includes("ETF") || isLikelyEtfCode(code)) {
+    return "ETF";
+  }
+
+  return "STOCK";
+}
+
+function isEtfRow(row = {}) {
+  return getSecurityType(row) === "ETF";
+}
+
+function getInstrumentBadge(row = {}) {
+  return isEtfRow(row) ? "ETF" : "股票";
+}
+
+function renderScoreBox(row, score, scoreClass) {
+  if (isEtfRow(row)) {
+    return `
+      <div class="score-box etf-score-box">
+        <span class="score-value">ETF</span>
+        <span class="score-label">指數型商品</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="score-box ${scoreClass}">
+      <span class="score-value">${formatNumber(score)}</span>
+      <span class="score-label">籌碼分數</span>
+    </div>
+  `;
+}
+
+function renderEtfInfoPanel(row = {}, realtimeQuote = {}) {
+  if (!isEtfRow(row) && !isEtfRow(realtimeQuote)) return "";
+
+  const quote = realtimeQuote && !realtimeQuote.error ? realtimeQuote : {};
+  const currentPrice = pick(quote, ["current_price", "close_price"], pick(row, ["close_price", "current_price"], "-"));
+  const change = pick(quote, ["price_change"], pick(row, ["price_change"], "-"));
+  const changePercent = pick(quote, ["change_percent"], pick(row, ["change_percent"], null));
+  const volumeLots = pick(quote, ["volume_lots"], pick(row, ["volume"], "-"));
+
+  return `
+    <section class="detail-section etf-info-panel">
+      <h3>ETF 資料</h3>
+      <div class="info-grid">
+        ${createInfoItem("商品類型", "ETF")}
+        ${createInfoItem("現價", formatPrice(currentPrice), getChangeClass(change))}
+        ${createInfoItem("漲跌", formatPrice(change), getChangeClass(change))}
+        ${createInfoItem("漲跌幅", changePercent === null || changePercent === undefined || changePercent === "-" ? "-" : formatPercent(changePercent), getChangeClass(changePercent))}
+        ${createInfoItem("成交量", `${formatNumber(volumeLots)} 張`)}
+        ${createInfoItem("資料來源", escapeHtml(pick(quote, ["source"], "即時行情")))}
+      </div>
+      <p class="panel-note">ETF 已支援查詢、加入自選、看明細與即時行情；公司營收與 EPS 屬個股資料，ETF 不適用。</p>
+    </section>
+  `;
 }
 
 function getRecentSearches() {
@@ -2889,13 +2965,13 @@ async function searchStock(codeFromButton = "") {
   const stockCode = normalizeStockCode(codeFromButton || stockSearchInput.value);
 
   if (!stockCode) {
-    showStatus("請先輸入股票代號，例如 2330。", "error");
+    showStatus("請先輸入股票或 ETF 代號，例如 2330、0050。", "error");
     stockSearchInput.focus();
     return;
   }
 
   if (!isValidStockCode(stockCode)) {
-    showStatus("股票代號格式不正確，請輸入 2 到 10 碼的數字或英文字。", "error");
+    showStatus("股票或 ETF 代號格式不正確，請輸入 2 到 10 碼的數字或英文字。", "error");
     stockSearchInput.focus();
     return;
   }
@@ -2931,7 +3007,7 @@ async function searchStock(codeFromButton = "") {
     const summaryData = getFirstArrayItem(summaryResult.value);
 
     if (!summaryData || !pick(summaryData, ["stock_code", "code"], "")) {
-      throw new Error("查不到這檔股票，請確認股票代號是否正確。");
+      throw new Error("查不到這檔股票或 ETF，請確認代號是否正確。");
     }
 
     summaryData.realtime_quote = realtimeResult.status === "fulfilled"
@@ -2958,11 +3034,11 @@ async function searchStock(codeFromButton = "") {
       <article class="search-intro-card error-card">
         <div class="intro-icon">⚠️</div>
         <h3>查不到這檔股票</h3>
-        <p>${isNotFound ? "請確認股票代號是否正確，或確認資料庫是否已匯入這檔股票。" : escapeHtml(error.message)}</p>
+        <p>${isNotFound ? "請確認股票或 ETF 代號是否正確。ETF 會在首次查詢時自動建立基本資料。" : escapeHtml(error.message)}</p>
         <button class="retry-btn" type="button" data-focus-search="true">重新輸入</button>
       </article>
     `;
-    showStatus(isNotFound ? "查不到這檔股票，請確認股票代號是否正確。" : escapeHtml(error.message), "error");
+    showStatus(isNotFound ? "查不到這檔股票或 ETF，請確認代號是否正確。" : escapeHtml(error.message), "error");
   } finally {
     setSearchLoading(false);
   }
@@ -3103,6 +3179,7 @@ async function openDetail(stockCode) {
     const latestScore = scoreRows[0] || summaryData || {};
 
     const stockName = pick(summaryData, ["stock_name", "name"], pick(latestScore, ["stock_name", "name"], "股票"));
+    const isEtf = isEtfRow(summaryData) || isEtfRow(realtimeQuote);
     const market = pick(summaryData, ["market_type", "market"], pick(latestScore, ["market_type", "market"]));
     const industry = pick(summaryData, ["industry"], "-");
     const totalScore = pick(latestScore, ["total_score", "chip_score", "score"], pick(summaryData, ["total_score", "chip_score", "score"], "-"));
@@ -3124,40 +3201,39 @@ async function openDetail(stockCode) {
               <span class="stock-code">${escapeHtml(stockCode)}</span>
               <span class="badge">${escapeHtml(market)}</span>
               <span class="badge">${escapeHtml(industry)}</span>
+              <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
             </div>
           </div>
-          <div class="score-box ${getScoreClass(totalScore)}">
-            <span class="score-value">${formatNumber(totalScore)}</span>
-            <span class="score-label">籌碼分數</span>
-          </div>
+          ${renderScoreBox(summaryData, totalScore, getScoreClass(totalScore))}
         </section>
       `,
       renderRealtimeQuotePanel(realtimeQuote, summaryData),
-      renderMonthlyRevenuePanel(monthlyRevenue),
-      renderQuarterlyEpsPanel(quarterlyEps),
-      renderStockCalendarPanel(stockCalendar),
+      renderEtfInfoPanel(summaryData, realtimeQuote),
+      isEtf ? "" : renderMonthlyRevenuePanel(monthlyRevenue),
+      isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps),
+      isEtf ? "" : renderStockCalendarPanel(stockCalendar),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
-        createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
+        createInfoItem(isEtf ? "現價" : "收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
-      renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
-      renderTechnicalCharts(enrichedPriceRows),
-      renderDetailSection("三大法人", [
+      isEtf ? "" : renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
+      isEtf ? "" : renderTechnicalCharts(enrichedPriceRows),
+      isEtf ? "" : renderDetailSection("三大法人", [
         createInfoItem("外資", formatNumber(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"])), getChangeClass(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"]))),
         createInfoItem("投信", formatNumber(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"])), getChangeClass(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"]))),
         createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
-      renderMajorHolderDetailSection(holderRows),
-      renderDetailSection("籌碼狀態", [
+      isEtf ? "" : renderMajorHolderDetailSection(holderRows),
+      isEtf ? "" : renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),
         createStatusItem("成交量", pick(latestScore, ["volume_status"])),
         createStatusItem("股價位置", pick(latestScore, ["price_position_status", "price_position"])),
       ]),
-      renderDetailSection("分數拆解", [
+      isEtf ? "" : renderDetailSection("分數拆解", [
         createInfoItem("外資分數", formatNumber(pick(latestScore, ["foreign_score"]))),
         createInfoItem("投信分數", formatNumber(pick(latestScore, ["investment_trust_score", "trust_score"]))),
         createInfoItem("自營商分數", formatNumber(pick(latestScore, ["dealer_score"]))),

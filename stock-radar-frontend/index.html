@@ -47,13 +47,13 @@
           <button class="tab-btn" type="button" data-page="syncBuy">法人同步</button>
           <button class="tab-btn" type="button" data-page="industryFlow">產業資金</button>
           <button class="tab-btn" type="button" data-page="majorHolder">主力籌碼</button>
-          <button class="tab-btn" type="button" data-page="search">個股查詢</button>
+          <button class="tab-btn" type="button" data-page="search">個股 / ETF</button>
           <button class="tab-btn" type="button" data-page="watchlist">自選股</button>
           <button class="tab-btn" type="button" data-page="account">我的</button>
         </div>
 
-        <form id="searchPanel" class="search-panel hidden" aria-label="個股查詢" novalidate>
-          <label class="search-label" for="stockSearchInput">輸入股票代號</label>
+        <form id="searchPanel" class="search-panel hidden" aria-label="個股 / ETF 查詢" novalidate>
+          <label class="search-label" for="stockSearchInput">輸入股票或 ETF 代號</label>
           <div class="search-row">
             <input
               id="stockSearchInput"
@@ -61,12 +61,12 @@
               type="text"
               inputmode="text"
               autocomplete="off"
-              placeholder="例如：2330"
+              placeholder="例如：2330、0050、00878"
               aria-describedby="searchHelp"
             />
             <button id="stockSearchBtn" class="search-btn" type="submit">查詢</button>
           </div>
-          <p id="searchHelp" class="search-help">輸入股票代號後按查詢，例如 2330、2317、0050。</p>
+          <p id="searchHelp" class="search-help">輸入股票或 ETF 代號後按查詢，例如 2330、2317、0050、00878。</p>
           <div id="recentSearches" class="recent-searches" aria-label="最近查詢"></div>
         </form>
 

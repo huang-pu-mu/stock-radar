@@ -865,6 +865,7 @@ function buildRealtimeQuote(row, stockInfo, channel) {
     stock_name: stockInfo.stock_name,
     market_type: stockInfo.market_type,
     industry: stockInfo.industry,
+    security_type: getSecurityType(stockInfo),
     channel,
     symbol: `${normalizeStockCodeValue(stockInfo.stock_code)}.${String(stockInfo.market_type || "").includes("上櫃") ? "TWO" : "TW"}`,
     trade_date: parseTwseRealtimeDate(row?.d),
@@ -893,6 +894,7 @@ function buildRealtimeQuote(row, stockInfo, channel) {
 }
 
 async function getStockInfoForRealtime(stockCode) {
+  const code = normalizeStockCodeValue(stockCode);
   const rows = await query(
     `
     SELECT
@@ -904,10 +906,17 @@ async function getStockInfoForRealtime(stockCode) {
     WHERE stock_code = ?
     LIMIT 1
     `,
-    [normalizeStockCodeValue(stockCode)],
+    [code],
   );
 
-  return rows[0] || null;
+  if (rows[0]) {
+    return {
+      ...rows[0],
+      security_type: getSecurityType(rows[0]),
+    };
+  }
+
+  return ensureEtfStockInfo(code);
 }
 
 async function fetchTwseRealtimeQuote(stockInfo) {
@@ -924,12 +933,237 @@ async function fetchTwseRealtimeQuote(stockInfo) {
   return buildRealtimeQuote(row, stockInfo, channel);
 }
 
+function isLikelyTaiwanEtfCode(stockCode) {
+  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
+
+  return /^00\d{2,4}[A-Z]?$/.test(code);
+}
+
+function isEtfStockInfo(stockInfo) {
+  const securityType = String(stockInfo?.security_type || stockInfo?.instrument_type || "").toUpperCase();
+  const industry = String(stockInfo?.industry || "").toUpperCase();
+  const marketType = String(stockInfo?.market_type || "").toUpperCase();
+
+  return securityType === "ETF" || industry === "ETF" || marketType.includes("ETF") || isLikelyTaiwanEtfCode(stockInfo?.stock_code);
+}
+
+function getSecurityType(stockInfo) {
+  return isEtfStockInfo(stockInfo) ? "ETF" : "STOCK";
+}
+
+function getYahooSymbolCandidates(stockCode, marketType = "") {
+  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
+  const market = String(marketType || "");
+
+  if (market.includes("上櫃")) return [`${code}.TWO`, `${code}.TW`];
+  if (market.includes("上市")) return [`${code}.TW`, `${code}.TWO`];
+
+  return [`${code}.TW`, `${code}.TWO`];
+}
+
 function getYahooTwSymbol(stockInfo) {
   const stockCode = normalizeStockCodeValue(stockInfo?.stock_code);
-  const marketType = String(stockInfo?.market_type || "");
-  const suffix = marketType.includes("上櫃") ? "TWO" : "TW";
 
-  return `${stockCode}.${suffix}`;
+  if (stockInfo?.symbol && /\.(TW|TWO)$/i.test(String(stockInfo.symbol))) {
+    return String(stockInfo.symbol).toUpperCase();
+  }
+
+  return getYahooSymbolCandidates(stockCode, stockInfo?.market_type)[0];
+}
+
+function getMarketTypeFromYahooSymbol(symbol, fallback = "上市") {
+  return String(symbol || "").toUpperCase().endsWith(".TWO") ? "上櫃" : fallback;
+}
+
+function normalizeYahooQuoteMeta(stockCode, symbol, meta = {}) {
+  const code = normalizeStockCodeValue(stockCode);
+  const name = String(meta.shortName || meta.longName || meta.symbol || code).trim();
+  const marketType = getMarketTypeFromYahooSymbol(symbol, "上市");
+
+  return {
+    stock_code: code,
+    stock_name: name || code,
+    market_type: marketType,
+    industry: "ETF",
+    security_type: "ETF",
+    symbol,
+  };
+}
+
+async function fetchYahooQuoteSnapshot(stockCode, stockInfo = {}) {
+  const code = normalizeStockCodeValue(stockCode);
+  const symbols = getYahooSymbolCandidates(code, stockInfo.market_type);
+  const errors = [];
+
+  for (const symbol of symbols) {
+    try {
+      const sourceUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m`;
+      const json = await fetchExternalJson(sourceUrl, `${code} Yahoo 即時行情`);
+      const result = json?.chart?.result?.[0];
+      const meta = result?.meta || {};
+      const quote = result?.indicators?.quote?.[0] || {};
+      const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+      const closes = Array.isArray(quote.close) ? quote.close : [];
+      const volumes = Array.isArray(quote.volume) ? quote.volume : [];
+
+      const latestClose = getLastFiniteValue(closes);
+      const latestVolume = getLastFiniteValue(volumes);
+      const totalVolume = toFiniteNumber(meta.regularMarketVolume) ?? latestVolume;
+      const currentPrice = toFiniteNumber(meta.regularMarketPrice) ?? latestClose;
+
+      if (currentPrice === null) {
+        errors.push(`${symbol}：沒有即時價格`);
+        continue;
+      }
+
+      const previousClose = toFiniteNumber(meta.chartPreviousClose) ?? toFiniteNumber(meta.previousClose);
+      const change = previousClose !== null ? currentPrice - previousClose : null;
+      const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
+      const lastTimestamp = timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
+      const tradeDate = meta.regularMarketTime
+        ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Number(meta.regularMarketTime) * 1000))
+        : getTaiwanDateTimeText().slice(0, 10);
+      const normalizedInfo = normalizeYahooQuoteMeta(code, symbol, meta);
+
+      return {
+        stock_info: {
+          ...normalizedInfo,
+          stock_name: stockInfo.stock_name || normalizedInfo.stock_name,
+          market_type: stockInfo.market_type || normalizedInfo.market_type,
+          industry: stockInfo.industry || normalizedInfo.industry,
+          security_type: getSecurityType({ ...normalizedInfo, ...stockInfo }),
+        },
+        quote: {
+          stock_code: code,
+          stock_name: stockInfo.stock_name || normalizedInfo.stock_name,
+          market_type: stockInfo.market_type || normalizedInfo.market_type,
+          industry: stockInfo.industry || normalizedInfo.industry,
+          security_type: getSecurityType({ ...normalizedInfo, ...stockInfo }),
+          symbol,
+          trade_date: tradeDate,
+          latest_time: meta.regularMarketTime ? getTaiwanTimeTextFromUnix(meta.regularMarketTime) : getTaiwanTimeTextFromUnix(lastTimestamp),
+          current_price: currentPrice,
+          close_price: currentPrice,
+          price_change: change,
+          change_percent: changePercent,
+          open_price: toFiniteNumber(meta.regularMarketDayLow) === currentPrice ? null : getLastFiniteValue(quote.open || []) ?? toFiniteNumber(meta.regularMarketOpen),
+          high_price: toFiniteNumber(meta.regularMarketDayHigh) ?? getLastFiniteValue(quote.high || []),
+          low_price: toFiniteNumber(meta.regularMarketDayLow) ?? getLastFiniteValue(quote.low || []),
+          previous_close: previousClose,
+          volume: totalVolume,
+          volume_lots: totalVolume !== null && totalVolume !== undefined ? totalVolume / 1000 : null,
+          total_trade_amount: currentPrice !== null && totalVolume !== null ? currentPrice * totalVolume : null,
+          source: "Yahoo Finance chart",
+          source_url: sourceUrl,
+          updated_at: getTaiwanDateTimeText(),
+        },
+      };
+    } catch (error) {
+      errors.push(`${symbol}：${error.message}`);
+    }
+  }
+
+  throw new Error(errors.join("；") || "Yahoo 即時行情查無資料");
+}
+
+async function ensureEtfStockInfo(stockCode) {
+  const code = normalizeStockCodeValue(stockCode);
+
+  if (!isLikelyTaiwanEtfCode(code)) {
+    return null;
+  }
+
+  const snapshot = await fetchYahooQuoteSnapshot(code);
+  const stockInfo = {
+    ...snapshot.stock_info,
+    industry: "ETF",
+    security_type: "ETF",
+  };
+
+  await query(
+    `
+    INSERT INTO stocks (
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      is_active
+    )
+    VALUES (?, ?, ?, 'ETF', 1)
+    ON DUPLICATE KEY UPDATE
+      stock_name = VALUES(stock_name),
+      market_type = VALUES(market_type),
+      industry = 'ETF',
+      is_active = 1,
+      updated_at = NOW()
+    `,
+    [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
+  );
+
+  return stockInfo;
+}
+
+function buildEtfSummaryFromQuote(stockInfo, quote) {
+  const change = toFiniteNumber(quote.price_change);
+  const scoreStatus = "ETF 不計算籌碼分數";
+
+  return {
+    stock_code: stockInfo.stock_code,
+    stock_name: stockInfo.stock_name,
+    market_type: stockInfo.market_type,
+    industry: "ETF",
+    security_type: "ETF",
+    trade_date: quote.trade_date,
+    open_price: quote.open_price,
+    high_price: quote.high_price,
+    low_price: quote.low_price,
+    close_price: quote.close_price ?? quote.current_price,
+    price_change: change,
+    change_percent: quote.change_percent,
+    volume: quote.volume_lots ?? (quote.volume ? quote.volume / 1000 : null),
+    transaction_amount: quote.total_trade_amount,
+    transaction_count: null,
+    foreign_buy: null,
+    foreign_sell: null,
+    foreign_net: null,
+    investment_trust_buy: null,
+    investment_trust_sell: null,
+    investment_trust_net: null,
+    dealer_net: null,
+    total_net: null,
+    chip_score: null,
+    foreign_score: null,
+    investment_trust_score: null,
+    dealer_score: null,
+    big_holder_score: null,
+    volume_score: null,
+    price_score: null,
+    foreign_status: scoreStatus,
+    investment_trust_status: scoreStatus,
+    dealer_status: scoreStatus,
+    big_holder_status: scoreStatus,
+    volume_status: "ETF 成交量看即時行情",
+    price_position: "ETF 以即時價格觀察",
+    realtime_quote: quote,
+  };
+}
+
+async function fetchYahooEtfSummary(stockCode, stockInfo = null) {
+  const snapshot = await fetchYahooQuoteSnapshot(stockCode, stockInfo || {});
+  const mergedStockInfo = {
+    ...snapshot.stock_info,
+    ...(stockInfo || {}),
+    industry: "ETF",
+    security_type: "ETF",
+  };
+
+  return buildEtfSummaryFromQuote(mergedStockInfo, {
+    ...snapshot.quote,
+    stock_name: mergedStockInfo.stock_name,
+    market_type: mergedStockInfo.market_type,
+    industry: "ETF",
+    security_type: "ETF",
+  });
 }
 
 function decodeBasicHtmlEntities(value) {
@@ -1580,7 +1814,23 @@ app.get("/stock/:stockCode/realtime", async (req, res) => {
       });
     }
 
-    const realtimeQuote = await fetchTwseRealtimeQuote(stockInfo);
+    let realtimeQuote;
+
+    try {
+      realtimeQuote = await fetchTwseRealtimeQuote(stockInfo);
+    } catch (misError) {
+      if (!isEtfStockInfo(stockInfo)) throw misError;
+      const snapshot = await fetchYahooQuoteSnapshot(stockCode, stockInfo);
+      realtimeQuote = {
+        ...snapshot.quote,
+        bid_levels: [],
+        ask_levels: [],
+        inner_volume_lots: null,
+        outer_volume_lots: null,
+        trade_side: "ETF 即時參考",
+        trade_side_note: "ETF 目前使用 Yahoo 即時資料，五檔與內外盤若來源未提供則不顯示。",
+      };
+    }
 
     res.json({
       success: true,
@@ -1615,6 +1865,23 @@ app.get("/stock/:stockCode/revenue", async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Stock not found",
+      });
+    }
+
+    if (isEtfStockInfo(stockInfo)) {
+      return res.json({
+        success: true,
+        message: "ETF 沒有公司每月營收資料",
+        data: convertBigIntToString({
+          stock_code: stockInfo.stock_code,
+          stock_name: stockInfo.stock_name,
+          market_type: stockInfo.market_type,
+          industry: "ETF",
+          security_type: "ETF",
+          not_applicable: true,
+          status: "ETF 不適用每月營收",
+          rows: [],
+        }),
       });
     }
 
@@ -1655,6 +1922,23 @@ app.get("/stock/:stockCode/eps", async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Stock not found",
+      });
+    }
+
+    if (isEtfStockInfo(stockInfo)) {
+      return res.json({
+        success: true,
+        message: "ETF 沒有公司 EPS 資料",
+        data: convertBigIntToString({
+          stock_code: stockInfo.stock_code,
+          stock_name: stockInfo.stock_name,
+          market_type: stockInfo.market_type,
+          industry: "ETF",
+          security_type: "ETF",
+          not_applicable: true,
+          status: "ETF 不適用 EPS",
+          rows: [],
+        }),
       });
     }
 
@@ -3428,7 +3712,14 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
   let conn;
 
   try {
-    const stockCode = req.params.stockCode;
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票或 ETF 代號格式不正確",
+      });
+    }
 
     conn = await pool.getConnection();
 
@@ -3493,15 +3784,46 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
     );
 
     if (rows.length === 0) {
+      if (isLikelyTaiwanEtfCode(stockCode)) {
+        const stockInfo = await ensureEtfStockInfo(stockCode);
+        const etfSummary = await fetchYahooEtfSummary(stockCode, stockInfo);
+
+        return res.json({
+          success: true,
+          data: convertBigIntToString(etfSummary),
+        });
+      }
+
       return res.status(404).json({
         success: false,
         message: "Stock not found",
       });
     }
 
+    const summaryRow = {
+      ...rows[0],
+      security_type: getSecurityType(rows[0]),
+    };
+
+    if (isEtfStockInfo(summaryRow)) {
+      try {
+        const etfSummary = await fetchYahooEtfSummary(stockCode, summaryRow);
+
+        return res.json({
+          success: true,
+          data: convertBigIntToString({ ...summaryRow, ...etfSummary }),
+        });
+      } catch (etfError) {
+        return res.json({
+          success: true,
+          data: convertBigIntToString(summaryRow),
+        });
+      }
+    }
+
     res.json({
       success: true,
-      data: convertBigIntToString(rows[0]),
+      data: convertBigIntToString(summaryRow),
     });
   } catch (error) {
     console.error("查詢個股摘要失敗：", error);
@@ -3523,6 +3845,37 @@ function normalizeStockCodeValue(value) {
 
 function isValidStockCodeValue(value) {
   return /^[0-9A-Z]{2,10}$/.test(String(value || ""));
+}
+
+async function enrichWatchlistEtfRows(rows = []) {
+  const enrichedRows = await Promise.all(rows.map(async (row) => {
+    const baseRow = {
+      ...row,
+      security_type: getSecurityType(row),
+    };
+
+    if (!isEtfStockInfo(baseRow)) return baseRow;
+
+    try {
+      const etfSummary = await fetchYahooEtfSummary(baseRow.stock_code, baseRow);
+
+      return {
+        ...baseRow,
+        ...etfSummary,
+        watchlist_id: baseRow.watchlist_id,
+        user_id: baseRow.user_id,
+        note: baseRow.note,
+        sort_order: baseRow.sort_order,
+        watchlist_created_at: baseRow.watchlist_created_at,
+        watchlist_updated_at: baseRow.watchlist_updated_at,
+        security_type: "ETF",
+      };
+    } catch (error) {
+      return baseRow;
+    }
+  }));
+
+  return enrichedRows;
 }
 
 async function getWatchlistRows(userId, stockCode = null) {
@@ -3611,7 +3964,7 @@ async function getWatchlistRows(userId, stockCode = null) {
 // ==============================
 app.get("/watchlist", requireAuth, async (req, res) => {
   try {
-    const rows = await getWatchlistRows(req.user.id);
+    const rows = await enrichWatchlistEtfRows(await getWatchlistRows(req.user.id));
 
     res.json({
       success: true,
@@ -3653,7 +4006,7 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       });
     }
 
-    const stocks = await query(
+    let stocks = await query(
       `
       SELECT stock_code
       FROM stocks
@@ -3664,10 +4017,15 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       [stockCode],
     );
 
+    if (stocks.length === 0 && isLikelyTaiwanEtfCode(stockCode)) {
+      const etfInfo = await ensureEtfStockInfo(stockCode);
+      stocks = etfInfo ? [{ stock_code: etfInfo.stock_code }] : [];
+    }
+
     if (stocks.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "查不到這檔股票，請確認股票代號是否正確。",
+        message: "查不到這檔股票或 ETF，請確認代號是否正確。",
       });
     }
 
@@ -3692,7 +4050,7 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       [req.user.id, stockCode, note, nextSortOrder],
     );
 
-    const rows = await getWatchlistRows(req.user.id, stockCode);
+    const rows = await enrichWatchlistEtfRows(await getWatchlistRows(req.user.id, stockCode));
 
     res.json({
       success: true,
