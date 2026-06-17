@@ -3279,23 +3279,22 @@ app.get("/market/institutional/summary", async (req, res) => {
     let targetDate = queryDate;
 
     if (!targetDate) {
-      const latestDateParams = [];
-      let latestDateMarketCondition = "";
-
-      if (market) {
-        latestDateMarketCondition = "WHERE s.market_type = ?";
-        latestDateParams.push(market);
-      }
-
       const latestDateRows = await query(
         `
-        SELECT DATE_FORMAT(MAX(i.trade_date), '%Y-%m-%d') AS latest_date
-        FROM institutional_trades i
-        LEFT JOIN stocks s
-          ON i.stock_code = s.stock_code
-        ${latestDateMarketCondition}
+        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
+        FROM (
+          SELECT i.trade_date AS trade_date
+          FROM institutional_trades i
+          LEFT JOIN stocks s
+            ON i.stock_code = s.stock_code
+          WHERE (? IS NULL OR s.market_type = ?)
+          UNION ALL
+          SELECT a.trade_date AS trade_date
+          FROM institutional_amount_summaries a
+          WHERE (? IS NULL OR a.market_type = ?)
+        ) latest_dates
         `,
-        latestDateParams,
+        [market, market, market, market],
       );
 
       targetDate = latestDateRows[0]?.latest_date || null;
