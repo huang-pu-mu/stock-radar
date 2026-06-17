@@ -1245,7 +1245,7 @@ code {
 
 @media (min-width: 621px) {
   .tab-row {
-    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   }
 }
 
@@ -2609,4 +2609,244 @@ body.chart-zoom-open {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
+}
+
+/* V1.2 第 7 項：三大法人總覽 */
+.institutional-overview-card,
+.institutional-market-section,
+.institutional-history-section,
+.institutional-top-wrapper {
+  border-color: rgba(86, 214, 255, 0.18);
+}
+
+.institutional-score-value {
+  font-size: 24px;
+  white-space: nowrap;
+}
+
+.institutional-entity-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.institutional-entity-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.institutional-entity-card.score-high {
+  background: rgba(255, 93, 124, 0.08);
+  border-color: rgba(255, 93, 124, 0.18);
+}
+
+.institutional-entity-card.score-low {
+  background: rgba(84, 217, 156, 0.08);
+  border-color: rgba(84, 217, 156, 0.18);
+}
+
+.institutional-entity-card span,
+.institutional-entity-card small,
+.institutional-entity-card em {
+  display: block;
+}
+
+.institutional-entity-card span {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.institutional-entity-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 23px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.institutional-entity-card small,
+.institutional-entity-card em {
+  margin-top: 5px;
+  color: var(--muted-2);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.institutional-info-grid {
+  margin-top: 14px;
+}
+
+.institutional-note {
+  margin-top: 14px;
+}
+
+.institutional-market-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.institutional-market-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.institutional-market-card h4 {
+  margin: 8px 0 0;
+  font-size: 26px;
+  font-weight: 950;
+}
+
+.institutional-market-items {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.institutional-history-list {
+  display: grid;
+  gap: 9px;
+}
+
+.institutional-history-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 108px;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.institutional-history-row strong {
+  text-align: right;
+  font-size: 13px;
+}
+
+.institutional-history-bar-track {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.institutional-history-bar {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.institutional-history-bar.up {
+  background: linear-gradient(90deg, rgba(255, 93, 124, 0.45), rgba(255, 93, 124, 0.95));
+}
+
+.institutional-history-bar.down {
+  background: linear-gradient(90deg, rgba(84, 217, 156, 0.45), rgba(84, 217, 156, 0.95));
+}
+
+.institutional-top-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.institutional-top-section h4 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.institutional-top-list {
+  display: grid;
+  gap: 9px;
+}
+
+.institutional-stock-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 17px;
+  padding: 11px 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.045);
+  text-align: left;
+  cursor: pointer;
+}
+
+.institutional-stock-row:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.institutional-stock-main strong,
+.institutional-stock-main em,
+.institutional-stock-value strong,
+.institutional-stock-value small {
+  display: block;
+}
+
+.institutional-stock-main strong {
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.institutional-stock-main small,
+.institutional-stock-main em,
+.institutional-stock-value small {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.institutional-stock-value {
+  text-align: right;
+}
+
+.institutional-stock-value strong {
+  font-size: 15px;
+}
+
+.institutional-empty {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 13px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 14px;
+}
+
+@media (max-width: 860px) {
+  .institutional-entity-grid,
+  .institutional-market-grid,
+  .institutional-top-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .institutional-history-row {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .institutional-history-row strong {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .institutional-stock-row {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .institutional-stock-value {
+    grid-column: 2;
+    text-align: left;
+  }
 }

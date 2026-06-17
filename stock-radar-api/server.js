@@ -2904,6 +2904,247 @@ app.get("/radar/institutional-sync-buying", async (req, res) => {
 
 
 // ==============================
+// 三大法人每日買賣總覽
+// GET /market/institutional/summary?market=上市&date=YYYY-MM-DD&days=10
+// ==============================
+app.get("/market/institutional/summary", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+    const days = parseLimit(req.query.days, 10, 30);
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    let targetDate = queryDate;
+
+    if (!targetDate) {
+      const latestDateParams = [];
+      let latestDateMarketCondition = "";
+
+      if (market) {
+        latestDateMarketCondition = "WHERE s.market_type = ?";
+        latestDateParams.push(market);
+      }
+
+      const latestDateRows = await query(
+        `
+        SELECT DATE_FORMAT(MAX(i.trade_date), '%Y-%m-%d') AS latest_date
+        FROM institutional_trades i
+        LEFT JOIN stocks s
+          ON i.stock_code = s.stock_code
+        ${latestDateMarketCondition}
+        `,
+        latestDateParams,
+      );
+
+      targetDate = latestDateRows[0]?.latest_date || null;
+    }
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        data: {
+          trade_date: null,
+          market: market || "全部",
+          summary: null,
+          by_market: [],
+          history: [],
+          top_net_buy: [],
+          top_net_sell: [],
+          note: "目前尚未匯入三大法人買賣超資料。",
+        },
+      });
+    }
+
+    const marketCondition = market ? "AND s.market_type = ?" : "";
+    const baseParams = market ? [targetDate, market] : [targetDate];
+
+    const summaryRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        COUNT(DISTINCT i.stock_code) AS stock_count,
+        COUNT(DISTINCT CASE WHEN p.close_price IS NOT NULL THEN i.stock_code END) AS priced_stock_count,
+        CAST(SUM(COALESCE(i.foreign_buy, 0)) AS CHAR) AS foreign_buy_lots,
+        CAST(SUM(COALESCE(i.foreign_sell, 0)) AS CHAR) AS foreign_sell_lots,
+        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
+        CAST(SUM(COALESCE(i.investment_trust_buy, 0)) AS CHAR) AS investment_trust_buy_lots,
+        CAST(SUM(COALESCE(i.investment_trust_sell, 0)) AS CHAR) AS investment_trust_sell_lots,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
+        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
+        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
+        CAST(SUM(COALESCE(i.foreign_buy, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_buy_amount,
+        CAST(SUM(COALESCE(i.foreign_sell, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_sell_amount,
+        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
+        CAST(SUM(COALESCE(i.investment_trust_buy, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_buy_amount,
+        CAST(SUM(COALESCE(i.investment_trust_sell, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_sell_amount,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
+        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
+        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount,
+        CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS market_transaction_amount
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+      GROUP BY i.trade_date
+      `,
+      baseParams,
+    );
+
+    const byMarketRows = await query(
+      `
+      SELECT
+        COALESCE(NULLIF(s.market_type, ''), '未分類') AS market_type,
+        COUNT(DISTINCT i.stock_code) AS stock_count,
+        COUNT(DISTINCT CASE WHEN p.close_price IS NOT NULL THEN i.stock_code END) AS priced_stock_count,
+        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
+        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
+        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
+        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
+        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
+        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount,
+        CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS market_transaction_amount
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+      GROUP BY COALESCE(NULLIF(s.market_type, ''), '未分類')
+      ORDER BY COALESCE(NULLIF(s.market_type, ''), '未分類') ASC
+      `,
+      baseParams,
+    );
+
+    const historyMarketOuter = market ? "s.market_type = ? AND" : "";
+    const historyMarketInner = market ? "WHERE s2.market_type = ?" : "";
+    const historyParams = market ? [market, market, days] : [days];
+
+    const historyRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        COUNT(DISTINCT i.stock_code) AS stock_count,
+        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
+        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
+        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
+        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
+        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
+        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
+        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      WHERE ${historyMarketOuter} i.trade_date IN (
+        SELECT trade_date
+        FROM (
+          SELECT DISTINCT i2.trade_date AS trade_date
+          FROM institutional_trades i2
+          LEFT JOIN stocks s2
+            ON i2.stock_code = s2.stock_code
+          ${historyMarketInner}
+          ORDER BY i2.trade_date DESC
+          LIMIT ?
+        ) recent_dates
+      )
+      GROUP BY i.trade_date
+      ORDER BY i.trade_date DESC
+      `,
+      historyParams,
+    );
+
+    const topParams = market ? [targetDate, market] : [targetDate];
+    const topSelectSql = `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        i.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        p.close_price,
+        p.price_change,
+        CAST(i.foreign_net AS CHAR) AS foreign_net_lots,
+        CAST(i.investment_trust_net AS CHAR) AS investment_trust_net_lots,
+        CAST(i.dealer_net AS CHAR) AS dealer_net_lots,
+        CAST(i.total_net AS CHAR) AS total_net_lots,
+        CAST((COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
+        CAST((COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
+        CAST((COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
+        CAST((COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount
+      FROM institutional_trades i
+      LEFT JOIN stocks s
+        ON i.stock_code = s.stock_code
+      LEFT JOIN daily_prices p
+        ON i.stock_code = p.stock_code
+       AND i.trade_date = p.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+        AND p.close_price IS NOT NULL
+    `;
+
+    const topNetBuyRows = await query(
+      `${topSelectSql}
+      ORDER BY (COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0)) DESC, i.stock_code ASC
+      LIMIT 5
+      `,
+      topParams,
+    );
+
+    const topNetSellRows = await query(
+      `${topSelectSql}
+      ORDER BY (COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0)) ASC, i.stock_code ASC
+      LIMIT 5
+      `,
+      topParams,
+    );
+
+    res.json({
+      success: true,
+      data: convertBigIntToString({
+        trade_date: targetDate,
+        market: market || "全部",
+        days,
+        unit: {
+          lots: "張",
+          amount: "新台幣，使用法人買賣超張數 × 收盤價 × 1000 估算",
+        },
+        summary: summaryRows[0] || null,
+        by_market: byMarketRows,
+        history: historyRows,
+        top_net_buy: topNetBuyRows,
+        top_net_sell: topNetSellRows,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢三大法人買賣總覽失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢三大法人買賣總覽失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+// ==============================
 // 產業分類完成度
 // GET /industries/status
 // ==============================

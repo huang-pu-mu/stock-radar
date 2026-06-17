@@ -352,6 +352,13 @@ function updatePageText() {
     return;
   }
 
+  if (state.page === "institutionalOverview") {
+    pageTitle.textContent = "法人總覽";
+    pageDesc.textContent = `${marketText}三大法人每日買賣超總覽，分開看外資、投信、自營商與合計金額。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看法人合計金額是流入還是流出，再看外資、投信、自營商哪一方主導；金額目前用買賣超張數乘收盤價估算。</span>`;
+    return;
+  }
+
   if (state.page === "industryFlow") {
     pageTitle.textContent = "產業資金流向";
     pageDesc.textContent = `${marketText}依產業彙總三大法人買賣超，先看資金今天流入哪個產業。`;
@@ -1832,6 +1839,268 @@ function renderSyncBuyCard(row, index) {
 }
 
 
+function formatSignedAmountYi(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+function formatInstitutionalLots(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
+}
+
+function getInstitutionalStrengthClass(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "score-low";
+  if (numberValue > 0) return "score-high";
+  if (numberValue < 0) return "score-low";
+  return "score-mid";
+}
+
+function getInstitutionalFlowText(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "資料不足";
+  if (numberValue > 0) return "法人淨流入";
+  if (numberValue < 0) return "法人淨流出";
+  return "法人持平";
+}
+
+function renderInstitutionalEntityCard(label, row, amountKey, lotsKey, options = {}) {
+  const amount = pick(row, [amountKey], null);
+  const lots = pick(row, [lotsKey], null);
+  const className = getInstitutionalStrengthClass(amount);
+  const note = options.note || "買賣超估算金額";
+  const buyAmount = options.buyAmountKey ? pick(row, [options.buyAmountKey], null) : null;
+  const sellAmount = options.sellAmountKey ? pick(row, [options.sellAmountKey], null) : null;
+
+  return `
+    <div class="institutional-entity-card ${className}">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
+      <small>${formatInstitutionalLots(lots)}｜${escapeHtml(note)}</small>
+      ${buyAmount !== null || sellAmount !== null ? `<em>買進 ${formatAmountYi(buyAmount)}｜賣出 ${formatAmountYi(sellAmount)}</em>` : ""}
+    </div>
+  `;
+}
+
+function renderInstitutionalByMarket(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (safeRows.length === 0) {
+    return `<div class="institutional-empty">沒有市場別彙總資料。</div>`;
+  }
+
+  return `
+    <div class="institutional-market-grid">
+      ${safeRows.map((row) => {
+        const market = pick(row, ["market_type", "market"], "市場");
+        const amount = pick(row, ["total_net_amount"], null);
+        return `
+          <div class="institutional-market-card">
+            <div>
+              <span class="badge">${escapeHtml(market)}</span>
+              <h4 class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</h4>
+            </div>
+            <div class="institutional-market-items">
+              <span>外資 <strong class="${getChangeClass(pick(row, ["foreign_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["foreign_net_amount"], null))}</strong></span>
+              <span>投信 <strong class="${getChangeClass(pick(row, ["investment_trust_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["investment_trust_net_amount"], null))}</strong></span>
+              <span>自營商 <strong class="${getChangeClass(pick(row, ["dealer_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["dealer_net_amount"], null))}</strong></span>
+              <span>檔數 ${formatNumber(pick(row, ["stock_count"], 0))}｜有收盤價 ${formatNumber(pick(row, ["priced_stock_count"], 0))}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderInstitutionalHistory(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (safeRows.length === 0) {
+    return `<div class="institutional-empty">尚無近日期法人歷史資料。</div>`;
+  }
+
+  const orderedRows = [...safeRows].reverse();
+  const maxAmount = Math.max(1, ...orderedRows.map((row) => Math.abs(toNumber(pick(row, ["total_net_amount"], 0)) || 0)));
+
+  return `
+    <div class="institutional-history-list">
+      ${orderedRows.map((row) => {
+        const amount = toNumber(pick(row, ["total_net_amount"], 0)) || 0;
+        const width = Math.max(4, Math.min(100, Math.abs(amount) / maxAmount * 100));
+        const tone = amount >= 0 ? "up" : "down";
+        return `
+          <div class="institutional-history-row">
+            <span>${formatDate(pick(row, ["trade_date"], "-"))}</span>
+            <div class="institutional-history-bar-track">
+              <div class="institutional-history-bar ${tone}" style="width:${width.toFixed(1)}%"></div>
+            </div>
+            <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderInstitutionalTopStocks(rows, title) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (safeRows.length === 0) {
+    return `<div class="institutional-empty">${escapeHtml(title)}目前沒有資料。</div>`;
+  }
+
+  return `
+    <section class="institutional-top-section">
+      <h4>${escapeHtml(title)}</h4>
+      <div class="institutional-top-list">
+        ${safeRows.map((row, index) => {
+          const code = pick(row, ["stock_code", "code"], "-");
+          const name = pick(row, ["stock_name", "name"], "-");
+          const amount = pick(row, ["total_net_amount"], null);
+          const lots = pick(row, ["total_net_lots"], null);
+          const change = pick(row, ["price_change", "change"], null);
+          return `
+            <button class="institutional-stock-row detail-btn" type="button" data-code="${escapeHtml(code)}">
+              <span class="leader-rank">${index + 1}</span>
+              <span class="institutional-stock-main">
+                <strong>${escapeHtml(name)} <small>${escapeHtml(code)}</small></strong>
+                <em>${escapeHtml(pick(row, ["market_type", "market"], "-"))}｜收盤 ${formatPrice(pick(row, ["close_price"], null))}｜漲跌 <span class="${getChangeClass(change)}">${formatPrice(change)}</span></em>
+              </span>
+              <span class="institutional-stock-value">
+                <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
+                <small>${formatInstitutionalLots(lots)}</small>
+              </span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderInstitutionalOverviewPage(result) {
+  const overview = result || {};
+  const summary = overview.summary || {};
+  const tradeDate = overview.trade_date || pick(summary, ["trade_date"], "-");
+  const totalAmount = pick(summary, ["total_net_amount"], null);
+  const flowClass = getInstitutionalStrengthClass(totalAmount);
+  const stockCount = pick(summary, ["stock_count"], 0);
+  const pricedCount = pick(summary, ["priced_stock_count"], 0);
+
+  if (!summary || !overview.trade_date) {
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>尚無法人總覽資料</h3>
+        <p>請先確認每日上市 / 上櫃匯入已完成，資料表 institutional_trades 有資料後就會顯示。</p>
+      </article>
+    `;
+    return;
+  }
+
+  stockList.innerHTML = `
+    <article class="stock-card institutional-overview-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">V1.2 第 7 項</span>
+          <div class="stock-name">
+            <h3>三大法人買賣總覽</h3>
+            <span class="badge">${escapeHtml(overview.market || "全部")}</span>
+            <span class="badge">資料日 ${formatDate(tradeDate)}</span>
+          </div>
+        </div>
+        <div class="score-box ${flowClass}">
+          <span class="score-value institutional-score-value">${formatSignedAmountYi(totalAmount)}</span>
+          <span class="score-label">法人合計金額</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${flowClass}">${escapeHtml(getInstitutionalFlowText(totalAmount))}</span>
+        <span class="summary-text">三大法人合計 <strong class="${getChangeClass(totalAmount)}">${formatSignedAmountYi(totalAmount)}</strong>，合計張數 <strong class="${getChangeClass(pick(summary, ["total_net_lots"], null))}">${formatInstitutionalLots(pick(summary, ["total_net_lots"], null))}</strong></span>
+      </div>
+
+      <div class="institutional-entity-grid">
+        ${renderInstitutionalEntityCard("外資", summary, "foreign_net_amount", "foreign_net_lots", { buyAmountKey: "foreign_buy_amount", sellAmountKey: "foreign_sell_amount" })}
+        ${renderInstitutionalEntityCard("投信", summary, "investment_trust_net_amount", "investment_trust_net_lots", { buyAmountKey: "investment_trust_buy_amount", sellAmountKey: "investment_trust_sell_amount" })}
+        ${renderInstitutionalEntityCard("自營商", summary, "dealer_net_amount", "dealer_net_lots", { note: "目前資料表只有自營商淨買賣超" })}
+        ${renderInstitutionalEntityCard("合計", summary, "total_net_amount", "total_net_lots", { note: "三大法人合計" })}
+      </div>
+
+      <div class="info-grid institutional-info-grid">
+        ${createInfoItem("統計檔數", formatNumber(stockCount))}
+        ${createInfoItem("有收盤價可估金額", `${formatNumber(pricedCount)} 檔`)}
+        ${createInfoItem("市場成交金額", formatAmountYi(pick(summary, ["market_transaction_amount"], null)))}
+        ${createInfoItem("估算方式", "買賣超張數 × 收盤價 × 1000")}
+      </div>
+
+      <p class="panel-note institutional-note">金額為估算值，方便快速看法人資金方向；正式買進 / 賣出成交金額若之後要精準到官方口徑，可再新增專用資料源。</p>
+    </article>
+
+    <article class="stock-card institutional-market-section">
+      <div class="chart-title-row">
+        <h3>上市 / 上櫃分別金額</h3>
+        <span>${formatDate(tradeDate)}</span>
+      </div>
+      ${renderInstitutionalByMarket(overview.by_market)}
+    </article>
+
+    <article class="stock-card institutional-history-section">
+      <div class="chart-title-row">
+        <h3>近 ${formatNumber(overview.days || 10)} 日法人合計趨勢</h3>
+        <span>正數偏流入，負數偏流出</span>
+      </div>
+      ${renderInstitutionalHistory(overview.history)}
+    </article>
+
+    <article class="stock-card institutional-top-wrapper">
+      <div class="chart-title-row">
+        <h3>法人金額排行</h3>
+        <span>點股票可看明細</span>
+      </div>
+      <div class="institutional-top-grid">
+        ${renderInstitutionalTopStocks(overview.top_net_buy, "法人估算買超前 5")}
+        ${renderInstitutionalTopStocks(overview.top_net_sell, "法人估算賣超前 5")}
+      </div>
+    </article>
+  `;
+}
+
+async function loadInstitutionalOverviewPage() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const params = new URLSearchParams({ days: "10" });
+    if (state.market) params.set("market", state.market);
+    const result = await fetchJson(`/market/institutional/summary?${params.toString()}`);
+    renderInstitutionalOverviewPage(result);
+    showTemporaryStatus("已更新三大法人總覽。", "success");
+  } catch (error) {
+    stockList.innerHTML = "";
+    showStatus(
+      `
+        <div class="status-title">法人總覽讀取失敗</div>
+        <div>${escapeHtml(error.message)}</div>
+        <div style="margin-top:10px;">
+          <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+        </div>
+      `,
+      "error"
+    );
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+  } finally {
+    setLoading(false);
+  }
+}
+
+
 function getIndustryFlowStrengthClass(direction, totalLots) {
   const lotValue = toNumber(totalLots) || 0;
   const text = String(direction || "");
@@ -2074,7 +2343,7 @@ function renderMajorHolderCard(row, index) {
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
             <span class="badge">${escapeHtml(industry)}</span>
-            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
+            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
         <div class="score-box ${strengthClass}">
@@ -3066,6 +3335,11 @@ async function loadList() {
 
   if (state.page === "marketIndex") {
     await loadMarketIndexPage();
+    return;
+  }
+
+  if (state.page === "institutionalOverview") {
+    await loadInstitutionalOverviewPage();
     return;
   }
 
