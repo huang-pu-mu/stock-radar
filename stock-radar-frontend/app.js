@@ -296,8 +296,8 @@ function updatePageText() {
 
   if (state.page === "marketIndex") {
     pageTitle.textContent = "大盤走勢";
-    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
+    pageDesc.textContent = "查看上市加權指數、上櫃指數、漲跌幅與市場成交總金額。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向，再看總交易金額；指數漲且成交金額放大，通常代表市場熱度較強。</span>`;
     return;
   }
 
@@ -857,6 +857,23 @@ function formatMarketAmount(value) {
   return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
 }
 
+function formatMarketShares(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "來源未提供";
+  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億股`;
+}
+
+function formatMarketTransactions(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "來源未提供";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 筆`;
+}
+
+function formatMarketSummaryDate(value) {
+  if (!value) return "來源未提供";
+  return formatDate(value);
+}
+
 function getMarketTrendText(changeValue) {
   const change = toNumber(changeValue);
   if (change === null) return "資料讀取中";
@@ -938,6 +955,49 @@ function renderMarketIndexChart(points = []) {
   `;
 }
 
+function renderMarketSummaryPanel(row) {
+  const hasAmount = toNumber(pick(row, ["total_trade_amount"], null)) !== null;
+  const hasVolume = toNumber(pick(row, ["trade_volume", "volume"], null)) !== null;
+  const hasTransactions = toNumber(pick(row, ["transaction_count"], null)) !== null;
+  const hasSummary = hasAmount || hasVolume || hasTransactions;
+  const source = pick(row, ["summary_source"], "");
+  const summaryError = pick(row, ["summary_error"], "");
+
+  return `
+    <section class="market-summary-panel" aria-label="市場成交總覽">
+      <div class="market-summary-title-row">
+        <div>
+          <p class="eyebrow">V1.2 第 1-1 項</p>
+          <h3>指數與成交總覽</h3>
+        </div>
+        <span class="summary-date-chip">資料日：${formatMarketSummaryDate(pick(row, ["summary_trade_date"], ""))}</span>
+      </div>
+
+      <div class="market-summary-grid">
+        <div class="market-summary-item highlight">
+          <span>總交易金額</span>
+          <strong>${formatMarketAmount(pick(row, ["total_trade_amount"], null))}</strong>
+        </div>
+        <div class="market-summary-item">
+          <span>成交股數</span>
+          <strong>${formatMarketShares(pick(row, ["trade_volume", "volume"], null))}</strong>
+        </div>
+        <div class="market-summary-item">
+          <span>成交筆數</span>
+          <strong>${formatMarketTransactions(pick(row, ["transaction_count"], null))}</strong>
+        </div>
+        <div class="market-summary-item">
+          <span>收盤指數參考</span>
+          <strong>${formatIndexPoint(pick(row, ["summary_index_point", "current_point"], null))}</strong>
+        </div>
+      </div>
+
+      ${!hasSummary ? `<p class="market-summary-note">${escapeHtml(summaryError || "這個市場的總交易金額來源尚未提供，先保留欄位，後續補上資料源即可顯示。")}</p>` : ""}
+      ${source ? `<p class="market-summary-note">成交總覽來源：${escapeHtml(source)}</p>` : ""}
+    </section>
+  `;
+}
+
 function renderMarketIndexCard(row) {
   const change = pick(row, ["change_point"], null);
   const trendClass = getChangeClass(change);
@@ -965,7 +1025,7 @@ function renderMarketIndexCard(row) {
 
       <div class="quick-summary">
         <span class="summary-pill ${trendClass === "price-up" ? "score-high" : trendClass === "price-down" ? "score-low" : "score-mid"}">${escapeHtml(trendText)}</span>
-        <span class="summary-text">漲跌 <strong class="${trendClass}">${formatIndexChange(change)}</strong>，漲跌幅 <strong class="${trendClass}">${formatIndexPercent(pick(row, ["change_percent"], null))}</strong></span>
+        <span class="summary-text">漲跌 <strong class="${trendClass}">${formatIndexChange(change)}</strong>，漲跌幅 <strong class="${trendClass}">${formatIndexPercent(pick(row, ["change_percent"], null))}</strong>，總交易金額 <strong>${formatMarketAmount(pick(row, ["total_trade_amount"], null))}</strong></span>
       </div>
 
       ${hasError ? `<div class="result-note error-note"><strong>讀取提醒：</strong>${escapeHtml(row.error)}</div>` : ""}
@@ -975,9 +1035,12 @@ function renderMarketIndexCard(row) {
         ${createInfoItem("最高", formatIndexPoint(pick(row, ["high"], null)))}
         ${createInfoItem("最低", formatIndexPoint(pick(row, ["low"], null)))}
         ${createInfoItem("昨收", formatIndexPoint(pick(row, ["previous_close"], null)))}
-        ${createInfoItem("成交量", formatNullableNumber(pick(row, ["volume"], null)))}
+        ${createInfoItem("成交股數", formatMarketShares(pick(row, ["trade_volume", "volume"], null)))}
+        ${createInfoItem("成交筆數", formatMarketTransactions(pick(row, ["transaction_count"], null)))}
         ${createInfoItem("總交易金額", formatMarketAmount(pick(row, ["total_trade_amount"], null)))}
       </div>
+
+      ${renderMarketSummaryPanel(row)}
 
       <section class="detail-section chart-section market-index-chart-section">
         <div class="chart-title-row">
@@ -985,7 +1048,7 @@ function renderMarketIndexCard(row) {
           <span>${escapeHtml(pick(row, ["latest_time"], ""))} 更新</span>
         </div>
         ${renderMarketIndexChart(points)}
-        <p class="chart-note">目前先做圖一需求：指數即時折線圖；成交量柱狀圖會依資料來源有提供時顯示。</p>
+        <p class="chart-note">圖一已完成指數走勢；圖二這次補上總交易金額、成交股數與成交筆數。</p>
       </section>
 
       <div class="card-actions">
@@ -1008,9 +1071,9 @@ function renderMarketIndexPage(result) {
   stockList.innerHTML = `
     <article class="market-overview-card">
       <div>
-        <p class="eyebrow">V1.2 第一項</p>
-        <h3>上市 / 上櫃指數即時走勢</h3>
-        <p>先補上圖一需求：加權指數與上櫃指數，包含目前點位、漲跌、漲跌幅與盤中走勢圖。</p>
+        <p class="eyebrow">V1.2 第一項 + 第 1-1 項</p>
+        <h3>上市 / 上櫃指數與市場成交總覽</h3>
+        <p>圖一已完成盤中走勢；這次接續圖二，補上加權指數、漲跌點數、漲跌百分比、總交易金額、成交股數與成交筆數。</p>
       </div>
     </article>
     ${indices.map(renderMarketIndexCard).join("")}
@@ -1232,14 +1295,7 @@ async function handleWatchlistAction(button) {
       });
       state.watchlistCodes.delete(stockCode);
 
-      if (state.page === "marketIndex") {
-    pageTitle.textContent = "大盤走勢";
-    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
-    return;
-  }
-
-  if (state.page === "watchlist") {
+      if (state.page === "watchlist") {
         await loadList();
       } else {
         rerenderCurrentContent();
@@ -2338,9 +2394,7 @@ async function loadList() {
   }
 
   if (state.page === "marketIndex") {
-    pageTitle.textContent = "大盤走勢";
-    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
+    await loadMarketIndexPage();
     return;
   }
 

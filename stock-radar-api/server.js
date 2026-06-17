@@ -322,6 +322,119 @@ function buildYahooIndexPoint(timestamp, quote, index) {
   };
 }
 
+function parseTwseRocDate(value) {
+  const text = String(value || "").replaceAll("/", "").trim();
+
+  if (!/^\d{7}$/.test(text)) {
+    return "";
+  }
+
+  const year = Number(text.slice(0, 3)) + 1911;
+  const month = text.slice(3, 5);
+  const day = text.slice(5, 7);
+
+  return `${year}-${month}-${day}`;
+}
+
+function getLatestValidTwseMarketRow(rows = []) {
+  if (!Array.isArray(rows)) return null;
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+
+    if (row && row.Date && toFiniteNumber(row.TradeValue) !== null) {
+      return row;
+    }
+  }
+
+  return null;
+}
+
+function buildTwseMarketSummary(row) {
+  if (!row) return null;
+
+  return {
+    key: "twse",
+    market_type: "上市",
+    trade_date: parseTwseRocDate(row.Date),
+    trade_volume: toFiniteNumber(row.TradeVolume),
+    total_trade_amount: toFiniteNumber(row.TradeValue),
+    transaction_count: toFiniteNumber(row.Transaction),
+    daily_index_point: toFiniteNumber(row.TAIEX),
+    daily_change_point: toFiniteNumber(row.Change),
+    source: "TWSE OpenAPI FMTQIK",
+  };
+}
+
+async function fetchTwseMarketSummary() {
+  const rows = await fetchExternalJson(
+    "https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK",
+    "上市市場成交資訊",
+  );
+
+  const latestRow = getLatestValidTwseMarketRow(rows);
+
+  if (!latestRow) {
+    throw new Error("上市市場成交資訊查無資料");
+  }
+
+  return buildTwseMarketSummary(latestRow);
+}
+
+async function fetchMarketSummary(config) {
+  if (config.key === "twse") {
+    return fetchTwseMarketSummary();
+  }
+
+  return null;
+}
+
+async function fetchMarketIndexWithSummary(config) {
+  const [chartResult, summaryResult] = await Promise.allSettled([
+    fetchYahooIndexChart(config),
+    fetchMarketSummary(config),
+  ]);
+
+  const chart = chartResult.status === "fulfilled"
+    ? chartResult.value
+    : {
+        key: config.key,
+        market_type: config.market_type,
+        index_code: config.index_code,
+        index_name: config.index_name,
+        symbol: config.symbols[0],
+        current_point: null,
+        previous_close: null,
+        change_point: null,
+        change_percent: null,
+        open: null,
+        high: null,
+        low: null,
+        volume: null,
+        total_trade_amount: null,
+        latest_time: "",
+        updated_at: getTaiwanDateTimeText(),
+        source: "Yahoo Finance chart",
+        points: [],
+        error: chartResult.reason?.message || "即時走勢讀取失敗",
+      };
+
+  const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
+  const summaryError = summaryResult.status === "rejected" ? summaryResult.reason?.message : "";
+
+  return {
+    ...chart,
+    total_trade_amount: summary?.total_trade_amount ?? chart.total_trade_amount ?? null,
+    trade_volume: summary?.trade_volume ?? chart.volume ?? null,
+    transaction_count: summary?.transaction_count ?? null,
+    summary_trade_date: summary?.trade_date || "",
+    summary_index_point: summary?.daily_index_point ?? null,
+    summary_change_point: summary?.daily_change_point ?? null,
+    summary_source: summary?.source || "",
+    summary_error: summaryError || "",
+  };
+}
+
 async function fetchYahooIndexChart(config) {
   let lastError = null;
 
@@ -607,7 +720,7 @@ app.post("/auth/logout", (req, res) => {
 // ==============================
 app.get("/market/indices/intraday", async (req, res) => {
   try {
-    const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchYahooIndexChart));
+    const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
 
     res.json({
       success: true,
