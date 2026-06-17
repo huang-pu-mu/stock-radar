@@ -3066,7 +3066,7 @@ function renderSearchResult(summaryData) {
 
       ${isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps)}
 
-      ${isEtf ? "" : renderStockCalendarPanel(stockCalendar)}
+      ${renderStockCalendarPanel(stockCalendar)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -3485,7 +3485,7 @@ async function openDetail(stockCode) {
       renderEtfInfoPanel(summaryData, realtimeQuote),
       isEtf ? "" : renderMonthlyRevenuePanel(monthlyRevenue),
       isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps),
-      isEtf ? "" : renderStockCalendarPanel(stockCalendar),
+      renderStockCalendarPanel(stockCalendar),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
         createInfoItem(isEtf ? "現價" : "收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),

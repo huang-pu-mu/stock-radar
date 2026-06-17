@@ -20,7 +20,7 @@
     "official:eps": "node scripts/importQuarterlyEps.js",
     "official:events": "node scripts/importStockCalendarEvents.js",
     "official:etf": "node scripts/syncEtfProfilesFromStocks.js",
-    "official:daily": "node scripts/importMarketDailySummaries.js && node scripts/importMonthlyRevenues.js && node scripts/importQuarterlyEps.js && node scripts/syncEtfProfilesFromStocks.js"
+    "official:daily": "node scripts/importMarketDailySummaries.js && node scripts/importMonthlyRevenues.js && node scripts/importQuarterlyEps.js && node scripts/syncEtfProfilesFromStocks.js && node scripts/importStockCalendarEvents.js"
   },
   "keywords": [
     "stock",
