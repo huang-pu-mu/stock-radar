@@ -2213,6 +2213,133 @@ function hasRealtimeQuote(quote) {
     .some((key) => toNumber(quote[key]) !== null);
 }
 
+function hasMonthlyRevenue(revenue) {
+  return revenue && !revenue.error && Array.isArray(revenue.rows) && revenue.rows.length > 0;
+}
+
+function formatRevenueAmount(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return `${(numberValue / 100000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+function getRevenueToneClass(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null || numberValue === 0) return "warn";
+  return numberValue > 0 ? "good" : "bad";
+}
+
+function getRevenueScoreClass(revenue) {
+  const yoy = toNumber(pick(revenue, ["latest_year_over_year_percent"], null));
+  const mom = toNumber(pick(revenue, ["latest_month_over_month_percent"], null));
+
+  if (yoy !== null && yoy >= 20 && mom !== null && mom >= 0) return "score-high";
+  if (yoy !== null && yoy > 0) return "score-mid";
+  return "score-low";
+}
+
+function formatRevenuePercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function renderRevenueRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `<div class="result-note">目前沒有近月營收資料。</div>`;
+  }
+
+  return `
+    <div class="revenue-table" aria-label="近月營收表格">
+      <div class="revenue-row revenue-head">
+        <span>月份</span>
+        <span>單月營收</span>
+        <span>月增率</span>
+        <span>年增率</span>
+      </div>
+      ${rows.slice(0, 8).map((row) => `
+        <div class="revenue-row">
+          <strong>${escapeHtml(pick(row, ["period"], "-"))}</strong>
+          <span>${formatRevenueAmount(pick(row, ["month_revenue_thousand"], null))}</span>
+          <span class="${getChangeClass(pick(row, ["month_over_month_percent"], null))}">${formatRevenuePercent(pick(row, ["month_over_month_percent"], null))}</span>
+          <span class="${getChangeClass(pick(row, ["year_over_year_percent"], null))}">${formatRevenuePercent(pick(row, ["year_over_year_percent"], null))}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderMonthlyRevenuePanel(revenue) {
+  const monthlyRevenue = revenue || {};
+
+  if (!hasMonthlyRevenue(monthlyRevenue)) {
+    return `
+      <section class="detail-section revenue-section revenue-empty-section">
+        <h3>每月營收</h3>
+        <div class="result-note error-note">
+          <strong>每月營收暫時讀不到：</strong>${escapeHtml(monthlyRevenue.error || "資料來源目前沒有回傳營收資料。")}
+        </div>
+      </section>
+    `;
+  }
+
+  const scoreClass = getRevenueScoreClass(monthlyRevenue);
+  const mom = pick(monthlyRevenue, ["latest_month_over_month_percent"], null);
+  const yoy = pick(monthlyRevenue, ["latest_year_over_year_percent"], null);
+  const cumulativeYoy = pick(monthlyRevenue, ["latest_cumulative_year_over_year_percent"], null);
+
+  return `
+    <section class="detail-section revenue-section">
+      <div class="realtime-title-row">
+        <div>
+          <p class="eyebrow">V1.2 第 3 項</p>
+          <h3>每月營收</h3>
+        </div>
+        <span class="summary-date-chip">最新：${escapeHtml(pick(monthlyRevenue, ["latest_period"], "-"))}</span>
+      </div>
+
+      <div class="quick-summary revenue-summary">
+        <span class="summary-pill ${scoreClass}">${escapeHtml(pick(monthlyRevenue, ["growth_status"], "營收觀察"))}</span>
+        <span class="summary-text">當月營收 <strong>${formatRevenueAmount(pick(monthlyRevenue, ["latest_month_revenue_thousand"], null))}</strong>，年增率 <strong class="${getChangeClass(yoy)}">${formatRevenuePercent(yoy)}</strong></span>
+      </div>
+
+      <div class="revenue-hero-grid">
+        <div class="revenue-hero-card highlight">
+          <span>當月營收</span>
+          <strong>${formatRevenueAmount(pick(monthlyRevenue, ["latest_month_revenue_thousand"], null))}</strong>
+          <small>單位換算：億元</small>
+        </div>
+        <div class="revenue-hero-card ${getRevenueToneClass(mom)}">
+          <span>月增率</span>
+          <strong>${formatRevenuePercent(mom)}</strong>
+          <small>跟上個月比較</small>
+        </div>
+        <div class="revenue-hero-card ${getRevenueToneClass(yoy)}">
+          <span>年增率</span>
+          <strong>${formatRevenuePercent(yoy)}</strong>
+          <small>跟去年同月比較</small>
+        </div>
+      </div>
+
+      <div class="info-grid revenue-info-grid">
+        ${createInfoItem("去年同月營收", formatRevenueAmount(pick(monthlyRevenue, ["latest_last_year_month_revenue_thousand"], null)))}
+        ${createInfoItem("累計營收", formatRevenueAmount(pick(monthlyRevenue, ["latest_cumulative_revenue_thousand"], null)))}
+        ${createInfoItem("累計年增率", formatRevenuePercent(cumulativeYoy), getChangeClass(cumulativeYoy))}
+        ${createInfoItem("資料來源", escapeHtml(pick(monthlyRevenue, ["source"], "Yahoo 股市營收表")))}
+      </div>
+
+      <div class="chart-title-row revenue-chart-title">
+        <h3>近月營收表格</h3>
+        <span>單位：億元</span>
+      </div>
+      ${renderRevenueRows(monthlyRevenue.rows)}
+
+      <p class="chart-note">營收資料用來確認基本面是否支撐股價；單月月增率可能受季節性影響，建議搭配年增率與累計年增率一起看。</p>
+    </section>
+  `;
+}
+
 function renderRealtimeLevelRows(quote) {
   const bids = Array.isArray(quote?.bid_levels) ? quote.bid_levels : [];
   const asks = Array.isArray(quote?.ask_levels) ? quote.ask_levels : [];
@@ -2346,6 +2473,7 @@ function renderSearchResult(summaryData) {
   const scoreClass = getScoreClass(score);
   const scoreText = getScoreText(score);
   const realtimeQuote = summaryData.realtime_quote || {};
+  const monthlyRevenue = summaryData.monthly_revenue || {};
   const hasRealtime = hasRealtimeQuote(realtimeQuote);
   const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
   const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
@@ -2382,6 +2510,8 @@ function renderSearchResult(summaryData) {
       </div>
 
       ${renderRealtimeQuotePanel(realtimeQuote, summaryData)}
+
+      ${renderMonthlyRevenuePanel(monthlyRevenue)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -2508,9 +2638,10 @@ async function searchStock(codeFromButton = "") {
   `;
 
   try {
-    const [summaryResult, realtimeResult] = await Promise.allSettled([
+    const [summaryResult, realtimeResult, revenueResult] = await Promise.allSettled([
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`),
       fetchJson(`/stock/${encodeURIComponent(stockCode)}/realtime`),
+      fetchJson(`/stock/${encodeURIComponent(stockCode)}/revenue?limit=24`),
     ]);
 
     if (summaryResult.status !== "fulfilled") {
@@ -2526,6 +2657,9 @@ async function searchStock(codeFromButton = "") {
     summaryData.realtime_quote = realtimeResult.status === "fulfilled"
       ? realtimeResult.value
       : { error: realtimeResult.reason?.message || "即時行情讀取失敗" };
+    summaryData.monthly_revenue = revenueResult.status === "fulfilled"
+      ? revenueResult.value
+      : { error: revenueResult.reason?.message || "每月營收讀取失敗" };
 
     state.lastSearchCode = stockCode;
     state.lastSearchData = summaryData;
@@ -2655,9 +2789,10 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, realtime, prices, trades, scores, holders] = await Promise.allSettled([
+    const [summary, realtime, revenue, prices, trades, scores, holders] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
       fetchJson(`/stock/${stockCode}/realtime`),
+      fetchJson(`/stock/${stockCode}/revenue?limit=24`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
@@ -2666,6 +2801,7 @@ async function openDetail(stockCode) {
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
     const realtimeQuote = realtime.status === "fulfilled" ? realtime.value : { error: realtime.reason?.message || "即時行情讀取失敗" };
+    const monthlyRevenue = revenue.status === "fulfilled" ? revenue.value : { error: revenue.reason?.message || "每月營收讀取失敗" };
     const priceRows = prices.status === "fulfilled" && Array.isArray(prices.value) ? prices.value : [];
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
@@ -2707,6 +2843,7 @@ async function openDetail(stockCode) {
         </section>
       `,
       renderRealtimeQuotePanel(realtimeQuote, summaryData),
+      renderMonthlyRevenuePanel(monthlyRevenue),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
         createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),

@@ -2350,3 +2350,109 @@ body.chart-zoom-open {
     font-size: 12px;
   }
 }
+
+/* V1.2 第 3 項：個股每月營收 */
+.revenue-section {
+  border-color: rgba(248, 214, 109, 0.22);
+  background: rgba(248, 214, 109, 0.055);
+}
+
+.revenue-summary {
+  margin-bottom: 14px;
+}
+
+.revenue-hero-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.revenue-hero-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.revenue-hero-card.highlight {
+  background: linear-gradient(135deg, rgba(248, 214, 109, 0.18), rgba(86, 214, 255, 0.08));
+}
+
+.revenue-hero-card span,
+.revenue-hero-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.revenue-hero-card strong {
+  display: block;
+  margin: 6px 0;
+  font-size: clamp(24px, 5vw, 34px);
+  line-height: 1.12;
+  font-variant-numeric: tabular-nums;
+}
+
+.revenue-hero-card.good strong {
+  color: var(--success);
+}
+
+.revenue-hero-card.bad strong {
+  color: var(--danger);
+}
+
+.revenue-hero-card.warn strong {
+  color: var(--warning);
+}
+
+.revenue-info-grid {
+  margin-bottom: 14px;
+}
+
+.revenue-chart-title {
+  margin: 8px 0 10px;
+}
+
+.revenue-table {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.revenue-row {
+  display: grid;
+  grid-template-columns: 0.9fr 1.2fr 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.revenue-row:first-child {
+  border-top: 0;
+}
+
+.revenue-head {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+@media (max-width: 720px) {
+  .revenue-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .revenue-row {
+    grid-template-columns: 0.85fr 1.1fr 0.9fr 0.9fr;
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+}

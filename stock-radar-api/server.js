@@ -298,6 +298,31 @@ async function fetchExternalJson(url, label) {
   }
 }
 
+async function fetchExternalText(url, label, headers = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 stock-radar-api",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        ...headers,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`${label} HTTP ${response.status}`);
+    }
+
+    return response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getLastFiniteValue(values = []) {
   for (let index = values.length - 1; index >= 0; index -= 1) {
     const value = toFiniteNumber(values[index]);
@@ -899,6 +924,144 @@ async function fetchTwseRealtimeQuote(stockInfo) {
   return buildRealtimeQuote(row, stockInfo, channel);
 }
 
+function getYahooTwSymbol(stockInfo) {
+  const stockCode = normalizeStockCodeValue(stockInfo?.stock_code);
+  const marketType = String(stockInfo?.market_type || "");
+  const suffix = marketType.includes("上櫃") ? "TWO" : "TW";
+
+  return `${stockCode}.${suffix}`;
+}
+
+function decodeBasicHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
+}
+
+function htmlToReadableText(html) {
+  return decodeBasicHtmlEntities(
+    String(html || "")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>|<\/div>|<\/li>|<\/tr>|<\/h[1-6]>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+function parseRevenuePercent(value) {
+  if (value === null || value === undefined || value === "" || value === "-") return null;
+  return toFiniteNumber(String(value).replace("%", ""));
+}
+
+function parseYahooRevenueRowsFromText(text, limit = 24) {
+  const normalized = String(text || "")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/−/g, "-");
+  const rowPattern = /(\d{4}\/\d{2})\s+([0-9,]+)\s+(-?[0-9,.]+%|-)\s+([0-9,]+)\s+(-?[0-9,.]+%|-)\s+([0-9,]+)\s+([0-9,]+)\s+(-?[0-9,.]+%|-)/g;
+  const rows = [];
+  const seenPeriods = new Set();
+  let match;
+
+  while ((match = rowPattern.exec(normalized)) !== null) {
+    const period = match[1];
+
+    if (seenPeriods.has(period)) continue;
+    seenPeriods.add(period);
+
+    const year = Number(period.slice(0, 4));
+    const month = Number(period.slice(5, 7));
+
+    rows.push({
+      period,
+      year,
+      month,
+      month_revenue_thousand: toFiniteNumber(match[2]),
+      month_over_month_percent: parseRevenuePercent(match[3]),
+      last_year_month_revenue_thousand: toFiniteNumber(match[4]),
+      year_over_year_percent: parseRevenuePercent(match[5]),
+      cumulative_revenue_thousand: toFiniteNumber(match[6]),
+      last_year_cumulative_revenue_thousand: toFiniteNumber(match[7]),
+      cumulative_year_over_year_percent: parseRevenuePercent(match[8]),
+    });
+
+    if (rows.length >= limit) break;
+  }
+
+  return rows;
+}
+
+function getRevenueGrowthStatus(latest, rows = []) {
+  if (!latest) return "營收資料不足";
+
+  const yoy = toFiniteNumber(latest.year_over_year_percent);
+  const mom = toFiniteNumber(latest.month_over_month_percent);
+  const recentRows = rows.slice(0, 3);
+  const positiveYoyCount = recentRows.filter((row) => toFiniteNumber(row.year_over_year_percent) !== null && toFiniteNumber(row.year_over_year_percent) > 0).length;
+  const positiveMomCount = recentRows.filter((row) => toFiniteNumber(row.month_over_month_percent) !== null && toFiniteNumber(row.month_over_month_percent) > 0).length;
+
+  if (yoy !== null && yoy >= 20 && mom !== null && mom >= 0) return "營收明顯成長";
+  if (positiveYoyCount >= 3 && positiveMomCount >= 2) return "營收連續轉強";
+  if (yoy !== null && yoy > 0) return "營收年增";
+  if (yoy !== null && yoy < 0) return "營收年減";
+  return "營收持平觀察";
+}
+
+function buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl) {
+  const latest = rows[0] || null;
+
+  return {
+    stock_code: stockInfo.stock_code,
+    stock_name: stockInfo.stock_name,
+    market_type: stockInfo.market_type,
+    industry: stockInfo.industry,
+    symbol,
+    unit: "仟元",
+    latest_period: latest?.period || "",
+    latest_month_revenue_thousand: latest?.month_revenue_thousand ?? null,
+    latest_month_over_month_percent: latest?.month_over_month_percent ?? null,
+    latest_last_year_month_revenue_thousand: latest?.last_year_month_revenue_thousand ?? null,
+    latest_year_over_year_percent: latest?.year_over_year_percent ?? null,
+    latest_cumulative_revenue_thousand: latest?.cumulative_revenue_thousand ?? null,
+    latest_cumulative_year_over_year_percent: latest?.cumulative_year_over_year_percent ?? null,
+    growth_status: getRevenueGrowthStatus(latest, rows),
+    rows,
+    source: "Yahoo 股市營收表",
+    source_url: sourceUrl,
+    updated_at: getTaiwanDateTimeText(),
+  };
+}
+
+async function fetchYahooMonthlyRevenue(stockInfo, limit = 24) {
+  const symbol = getYahooTwSymbol(stockInfo);
+  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/revenue`;
+  const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 每月營收`, {
+    Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
+  });
+  const text = htmlToReadableText(html);
+  const rows = parseYahooRevenueRowsFromText(text, limit);
+
+  if (rows.length === 0) {
+    throw new Error("每月營收來源暫時沒有回傳可解析資料");
+  }
+
+  return buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl);
+}
+
 app.get("/market/indices/intraday", async (req, res) => {
   try {
     const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
@@ -956,6 +1119,45 @@ app.get("/stock/:stockCode/realtime", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢個股即時行情失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/stock/:stockCode/revenue", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確",
+      });
+    }
+
+    const stockInfo = await getStockInfoForRealtime(stockCode);
+
+    if (!stockInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    const limit = parseLimit(req.query.limit, 24, 60);
+    const revenue = await fetchYahooMonthlyRevenue(stockInfo, limit);
+
+    res.json({
+      success: true,
+      message: "個股每月營收讀取完成",
+      data: convertBigIntToString(revenue),
+    });
+  } catch (error) {
+    console.error("查詢個股每月營收失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股每月營收失敗",
       error: error.message,
     });
   }
