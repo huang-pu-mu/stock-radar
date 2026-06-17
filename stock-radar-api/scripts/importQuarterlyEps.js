@@ -1,6 +1,14 @@
 import pool from "../db.js";
 
-const MOPS_AJAX_URL = "https://mops.twse.com.tw/mops/web/ajax_t163sb04";
+const MOPS_AJAX_URLS = [
+  "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04",
+  "https://mops.twse.com.tw/mops/web/ajax_t163sb04",
+];
+
+const MOPS_REFERERS = [
+  "https://mopsov.twse.com.tw/mops/web/t163sb04",
+  "https://mops.twse.com.tw/mops/web/t163sb04",
+];
 const DEFAULT_QUARTER_COUNT = Number(process.env.EPS_IMPORT_QUARTERS || 12);
 
 const SOURCES = [
@@ -111,6 +119,10 @@ function htmlTableRows(html) {
   return rows;
 }
 
+function getHtmlDebugText(html) {
+  return stripHtml(String(html || "")).slice(0, 240);
+}
+
 function findHeaderIndex(header, candidates) {
   const normalizedCandidates = candidates.map(normalizeKey);
   return header.findIndex((cell) => {
@@ -170,45 +182,76 @@ function parseMopsEpsRows(html, year, quarter) {
   return result;
 }
 
-async function fetchMopsEpsRows(source, period) {
+function buildMopsParamVariants(source, period) {
   const rocYear = period.year - 1911;
-  const params = new URLSearchParams({
+  const paddedSeason = String(period.quarter).padStart(2, "0");
+  const plainSeason = String(period.quarter);
+  const base = {
     encodeURIComponent: "1",
     step: "1",
     firstin: "1",
     off: "1",
     keyword4: "",
     code1: "",
+    inpuType: "co_id",
+    queryName: "co_id",
     TYPEK: source.typeK,
     year: String(rocYear),
-    season: String(period.quarter).padStart(2, "0"),
-  });
+  };
 
-  const response = await fetch(MOPS_AJAX_URL, {
+  return [
+    { ...base, season: paddedSeason },
+    { ...base, season: plainSeason },
+    { ...base, isnew: "false", season: paddedSeason },
+    { ...base, isnew: "false", season: plainSeason },
+  ];
+}
+
+async function fetchMopsHtml(url, referer, params) {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
-      "User-Agent": "Mozilla/5.0 stock-radar-api",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) stock-radar-api",
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
       Accept: "text/html,application/xhtml+xml,application/xml,text/plain,*/*",
-      Origin: "https://mops.twse.com.tw",
-      Referer: "https://mops.twse.com.tw/mops/web/t163sb04",
+      Origin: new URL(url).origin,
+      Referer: referer,
     },
-    body: params,
+    body: new URLSearchParams(params),
   });
 
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
 
-  const html = await response.text();
-  const rows = parseMopsEpsRows(html, period.year, period.quarter);
+async function fetchMopsEpsRows(source, period) {
+  const rocYear = period.year - 1911;
+  const attempts = [];
 
-  if (rows.length === 0) {
-    throw new Error(`${period.year} Q${period.quarter} 無可解析 EPS 資料`);
+  for (const url of MOPS_AJAX_URLS) {
+    const isNewDomain = url.includes("mopsov.twse.com.tw");
+    const referer = isNewDomain ? MOPS_REFERERS[0] : MOPS_REFERERS[1];
+
+    for (const params of buildMopsParamVariants(source, period)) {
+      try {
+        const html = await fetchMopsHtml(url, referer, params);
+        const rows = parseMopsEpsRows(html, period.year, period.quarter);
+
+        if (rows.length > 0) {
+          return {
+            rows,
+            sourceUrl: `${url}?TYPEK=${source.typeK}&year=${rocYear}&season=${params.season}`,
+          };
+        }
+
+        attempts.push(`${new URL(url).hostname} season=${params.season} 無資料：${getHtmlDebugText(html)}`);
+      } catch (error) {
+        attempts.push(`${new URL(url).hostname} season=${params.season} ${error.message}`);
+      }
+    }
   }
 
-  return {
-    rows,
-    sourceUrl: `${MOPS_AJAX_URL}?TYPEK=${source.typeK}&year=${rocYear}&season=${String(period.quarter).padStart(2, "0")}`,
-  };
+  throw new Error(`${period.year} Q${period.quarter} 無可解析 EPS 資料；${attempts.slice(0, 4).join("；")}`);
 }
 
 async function upsertRows(conn, rows, sourceUrl) {
@@ -230,7 +273,7 @@ async function upsertRows(conn, rows, sourceUrl) {
         eps,
         source,
         source_url
-      ) VALUES (?, ?, ?, ?, 'MOPS ajax_t163sb04', ?)
+      ) VALUES (?, ?, ?, ?, 'MOPS ajax_t163sb04 / mopsov', ?)
       ON DUPLICATE KEY UPDATE
         eps = VALUES(eps),
         source = VALUES(source),
@@ -324,7 +367,7 @@ async function main() {
 
   try {
     console.log("開始匯入每季 EPS 資料");
-    console.log(`資料來源：MOPS ajax_t163sb04，季度：${periods.map((period) => `${period.year}Q${period.quarter}`).join(", ")}`);
+    console.log(`資料來源：MOPSOV / MOPS ajax_t163sb04，季度：${periods.map((period) => `${period.year}Q${period.quarter}`).join(", ")}`);
 
     for (const source of SOURCES) {
       const result = await importSource(conn, source, periods);
