@@ -2456,3 +2456,26 @@ body.chart-zoom-open {
     font-size: 12px;
   }
 }
+
+
+.eps-section {
+  border-color: rgba(248, 214, 109, 0.28);
+}
+
+.eps-summary {
+  margin-bottom: 14px;
+}
+
+.eps-table .eps-row {
+  grid-template-columns: 0.95fr 1fr 1fr 1fr;
+}
+
+.eps-info-grid {
+  margin-top: 2px;
+}
+
+@media (max-width: 720px) {
+  .eps-table .eps-row {
+    grid-template-columns: 0.85fr 0.95fr 0.95fr 0.95fr;
+  }
+}

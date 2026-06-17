@@ -1062,6 +1062,207 @@ async function fetchYahooMonthlyRevenue(stockInfo, limit = 24) {
   return buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl);
 }
 
+function parseEpsPercent(value) {
+  if (value === null || value === undefined || value === "" || value === "-") return null;
+  return toFiniteNumber(String(value).replace("%", ""));
+}
+
+function buildQuarterKey(year, quarter) {
+  const yearValue = Number(year);
+  const quarterValue = Number(quarter);
+
+  if (!Number.isFinite(yearValue) || !Number.isFinite(quarterValue)) {
+    return null;
+  }
+
+  return yearValue * 4 + quarterValue;
+}
+
+function normalizeEpsRows(rows = []) {
+  const sortedRows = rows
+    .filter((row) => row && Number.isFinite(Number(row.year)) && Number.isFinite(Number(row.quarter)))
+    .map((row) => ({
+      ...row,
+      year: Number(row.year),
+      quarter: Number(row.quarter),
+      period: row.period || `${row.year} Q${row.quarter}`,
+      quarter_key: buildQuarterKey(row.year, row.quarter),
+      eps: toFiniteNumber(row.eps),
+      quarter_over_quarter_percent: parseEpsPercent(row.quarter_over_quarter_percent),
+      year_over_year_percent: parseEpsPercent(row.year_over_year_percent),
+    }))
+    .sort((a, b) => b.quarter_key - a.quarter_key);
+
+  return sortedRows.map((row, index, allRows) => {
+    const previousQuarter = allRows.find((item) => item.quarter_key === row.quarter_key - 1);
+    const sameQuarterLastYear = allRows.find((item) => item.quarter_key === row.quarter_key - 4);
+    const eps = toFiniteNumber(row.eps);
+    const previousEps = toFiniteNumber(previousQuarter?.eps);
+    const lastYearEps = toFiniteNumber(sameQuarterLastYear?.eps);
+    const qoq = row.quarter_over_quarter_percent ?? (
+      eps !== null && previousEps !== null && previousEps !== 0
+        ? ((eps - previousEps) / Math.abs(previousEps)) * 100
+        : null
+    );
+    const yoy = row.year_over_year_percent ?? (
+      eps !== null && lastYearEps !== null && lastYearEps !== 0
+        ? ((eps - lastYearEps) / Math.abs(lastYearEps)) * 100
+        : null
+    );
+
+    return {
+      ...row,
+      quarter_over_quarter_percent: qoq,
+      year_over_year_percent: yoy,
+    };
+  });
+}
+
+function parseYahooEpsRowsFromText(text, limit = 20) {
+  const normalized = String(text || "")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/−/g, "-");
+  const rowPattern = /(20\d{2})\s*(?:\/\s*)?(?:Q\s*([1-4])|([1-4])\s*Q|第\s*([1-4])\s*季|([1-4])\s*季)\s+(-?[0-9,.]+|-)\s+(-?[0-9,.]+%?|-)?\s*([-+]?[0-9,.]+%?|-)?/gi;
+  const rows = [];
+  const seenPeriods = new Set();
+  let match;
+
+  while ((match = rowPattern.exec(normalized)) !== null) {
+    const year = Number(match[1]);
+    const quarter = Number(match[2] || match[3] || match[4] || match[5]);
+    const period = `${year} Q${quarter}`;
+
+    if (seenPeriods.has(period)) continue;
+    seenPeriods.add(period);
+
+    rows.push({
+      period,
+      year,
+      quarter,
+      eps: toFiniteNumber(match[6]),
+      quarter_over_quarter_percent: parseEpsPercent(match[7]),
+      year_over_year_percent: parseEpsPercent(match[8]),
+    });
+
+    if (rows.length >= limit) break;
+  }
+
+  return normalizeEpsRows(rows).slice(0, limit);
+}
+
+function getEpsGrowthStatus(latest, rows = []) {
+  if (!latest || toFiniteNumber(latest.eps) === null) return "EPS 資料不足";
+
+  const eps = toFiniteNumber(latest.eps);
+  const qoq = toFiniteNumber(latest.quarter_over_quarter_percent);
+  const yoy = toFiniteNumber(latest.year_over_year_percent);
+  const recentRows = rows.slice(0, 4);
+  const positiveEpsCount = recentRows.filter((row) => toFiniteNumber(row.eps) !== null && toFiniteNumber(row.eps) > 0).length;
+  const positiveYoyCount = recentRows.filter((row) => toFiniteNumber(row.year_over_year_percent) !== null && toFiniteNumber(row.year_over_year_percent) > 0).length;
+
+  if (eps !== null && eps > 0 && yoy !== null && yoy >= 20 && (qoq === null || qoq >= 0)) return "EPS 明顯成長";
+  if (positiveEpsCount >= 4 && positiveYoyCount >= 3) return "EPS 連續轉強";
+  if (eps !== null && eps > 0 && yoy !== null && yoy > 0) return "EPS 年增";
+  if (eps !== null && eps > 0) return "EPS 獲利觀察";
+  if (eps !== null && eps < 0) return "EPS 虧損觀察";
+  return "EPS 持平觀察";
+}
+
+function buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl) {
+  const latest = rows[0] || null;
+  const recentFourRows = rows.slice(0, 4);
+  const validRecentEps = recentFourRows
+    .map((row) => toFiniteNumber(row.eps))
+    .filter((value) => value !== null);
+  const trailingFourQuarterEps = validRecentEps.length > 0
+    ? validRecentEps.reduce((sum, value) => sum + value, 0)
+    : null;
+  const averageQuarterEps = validRecentEps.length > 0
+    ? trailingFourQuarterEps / validRecentEps.length
+    : null;
+
+  return {
+    stock_code: stockInfo.stock_code,
+    stock_name: stockInfo.stock_name,
+    market_type: stockInfo.market_type,
+    industry: stockInfo.industry,
+    symbol,
+    unit: "元",
+    latest_period: latest?.period || "",
+    latest_eps: latest?.eps ?? null,
+    latest_quarter_over_quarter_percent: latest?.quarter_over_quarter_percent ?? null,
+    latest_year_over_year_percent: latest?.year_over_year_percent ?? null,
+    trailing_four_quarter_eps: trailingFourQuarterEps,
+    average_quarter_eps: averageQuarterEps,
+    growth_status: getEpsGrowthStatus(latest, rows),
+    rows,
+    source: "Yahoo 股市 EPS 表",
+    source_url: sourceUrl,
+    updated_at: getTaiwanDateTimeText(),
+  };
+}
+
+function normalizeYahooQuoteSummaryEpsRows(history = [], limit = 20) {
+  const rows = history
+    .map((item) => {
+      const quarterText = String(item?.quarter?.fmt || item?.quarter?.raw || "").trim();
+      const match = quarterText.match(/(20\d{2}).*?([1-4])/);
+      const year = match ? Number(match[1]) : null;
+      const quarter = match ? Number(match[2]) : null;
+      const eps = toFiniteNumber(item?.epsActual?.raw ?? item?.epsActual?.fmt);
+
+      if (!year || !quarter || eps === null) return null;
+
+      return {
+        period: `${year} Q${quarter}`,
+        year,
+        quarter,
+        eps,
+        quarter_over_quarter_percent: null,
+        year_over_year_percent: null,
+      };
+    })
+    .filter(Boolean);
+
+  return normalizeEpsRows(rows).slice(0, limit);
+}
+
+async function fetchYahooEpsQuoteSummary(stockInfo, limit = 20) {
+  const symbol = getYahooTwSymbol(stockInfo);
+  const sourceUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earningsHistory`;
+  const json = await fetchExternalJson(sourceUrl, `${stockInfo.stock_code} EPS 備援資料`);
+  const history = json?.quoteSummary?.result?.[0]?.earningsHistory?.history || [];
+  const rows = normalizeYahooQuoteSummaryEpsRows(history, limit);
+
+  if (rows.length === 0) {
+    throw new Error("EPS 備援來源暫時沒有回傳可解析資料");
+  }
+
+  return buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl);
+}
+
+async function fetchYahooQuarterlyEps(stockInfo, limit = 20) {
+  const symbol = getYahooTwSymbol(stockInfo);
+  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/eps`;
+
+  try {
+    const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 每季 EPS`, {
+      Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
+    });
+    const text = htmlToReadableText(html);
+    const rows = parseYahooEpsRowsFromText(text, limit);
+
+    if (rows.length > 0) {
+      return buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl);
+    }
+  } catch (error) {
+    // 頁面解析失敗時改用 Yahoo Finance quoteSummary 備援。
+  }
+
+  return fetchYahooEpsQuoteSummary(stockInfo, limit);
+}
+
 app.get("/market/indices/intraday", async (req, res) => {
   try {
     const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
@@ -1158,6 +1359,46 @@ app.get("/stock/:stockCode/revenue", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢個股每月營收失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+app.get("/stock/:stockCode/eps", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確",
+      });
+    }
+
+    const stockInfo = await getStockInfoForRealtime(stockCode);
+
+    if (!stockInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    const limit = parseLimit(req.query.limit, 20, 40);
+    const eps = await fetchYahooQuarterlyEps(stockInfo, limit);
+
+    res.json({
+      success: true,
+      message: "個股每季 EPS 讀取完成",
+      data: convertBigIntToString(eps),
+    });
+  } catch (error) {
+    console.error("查詢個股每季 EPS 失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股每季 EPS 失敗",
       error: error.message,
     });
   }
