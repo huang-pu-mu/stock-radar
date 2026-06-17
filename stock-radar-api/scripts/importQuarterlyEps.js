@@ -1,26 +1,34 @@
 import pool from "../db.js";
 
+const MOPS_AJAX_URL = "https://mops.twse.com.tw/mops/web/ajax_t163sb04";
+const DEFAULT_QUARTER_COUNT = Number(process.env.EPS_IMPORT_QUARTERS || 12);
+
 const SOURCES = [
   {
     marketType: "上市",
-    urls: [
-      "https://mopsfin.twse.com.tw/opendata/t163sb04_L.csv",
-      "https://mopsfin.twse.com.tw/opendata/t163sb04_L",
-    ],
+    typeK: "sii",
   },
   {
     marketType: "上櫃",
-    urls: [
-      "https://mopsfin.twse.com.tw/opendata/t163sb04_O.csv",
-      "https://mopsfin.twse.com.tw/opendata/t163sb04_O",
-    ],
+    typeK: "otc",
   },
 ];
 
 function stripHtml(value) {
   return String(value ?? "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#40;/g, "(")
+    .replace(/&#41;/g, ")")
+    .replace(/&#43;/g, "+")
+    .replace(/&#45;/g, "-")
+    .replace(/&#37;/g, "%")
+    .replace(/\s+/g, " ")
     .replace(/^\uFEFF/, "")
     .trim();
 }
@@ -31,115 +39,15 @@ function normalizeKey(value) {
     .toLowerCase();
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const nextChar = text[index + 1];
-
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        field += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(field);
-      field = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && nextChar === "\n") index += 1;
-      row.push(field);
-      if (row.some((item) => String(item).trim() !== "")) rows.push(row);
-      row = [];
-      field = "";
-      continue;
-    }
-
-    field += char;
-  }
-
-  row.push(field);
-  if (row.some((item) => String(item).trim() !== "")) rows.push(row);
-
-  if (rows.length < 2) return [];
-  const headers = rows[0].map(normalizeKey);
-
-  return rows.slice(1).map((values) => {
-    const result = {};
-    headers.forEach((header, index) => {
-      result[header] = stripHtml(values[index]);
-    });
-    return result;
-  });
-}
-
-async function fetchRows(url) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 stock-radar-api",
-      Accept: "text/csv,application/json,text/plain,*/*",
-    },
-  });
-
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const text = (await response.text()).replace(/^\uFEFF/, "").trim();
-  if (!text) throw new Error("資料來源空白");
-
-  if (text.startsWith("[") || text.startsWith("{")) {
-    const json = JSON.parse(text);
-    if (Array.isArray(json)) return json;
-    if (Array.isArray(json.data)) return json.data;
-  }
-
-  return parseCsv(text);
-}
-
-async function fetchRowsWithFallback(source) {
-  const errors = [];
-
-  for (const url of source.urls) {
-    try {
-      const rows = await fetchRows(url);
-      if (rows.length > 0) return { rows, url };
-      errors.push(`${url}：沒有資料列`);
-    } catch (error) {
-      errors.push(`${url}：${error.message}`);
-    }
-  }
-
-  throw new Error(errors.join("；"));
-}
-
-function pick(row, candidates) {
-  const entries = Object.entries(row || {});
-  for (const candidate of candidates) {
-    const key = normalizeKey(candidate);
-    const found = entries.find(([itemKey]) => normalizeKey(itemKey) === key);
-    if (found && String(found[1] ?? "").trim() !== "") return found[1];
-  }
-  for (const candidate of candidates) {
-    const key = normalizeKey(candidate);
-    const found = entries.find(([itemKey]) => normalizeKey(itemKey).includes(key));
-    if (found && String(found[1] ?? "").trim() !== "") return found[1];
-  }
-  return "";
-}
-
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
-  const text = String(value).replace(/,/g, "").replace(/%/g, "").trim();
-  if (!text || text === "-" || text === "--") return null;
+  const text = stripHtml(value)
+    .replace(/,/g, "")
+    .replace(/%/g, "")
+    .replace(/−/g, "-")
+    .replace(/—/g, "-")
+    .trim();
+  if (!text || text === "-" || text === "--" || text === "不適用") return null;
   const numberValue = Number(text);
   return Number.isFinite(numberValue) ? numberValue : null;
 }
@@ -157,30 +65,158 @@ function normalizeQuarter(value) {
   return match ? Number(match[0]) : null;
 }
 
-function normalizeRow(row) {
-  const stockCode = String(pick(row, ["公司代號", "股票代號", "證券代號", "代號"])).trim();
-  const year = normalizeYear(pick(row, ["年度", "年", "財報年度", "資料年度"]));
-  const quarter = normalizeQuarter(pick(row, ["季別", "季度", "季", "財報季別", "資料季別"]));
-  const eps = toNumber(pick(row, ["基本每股盈餘", "基本每股盈餘元", "每股盈餘", "EPS", "基本每股盈餘合計"]));
+function getRecentCompletedQuarters(count = DEFAULT_QUARTER_COUNT) {
+  const now = new Date();
+  let year = now.getFullYear();
+  let quarter = Math.floor(now.getMonth() / 3) + 1;
 
-  if (!/^\d{4,6}[A-Z]?$/.test(stockCode) || !year || !quarter || eps === null) return null;
+  // 只抓已結束季度，避免抓到尚未申報完成的本季資料。
+  quarter -= 1;
+  if (quarter <= 0) {
+    year -= 1;
+    quarter = 4;
+  }
+
+  const periods = [];
+  for (let index = 0; index < count; index += 1) {
+    periods.push({ year, quarter });
+    quarter -= 1;
+    if (quarter <= 0) {
+      year -= 1;
+      quarter = 4;
+    }
+  }
+  return periods;
+}
+
+function parseRequestedPeriods() {
+  const [yearArg, quarterArg] = process.argv.slice(2);
+  const year = normalizeYear(yearArg);
+  const quarter = normalizeQuarter(quarterArg);
+
+  if (year && quarter) return [{ year, quarter }];
+  return getRecentCompletedQuarters();
+}
+
+function htmlTableRows(html) {
+  const rows = [];
+  const rowMatches = String(html || "").match(/<tr[\s\S]*?<\/tr>/gi) || [];
+
+  for (const rowHtml of rowMatches) {
+    const cellMatches = rowHtml.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) || [];
+    const cells = cellMatches.map(stripHtml).filter((cell) => cell !== "");
+    if (cells.length > 0) rows.push(cells);
+  }
+
+  return rows;
+}
+
+function findHeaderIndex(header, candidates) {
+  const normalizedCandidates = candidates.map(normalizeKey);
+  return header.findIndex((cell) => {
+    const key = normalizeKey(cell);
+    return normalizedCandidates.some((candidate) => key === candidate || key.includes(candidate));
+  });
+}
+
+function findLikelyEpsValue(cells) {
+  // MOPS 綜合損益表中，基本每股盈餘通常在表格後段。
+  // 若表頭解析不到，就從後段數值欄位往前找第一個合理 EPS 數字。
+  for (let index = cells.length - 1; index >= 0; index -= 1) {
+    const value = toNumber(cells[index]);
+    if (value !== null && Math.abs(value) < 1000) return value;
+  }
+  return null;
+}
+
+function parseMopsEpsRows(html, year, quarter) {
+  const text = stripHtml(html);
+  if (!text || text.includes("查無資料") || text.includes("很抱歉")) return [];
+
+  const tableRows = htmlTableRows(html);
+  let header = [];
+  let codeIndex = 0;
+  let epsIndex = -1;
+  const result = [];
+
+  for (const cells of tableRows) {
+    const normalizedCells = cells.map(normalizeKey);
+    const hasCodeHeader = normalizedCells.some((cell) => cell.includes("公司代號") || cell.includes("證券代號"));
+    const hasEpsHeader = normalizedCells.some((cell) => cell.includes("基本每股盈餘") || cell.includes("每股盈餘"));
+
+    if (hasCodeHeader && hasEpsHeader) {
+      header = cells;
+      const foundCodeIndex = findHeaderIndex(header, ["公司代號", "證券代號", "股票代號"]);
+      const foundEpsIndex = findHeaderIndex(header, ["基本每股盈餘", "基本每股盈餘元", "基本每股盈餘（元）", "每股盈餘"]);
+      codeIndex = foundCodeIndex >= 0 ? foundCodeIndex : 0;
+      epsIndex = foundEpsIndex;
+      continue;
+    }
+
+    const stockCode = String(cells[codeIndex] || cells[0] || "").trim();
+    if (!/^\d{4,6}[A-Z]?$/.test(stockCode)) continue;
+
+    const eps = epsIndex >= 0 ? toNumber(cells[epsIndex]) : findLikelyEpsValue(cells);
+    if (eps === null) continue;
+
+    result.push({
+      stockCode,
+      year,
+      quarter,
+      eps,
+    });
+  }
+
+  return result;
+}
+
+async function fetchMopsEpsRows(source, period) {
+  const rocYear = period.year - 1911;
+  const params = new URLSearchParams({
+    encodeURIComponent: "1",
+    step: "1",
+    firstin: "1",
+    off: "1",
+    keyword4: "",
+    code1: "",
+    TYPEK: source.typeK,
+    year: String(rocYear),
+    season: String(period.quarter).padStart(2, "0"),
+  });
+
+  const response = await fetch(MOPS_AJAX_URL, {
+    method: "POST",
+    headers: {
+      "User-Agent": "Mozilla/5.0 stock-radar-api",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      Accept: "text/html,application/xhtml+xml,application/xml,text/plain,*/*",
+      Origin: "https://mops.twse.com.tw",
+      Referer: "https://mops.twse.com.tw/mops/web/t163sb04",
+    },
+    body: params,
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const html = await response.text();
+  const rows = parseMopsEpsRows(html, period.year, period.quarter);
+
+  if (rows.length === 0) {
+    throw new Error(`${period.year} Q${period.quarter} 無可解析 EPS 資料`);
+  }
 
   return {
-    stockCode,
-    year,
-    quarter,
-    eps,
+    rows,
+    sourceUrl: `${MOPS_AJAX_URL}?TYPEK=${source.typeK}&year=${rocYear}&season=${String(period.quarter).padStart(2, "0")}`,
   };
 }
 
-async function importSource(conn, source) {
-  const { rows, url } = await fetchRowsWithFallback(source);
+async function upsertRows(conn, rows, sourceUrl) {
   let imported = 0;
   let skipped = 0;
 
-  for (const rawRow of rows) {
-    const row = normalizeRow(rawRow);
-    if (!row) {
+  for (const row of rows) {
+    if (!row || !/^\d{4,6}[A-Z]?$/.test(row.stockCode) || !row.year || !row.quarter || row.eps === null) {
       skipped += 1;
       continue;
     }
@@ -194,20 +230,47 @@ async function importSource(conn, source) {
         eps,
         source,
         source_url
-      ) VALUES (?, ?, ?, ?, 'MOPS OpenData t163sb04', ?)
+      ) VALUES (?, ?, ?, ?, 'MOPS ajax_t163sb04', ?)
       ON DUPLICATE KEY UPDATE
         eps = VALUES(eps),
         source = VALUES(source),
         source_url = VALUES(source_url),
         updated_at = CURRENT_TIMESTAMP
       `,
-      [row.stockCode, row.year, row.quarter, row.eps, url],
+      [row.stockCode, row.year, row.quarter, row.eps, sourceUrl],
     );
 
     imported += 1;
   }
 
-  return { marketType: source.marketType, imported, skipped, url };
+  return { imported, skipped };
+}
+
+async function importSource(conn, source, periods) {
+  let imported = 0;
+  let skipped = 0;
+  let successPeriods = 0;
+  const errors = [];
+
+  for (const period of periods) {
+    try {
+      const { rows, sourceUrl } = await fetchMopsEpsRows(source, period);
+      const result = await upsertRows(conn, rows, sourceUrl);
+      imported += result.imported;
+      skipped += result.skipped;
+      successPeriods += 1;
+      console.log(`完成：${source.marketType} ${period.year} Q${period.quarter}，匯入 ${result.imported} 筆，略過 ${result.skipped} 筆`);
+    } catch (error) {
+      errors.push(`${source.marketType} ${period.year} Q${period.quarter}：${error.message}`);
+      console.log(`略過：${source.marketType} ${period.year} Q${period.quarter}，${error.message}`);
+    }
+  }
+
+  if (successPeriods === 0) {
+    throw new Error(errors.join("；"));
+  }
+
+  return { marketType: source.marketType, imported, skipped, successPeriods, errors };
 }
 
 async function backfillGrowthRates(conn) {
@@ -257,13 +320,15 @@ async function backfillGrowthRates(conn) {
 
 async function main() {
   const conn = await pool.getConnection();
+  const periods = parseRequestedPeriods();
 
   try {
     console.log("開始匯入每季 EPS 資料");
+    console.log(`資料來源：MOPS ajax_t163sb04，季度：${periods.map((period) => `${period.year}Q${period.quarter}`).join(", ")}`);
+
     for (const source of SOURCES) {
-      const result = await importSource(conn, source);
-      console.log(`完成：${result.marketType}，匯入 ${result.imported} 筆，略過 ${result.skipped} 筆`);
-      console.log(`來源：${result.url}`);
+      const result = await importSource(conn, source, periods);
+      console.log(`完成：${result.marketType}，成功季度 ${result.successPeriods}，匯入 ${result.imported} 筆，略過 ${result.skipped} 筆`);
     }
 
     console.log("開始回填 EPS 季增率 / 年增率");
