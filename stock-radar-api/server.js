@@ -179,60 +179,6 @@ function sharesToLotsString(shares) {
   return (shares / 1000n).toString();
 }
 
-const INDUSTRY_CODE_NAME_MAP = new Map([
-  ["1", "水泥工業"],
-  ["2", "食品工業"],
-  ["3", "塑膠工業"],
-  ["4", "紡織纖維"],
-  ["5", "電機機械"],
-  ["6", "電器電纜"],
-  ["7", "化學生技醫療"],
-  ["8", "玻璃陶瓷"],
-  ["9", "造紙工業"],
-  ["10", "鋼鐵工業"],
-  ["11", "橡膠工業"],
-  ["12", "汽車工業"],
-  ["14", "建材營造"],
-  ["15", "航運業"],
-  ["16", "觀光事業"],
-  ["17", "金融保險"],
-  ["18", "貿易百貨"],
-  ["20", "其他"],
-  ["21", "化學工業"],
-  ["22", "生技醫療業"],
-  ["23", "油電燃氣業"],
-  ["24", "半導體業"],
-  ["25", "電腦及週邊設備業"],
-  ["26", "光電業"],
-  ["27", "通信網路業"],
-  ["28", "電子零組件業"],
-  ["29", "電子通路業"],
-  ["30", "資訊服務業"],
-  ["31", "其他電子業"],
-  ["32", "文化創意業"],
-  ["33", "農業科技業"],
-  ["34", "電子商務"],
-  ["35", "綠能環保"],
-  ["36", "數位雲端"],
-  ["37", "運動休閒"],
-  ["38", "居家生活"],
-]);
-
-function formatIndustryName(value) {
-  const text = String(value ?? "").trim();
-
-  if (!text || text === "-" || text === "--") {
-    return "未分類";
-  }
-
-  if (/^\d+$/.test(text)) {
-    const normalizedCode = String(Number(text));
-    return INDUSTRY_CODE_NAME_MAP.get(normalizedCode) || text;
-  }
-
-  return text;
-}
-
 function convertBigIntToString(value) {
   if (typeof value === "bigint") {
     return value.toString();
@@ -246,11 +192,7 @@ function convertBigIntToString(value) {
     const result = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (key === "industry") {
-        result[key] = formatIndustryName(item);
-      } else {
-        result[key] = convertBigIntToString(item);
-      }
+      result[key] = convertBigIntToString(item);
     }
 
     return result;
@@ -281,6 +223,183 @@ function parseMarket(value) {
 
 function isValidDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+
+const MARKET_INDEX_CONFIGS = [
+  {
+    key: "twse",
+    market_type: "上市",
+    index_code: "TAIEX",
+    index_name: "加權指數",
+    symbols: ["^TWII"],
+  },
+  {
+    key: "tpex",
+    market_type: "上櫃",
+    index_code: "TPEX",
+    index_name: "上櫃指數",
+    symbols: ["^TWOII", "TWOII.TWO", "TPEX.TWO"],
+  },
+];
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = Number(String(value).replaceAll(",", ""));
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function getTaiwanDateTimeText(date = new Date()) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date).replace(" ", " ");
+}
+
+function getTaiwanTimeTextFromUnix(unixSeconds) {
+  if (!unixSeconds) return "";
+
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(Number(unixSeconds) * 1000));
+}
+
+async function fetchExternalJson(url, label) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 stock-radar-api",
+        Accept: "application/json,text/plain,*/*",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`${label} HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function getLastFiniteValue(values = []) {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = toFiniteNumber(values[index]);
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
+function buildYahooIndexPoint(timestamp, quote, index) {
+  const close = toFiniteNumber(quote?.close?.[index]);
+
+  if (close === null) return null;
+
+  return {
+    time: getTaiwanTimeTextFromUnix(timestamp),
+    timestamp,
+    open: toFiniteNumber(quote?.open?.[index]),
+    high: toFiniteNumber(quote?.high?.[index]),
+    low: toFiniteNumber(quote?.low?.[index]),
+    close,
+    volume: toFiniteNumber(quote?.volume?.[index]),
+  };
+}
+
+async function fetchYahooIndexChart(config) {
+  let lastError = null;
+
+  for (const symbol of config.symbols) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m&includePrePost=false`;
+      const json = await fetchExternalJson(url, `${config.index_name} 即時走勢`);
+      const result = json?.chart?.result?.[0];
+      const error = json?.chart?.error;
+
+      if (!result) {
+        throw new Error(error?.description || `${config.index_name} 查無即時走勢資料`);
+      }
+
+      const meta = result.meta || {};
+      const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+      const quote = result.indicators?.quote?.[0] || {};
+      const points = timestamps
+        .map((timestamp, index) => buildYahooIndexPoint(timestamp, quote, index))
+        .filter(Boolean);
+      const closeSeries = points.map((point) => point.close);
+      const currentPoint = toFiniteNumber(meta.regularMarketPrice) ?? getLastFiniteValue(closeSeries);
+      const previousClose =
+        toFiniteNumber(meta.previousClose) ??
+        toFiniteNumber(meta.chartPreviousClose) ??
+        (closeSeries.length >= 2 ? closeSeries[closeSeries.length - 2] : null);
+      const change = currentPoint !== null && previousClose !== null ? currentPoint - previousClose : null;
+      const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
+      const latestPoint = points[points.length - 1] || null;
+      const latestVolume = toFiniteNumber(meta.regularMarketVolume) ?? latestPoint?.volume ?? null;
+
+      return {
+        key: config.key,
+        market_type: config.market_type,
+        index_code: config.index_code,
+        index_name: config.index_name,
+        symbol,
+        current_point: currentPoint,
+        previous_close: previousClose,
+        change_point: change,
+        change_percent: changePercent,
+        open: toFiniteNumber(meta.regularMarketOpen) ?? latestPoint?.open ?? null,
+        high: toFiniteNumber(meta.regularMarketDayHigh) ?? getLastFiniteValue(points.map((point) => point.high)) ?? null,
+        low: toFiniteNumber(meta.regularMarketDayLow) ?? getLastFiniteValue(points.map((point) => point.low)) ?? null,
+        volume: latestVolume,
+        total_trade_amount: null,
+        latest_time: latestPoint?.time || getTaiwanTimeTextFromUnix(meta.regularMarketTime),
+        updated_at: getTaiwanDateTimeText(),
+        source: "Yahoo Finance chart",
+        points,
+        error: null,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    key: config.key,
+    market_type: config.market_type,
+    index_code: config.index_code,
+    index_name: config.index_name,
+    symbol: config.symbols[0],
+    current_point: null,
+    previous_close: null,
+    change_point: null,
+    change_percent: null,
+    open: null,
+    high: null,
+    low: null,
+    volume: null,
+    total_trade_amount: null,
+    latest_time: "",
+    updated_at: getTaiwanDateTimeText(),
+    source: "Yahoo Finance chart",
+    points: [],
+    error: lastError?.message || "即時走勢讀取失敗",
+  };
 }
 
 
@@ -479,6 +598,34 @@ app.post("/auth/logout", (req, res) => {
     success: true,
     message: "已登出",
   });
+});
+
+
+// ==============================
+// 大盤指數即時走勢
+// GET /market/indices/intraday
+// ==============================
+app.get("/market/indices/intraday", async (req, res) => {
+  try {
+    const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchYahooIndexChart));
+
+    res.json({
+      success: true,
+      message: "大盤指數即時走勢讀取完成",
+      updated_at: getTaiwanDateTimeText(),
+      data: convertBigIntToString({
+        indices,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢大盤指數即時走勢失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢大盤指數即時走勢失敗",
+      error: error.message,
+    });
+  }
 });
 
 app.get("/test-db", async (req, res) => {

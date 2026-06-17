@@ -22,6 +22,7 @@ const state = {
   market: "",
   limit: 20,
   latestRows: [],
+  marketIndices: [],
   lastSearchCode: "",
   lastSearchData: null,
   authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
@@ -287,10 +288,18 @@ function updatePageText() {
   const isSearchPage = state.page === "search";
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
+  const isMarketIndexPage = state.page === "marketIndex";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isMarketIndexPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+
+  if (state.page === "marketIndex") {
+    pageTitle.textContent = "大盤走勢";
+    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
+    return;
+  }
 
   if (state.page === "watchlist") {
     pageTitle.textContent = "自選股";
@@ -815,6 +824,225 @@ function renderTechnicalCharts(enrichedRows) {
   `;
 }
 
+
+function formatIndexPoint(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatIndexChange(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatIndexPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function formatNullableNumber(value, emptyText = "來源未提供") {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return emptyText;
+  return numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 });
+}
+
+function formatMarketAmount(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "來源未提供";
+  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+function getMarketTrendText(changeValue) {
+  const change = toNumber(changeValue);
+  if (change === null) return "資料讀取中";
+  if (change > 0) return "大盤偏強";
+  if (change < 0) return "大盤偏弱";
+  return "大盤持平";
+}
+
+function renderMarketIndexChart(points = []) {
+  const rows = Array.isArray(points)
+    ? points.filter((point) => toNumber(point.close) !== null)
+    : [];
+
+  if (rows.length < 2) {
+    return renderEmptyChart("目前即時走勢資料不足，請盤中或稍後重新整理。");
+  }
+
+  const width = 900;
+  const height = 310;
+  const left = 54;
+  const right = 24;
+  const top = 22;
+  const priceBottom = 210;
+  const volumeTop = 230;
+  const bottom = 282;
+  const chartWidth = width - left - right;
+  const priceHeight = priceBottom - top;
+  const volumeHeight = bottom - volumeTop;
+  const closes = rows.map((point) => toNumber(point.close)).filter((value) => value !== null);
+  const minValue = Math.min(...closes);
+  const maxValue = Math.max(...closes);
+  const paddingValue = Math.max((maxValue - minValue) * 0.1, maxValue * 0.001, 1);
+  const lowBound = minValue - paddingValue;
+  const highBound = maxValue + paddingValue;
+  const valueRange = highBound - lowBound || 1;
+  const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
+  const maxVolume = Math.max(...rows.map((point) => toNumber(point.volume) || 0), 0);
+
+  const xFor = (index) => left + index * xStep;
+  const yFor = (value) => top + ((highBound - value) / valueRange) * priceHeight;
+
+  const path = rows
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${svgPoint(xFor(index), yFor(toNumber(point.close)))}`)
+    .join(" ");
+
+  const volumeBars = maxVolume > 0
+    ? rows.map((point, index) => {
+        const volume = toNumber(point.volume) || 0;
+        const barHeight = Math.max(1, (volume / maxVolume) * volumeHeight);
+        const x = xFor(index) - Math.max(2, Math.min(8, xStep * 0.35)) / 2;
+        const y = bottom - barHeight;
+        const widthValue = Math.max(2, Math.min(8, xStep * 0.7));
+        return `<rect class="market-volume-bar" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${widthValue.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2"></rect>`;
+      }).join("")
+    : "";
+
+  const firstRow = rows[0];
+  const lastRow = rows[rows.length - 1];
+  const middleTime = rows[Math.floor(rows.length / 2)]?.time || "";
+
+  return `
+    <div class="chart-scroll market-chart-scroll">
+      <svg class="stock-chart market-index-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="大盤即時走勢圖">
+        <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18"></rect>
+        <line class="chart-grid" x1="${left}" y1="${top}" x2="${width - right}" y2="${top}"></line>
+        <line class="chart-grid" x1="${left}" y1="${(top + priceBottom) / 2}" x2="${width - right}" y2="${(top + priceBottom) / 2}"></line>
+        <line class="chart-grid" x1="${left}" y1="${priceBottom}" x2="${width - right}" y2="${priceBottom}"></line>
+        <line class="chart-grid" x1="${left}" y1="${bottom}" x2="${width - right}" y2="${bottom}"></line>
+        ${volumeBars}
+        <path class="market-index-line" d="${path}"></path>
+        <circle class="market-index-dot" cx="${xFor(rows.length - 1).toFixed(2)}" cy="${yFor(toNumber(lastRow.close)).toFixed(2)}" r="4"></circle>
+        <text class="chart-axis-text" x="${left}" y="${height - 9}">${escapeHtml(firstRow.time || "")}</text>
+        <text class="chart-axis-text" x="${left + chartWidth / 2}" y="${height - 9}" text-anchor="middle">${escapeHtml(middleTime)}</text>
+        <text class="chart-axis-text" x="${width - right}" y="${height - 9}" text-anchor="end">${escapeHtml(lastRow.time || "")}</text>
+        <text class="chart-axis-text" x="${left - 8}" y="${top + 5}" text-anchor="end">${formatIndexPoint(highBound)}</text>
+        <text class="chart-axis-text" x="${left - 8}" y="${priceBottom}" text-anchor="end">${formatIndexPoint(lowBound)}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function renderMarketIndexCard(row) {
+  const change = pick(row, ["change_point"], null);
+  const trendClass = getChangeClass(change);
+  const trendText = getMarketTrendText(change);
+  const point = pick(row, ["current_point"], "-");
+  const points = Array.isArray(row.points) ? row.points : [];
+  const hasError = Boolean(row.error);
+
+  return `
+    <article class="stock-card market-index-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">${escapeHtml(pick(row, ["market_type"], "市場"))}</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(pick(row, ["index_name"], "大盤指數"))}</h3>
+            <span class="stock-code">${escapeHtml(pick(row, ["index_code"], "INDEX"))}</span>
+            <span class="badge">${escapeHtml(pick(row, ["symbol"], "-"))}</span>
+          </div>
+        </div>
+        <div class="score-box ${trendClass === "price-up" ? "score-high" : trendClass === "price-down" ? "score-low" : "score-mid"}">
+          <span class="score-value index-score-value">${formatIndexPoint(point)}</span>
+          <span class="score-label">目前指數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${trendClass === "price-up" ? "score-high" : trendClass === "price-down" ? "score-low" : "score-mid"}">${escapeHtml(trendText)}</span>
+        <span class="summary-text">漲跌 <strong class="${trendClass}">${formatIndexChange(change)}</strong>，漲跌幅 <strong class="${trendClass}">${formatIndexPercent(pick(row, ["change_percent"], null))}</strong></span>
+      </div>
+
+      ${hasError ? `<div class="result-note error-note"><strong>讀取提醒：</strong>${escapeHtml(row.error)}</div>` : ""}
+
+      <div class="info-grid market-index-grid">
+        ${createInfoItem("開盤", formatIndexPoint(pick(row, ["open"], null)))}
+        ${createInfoItem("最高", formatIndexPoint(pick(row, ["high"], null)))}
+        ${createInfoItem("最低", formatIndexPoint(pick(row, ["low"], null)))}
+        ${createInfoItem("昨收", formatIndexPoint(pick(row, ["previous_close"], null)))}
+        ${createInfoItem("成交量", formatNullableNumber(pick(row, ["volume"], null)))}
+        ${createInfoItem("總交易金額", formatMarketAmount(pick(row, ["total_trade_amount"], null)))}
+      </div>
+
+      <section class="detail-section chart-section market-index-chart-section">
+        <div class="chart-title-row">
+          <h3>盤中即時走勢</h3>
+          <span>${escapeHtml(pick(row, ["latest_time"], ""))} 更新</span>
+        </div>
+        ${renderMarketIndexChart(points)}
+        <p class="chart-note">目前先做圖一需求：指數即時折線圖；成交量柱狀圖會依資料來源有提供時顯示。</p>
+      </section>
+
+      <div class="card-actions">
+        <span class="card-note">來源：${escapeHtml(pick(row, ["source"], "即時行情來源"))}；更新：${escapeHtml(pick(row, ["updated_at"], "-"))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderMarketIndexPage(result) {
+  const indices = Array.isArray(result) ? result : Array.isArray(result?.indices) ? result.indices : [];
+  state.marketIndices = indices;
+
+  if (indices.length === 0) {
+    stockList.innerHTML = "";
+    showStatus("目前沒有大盤指數資料，請稍後重新整理。", "error");
+    return;
+  }
+
+  stockList.innerHTML = `
+    <article class="market-overview-card">
+      <div>
+        <p class="eyebrow">V1.2 第一項</p>
+        <h3>上市 / 上櫃指數即時走勢</h3>
+        <p>先補上圖一需求：加權指數與上櫃指數，包含目前點位、漲跌、漲跌幅與盤中走勢圖。</p>
+      </div>
+    </article>
+    ${indices.map(renderMarketIndexCard).join("")}
+  `;
+}
+
+async function loadMarketIndexPage() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const result = await fetchJson("/market/indices/intraday");
+    renderMarketIndexPage(result);
+    showTemporaryStatus("已更新大盤指數走勢。", "success");
+  } catch (error) {
+    stockList.innerHTML = "";
+    showStatus(
+      `
+        <div class="status-title">大盤走勢讀取失敗</div>
+        <div>${escapeHtml(error.message)}</div>
+        <div style="margin-top:10px;">
+          <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+        </div>
+      `,
+      "error"
+    );
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+  } finally {
+    setLoading(false);
+  }
+}
+
 function renderLoadingCards() {
   stockList.innerHTML = Array.from({ length: 4 })
     .map(
@@ -932,6 +1160,11 @@ function rerenderCurrentContent() {
     return;
   }
 
+  if (state.page === "marketIndex" && state.marketIndices.length > 0) {
+    renderMarketIndexPage({ indices: state.marketIndices });
+    return;
+  }
+
   if (["radar", "foreign", "foreignStreak", "trust", "syncBuy"].includes(state.page) && state.latestRows.length > 0) {
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
     return;
@@ -999,7 +1232,14 @@ async function handleWatchlistAction(button) {
       });
       state.watchlistCodes.delete(stockCode);
 
-      if (state.page === "watchlist") {
+      if (state.page === "marketIndex") {
+    pageTitle.textContent = "大盤走勢";
+    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
+    return;
+  }
+
+  if (state.page === "watchlist") {
         await loadList();
       } else {
         rerenderCurrentContent();
@@ -2094,6 +2334,13 @@ async function loadList() {
     } else {
       renderSearchIntro();
     }
+    return;
+  }
+
+  if (state.page === "marketIndex") {
+    pageTitle.textContent = "大盤走勢";
+    pageDesc.textContent = "查看上市加權指數與上櫃指數的盤中走勢。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向；指數上漲代表整體市場偏強，指數下跌代表市場壓力較大。</span>`;
     return;
   }
 

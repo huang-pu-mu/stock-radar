@@ -27,60 +27,6 @@ function stripHtml(value) {
     .trim();
 }
 
-const INDUSTRY_CODE_NAME_MAP = new Map([
-  ["1", "水泥工業"],
-  ["2", "食品工業"],
-  ["3", "塑膠工業"],
-  ["4", "紡織纖維"],
-  ["5", "電機機械"],
-  ["6", "電器電纜"],
-  ["7", "化學生技醫療"],
-  ["8", "玻璃陶瓷"],
-  ["9", "造紙工業"],
-  ["10", "鋼鐵工業"],
-  ["11", "橡膠工業"],
-  ["12", "汽車工業"],
-  ["14", "建材營造"],
-  ["15", "航運業"],
-  ["16", "觀光事業"],
-  ["17", "金融保險"],
-  ["18", "貿易百貨"],
-  ["20", "其他"],
-  ["21", "化學工業"],
-  ["22", "生技醫療業"],
-  ["23", "油電燃氣業"],
-  ["24", "半導體業"],
-  ["25", "電腦及週邊設備業"],
-  ["26", "光電業"],
-  ["27", "通信網路業"],
-  ["28", "電子零組件業"],
-  ["29", "電子通路業"],
-  ["30", "資訊服務業"],
-  ["31", "其他電子業"],
-  ["32", "文化創意業"],
-  ["33", "農業科技業"],
-  ["34", "電子商務"],
-  ["35", "綠能環保"],
-  ["36", "數位雲端"],
-  ["37", "運動休閒"],
-  ["38", "居家生活"],
-]);
-
-function formatIndustryName(value) {
-  const text = String(value ?? "").trim();
-
-  if (!text || text === "-" || text === "--") {
-    return "未分類";
-  }
-
-  if (/^\d+$/.test(text)) {
-    const normalizedCode = String(Number(text));
-    return INDUSTRY_CODE_NAME_MAP.get(normalizedCode) || text;
-  }
-
-  return text;
-}
-
 function normalizeKey(value) {
   return stripHtml(value)
     .replace(/^﻿/, "")
@@ -237,7 +183,7 @@ function normalizeStockInfo(row) {
 }
 
 function normalizeIndustry(value) {
-  const industry = formatIndustryName(stripHtml(value));
+  const industry = stripHtml(value);
 
   if (!industry || industry === "-" || industry === "--") {
     return "未分類";
