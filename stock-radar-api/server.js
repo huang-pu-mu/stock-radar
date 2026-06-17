@@ -284,6 +284,7 @@ async function fetchExternalJson(url, label) {
         "User-Agent": "Mozilla/5.0 stock-radar-api",
         Accept: "application/json,text/plain,*/*",
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        Referer: "https://mis.twse.com.tw/stock/fibest.jsp",
       },
     });
 
@@ -718,6 +719,186 @@ app.post("/auth/logout", (req, res) => {
 // 大盤指數即時走勢
 // GET /market/indices/intraday
 // ==============================
+
+function parseTwseRealtimeDate(value) {
+  const text = String(value || "").replaceAll("/", "").replaceAll("-", "").trim();
+
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+  }
+
+  if (/^\d{7}$/.test(text)) {
+    const year = Number(text.slice(0, 3)) + 1911;
+    return `${year}-${text.slice(3, 5)}-${text.slice(5, 7)}`;
+  }
+
+  return "";
+}
+
+function normalizeRealtimeNumber(value) {
+  if (value === null || value === undefined) return null;
+
+  const text = String(value)
+    .replaceAll(",", "")
+    .replaceAll("--", "-")
+    .trim();
+
+  if (!text || text === "-" || text === "－" || text.toLowerCase() === "nan") {
+    return null;
+  }
+
+  const numberValue = Number(text);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function pickRealtimeNumber(row, keys = []) {
+  for (const key of keys) {
+    const numberValue = normalizeRealtimeNumber(row?.[key]);
+    if (numberValue !== null) return numberValue;
+  }
+
+  return null;
+}
+
+function parseTwseLevelField(value) {
+  return String(value || "")
+    .split("_")
+    .map((item) => item.trim())
+    .filter((item) => item && item !== "-" && item !== "－")
+    .map(normalizeRealtimeNumber);
+}
+
+function buildRealtimeLevels(priceText, volumeText, side) {
+  const prices = parseTwseLevelField(priceText);
+  const volumes = parseTwseLevelField(volumeText);
+  const length = Math.max(prices.length, volumes.length, 5);
+
+  return Array.from({ length })
+    .map((_, index) => ({
+      level: index + 1,
+      side,
+      price: prices[index] ?? null,
+      volume_lots: volumes[index] ?? null,
+    }))
+    .filter((item) => item.price !== null || item.volume_lots !== null);
+}
+
+function getQuoteChannels(stockCode, marketType = "") {
+  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
+  const market = String(marketType || "");
+  const primary = market.includes("上櫃") ? "otc" : "tse";
+  const secondary = primary === "tse" ? "otc" : "tse";
+
+  return [`${primary}_${code}.tw`, `${secondary}_${code}.tw`];
+}
+
+function getRealtimeTradeSide(currentPrice, bestBid, bestAsk) {
+  if (currentPrice === null) return "來源未提供";
+  if (bestAsk !== null && currentPrice >= bestAsk) return "外盤參考";
+  if (bestBid !== null && currentPrice <= bestBid) return "內盤參考";
+  return "買賣中間";
+}
+
+function getRealtimeTradeSideNote(side) {
+  if (side === "外盤參考") return "最新成交價接近委賣價，代表最新一筆較偏主動買進。";
+  if (side === "內盤參考") return "最新成交價接近委買價，代表最新一筆較偏主動賣出。";
+  if (side === "買賣中間") return "最新成交價在委買與委賣中間，暫不明顯偏內盤或外盤。";
+  return "目前資料來源沒有提供可判斷內外盤的即時欄位。";
+}
+
+function findRealtimeQuoteRow(json, stockCode) {
+  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
+  const rows = Array.isArray(json?.msgArray)
+    ? json.msgArray
+    : Array.isArray(json?.data)
+      ? json.data
+      : Array.isArray(json)
+        ? json
+        : [];
+
+  return rows.find((row) => normalizeStockCodeValue(row?.c) === code) || rows[0] || null;
+}
+
+function buildRealtimeQuote(row, stockInfo, channel) {
+  const bidLevels = buildRealtimeLevels(row?.b, row?.g, "bid");
+  const askLevels = buildRealtimeLevels(row?.a, row?.f, "ask");
+  const bestBid = bidLevels.find((item) => item.price !== null)?.price ?? null;
+  const bestAsk = askLevels.find((item) => item.price !== null)?.price ?? null;
+  const currentPrice = pickRealtimeNumber(row, ["z", "pz", "price", "current_price"]);
+  const previousClose = pickRealtimeNumber(row, ["y", "previous_close", "previousClose"]);
+  const change = currentPrice !== null && previousClose !== null ? currentPrice - previousClose : pickRealtimeNumber(row, ["change", "price_change"]);
+  const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
+  const volumeLots = pickRealtimeNumber(row, ["v", "volume", "trade_volume"]);
+  const latestVolumeLots = pickRealtimeNumber(row, ["tv", "latest_volume", "last_volume"]);
+  const innerVolumeLots = pickRealtimeNumber(row, ["iv", "inner_volume", "inside_volume", "in_volume"]);
+  const outerVolumeLots = pickRealtimeNumber(row, ["ov", "outer_volume", "outside_volume", "out_volume"]);
+  const totalAmount = pickRealtimeNumber(row, ["amount", "trade_value", "transaction_amount", "amt"]);
+  const tradeSide = getRealtimeTradeSide(currentPrice, bestBid, bestAsk);
+
+  return {
+    stock_code: stockInfo.stock_code,
+    stock_name: stockInfo.stock_name,
+    market_type: stockInfo.market_type,
+    industry: stockInfo.industry,
+    channel,
+    symbol: `${normalizeStockCodeValue(stockInfo.stock_code)}.${String(stockInfo.market_type || "").includes("上櫃") ? "TWO" : "TW"}`,
+    trade_date: parseTwseRealtimeDate(row?.d),
+    latest_time: String(row?.t || row?.time || "").trim(),
+    current_price: currentPrice,
+    price_change: change,
+    change_percent: changePercent,
+    open_price: pickRealtimeNumber(row, ["o", "open_price", "open"]),
+    high_price: pickRealtimeNumber(row, ["h", "high_price", "high"]),
+    low_price: pickRealtimeNumber(row, ["l", "low_price", "low"]),
+    previous_close: previousClose,
+    volume_lots: volumeLots,
+    latest_volume_lots: latestVolumeLots,
+    total_trade_amount: totalAmount,
+    bid_price: bestBid,
+    ask_price: bestAsk,
+    bid_levels: bidLevels.slice(0, 5),
+    ask_levels: askLevels.slice(0, 5),
+    inner_volume_lots: innerVolumeLots,
+    outer_volume_lots: outerVolumeLots,
+    trade_side: tradeSide,
+    trade_side_note: getRealtimeTradeSideNote(tradeSide),
+    source: "TWSE MIS 即時行情",
+    updated_at: getTaiwanDateTimeText(),
+  };
+}
+
+async function getStockInfoForRealtime(stockCode) {
+  const rows = await query(
+    `
+    SELECT
+      stock_code,
+      stock_name,
+      market_type,
+      industry
+    FROM stocks
+    WHERE stock_code = ?
+    LIMIT 1
+    `,
+    [normalizeStockCodeValue(stockCode)],
+  );
+
+  return rows[0] || null;
+}
+
+async function fetchTwseRealtimeQuote(stockInfo) {
+  const channels = getQuoteChannels(stockInfo.stock_code, stockInfo.market_type);
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${encodeURIComponent(channels.join("|"))}&json=1&delay=0`;
+  const json = await fetchExternalJson(url, `${stockInfo.stock_code} 即時行情`);
+  const row = findRealtimeQuoteRow(json, stockInfo.stock_code);
+
+  if (!row) {
+    throw new Error("即時行情來源查無資料");
+  }
+
+  const channel = String(row?.ch || "").split(".")[0] || channels[0];
+  return buildRealtimeQuote(row, stockInfo, channel);
+}
+
 app.get("/market/indices/intraday", async (req, res) => {
   try {
     const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
@@ -736,6 +917,45 @@ app.get("/market/indices/intraday", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢大盤指數即時走勢失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+app.get("/stock/:stockCode/realtime", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確",
+      });
+    }
+
+    const stockInfo = await getStockInfoForRealtime(stockCode);
+
+    if (!stockInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Stock not found",
+      });
+    }
+
+    const realtimeQuote = await fetchTwseRealtimeQuote(stockInfo);
+
+    res.json({
+      success: true,
+      message: "個股即時行情讀取完成",
+      data: convertBigIntToString(realtimeQuote),
+    });
+  } catch (error) {
+    console.error("查詢個股即時行情失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股即時行情失敗",
       error: error.message,
     });
   }

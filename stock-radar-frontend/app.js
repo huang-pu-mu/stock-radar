@@ -317,8 +317,8 @@ function updatePageText() {
 
   if (state.page === "search") {
     pageTitle.textContent = "個股查詢";
-    pageDesc.textContent = "直接輸入股票代號，查看該股票的行情、法人與籌碼分數。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後再看分數、法人買賣超與成交量。</span>`;
+    pageDesc.textContent = "直接輸入股票代號，查看即時行情、五檔報價、法人與籌碼分數。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後先看現價、內外盤參考與五檔，再看法人買賣超。</span>`;
     window.setTimeout(() => stockSearchInput.focus(), 80);
     renderRecentSearches();
     return;
@@ -2180,6 +2180,162 @@ function renderDetailSection(title, rows) {
   `;
 }
 
+
+function formatSignedPrice(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toFixed(2).replace(/\.00$/, "")}`;
+}
+
+function formatRealtimePercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function formatLotsWithUnit(value, emptyText = "來源未提供") {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return emptyText;
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
+}
+
+function formatRealtimeAmount(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "來源未提供";
+  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+function hasRealtimeQuote(quote) {
+  if (!quote || quote.error) return false;
+  return ["current_price", "bid_price", "ask_price", "volume_lots", "open_price", "high_price", "low_price"]
+    .some((key) => toNumber(quote[key]) !== null);
+}
+
+function renderRealtimeLevelRows(quote) {
+  const bids = Array.isArray(quote?.bid_levels) ? quote.bid_levels : [];
+  const asks = Array.isArray(quote?.ask_levels) ? quote.ask_levels : [];
+  const length = Math.max(bids.length, asks.length, 5);
+
+  if (length === 0) {
+    return `<div class="result-note">目前沒有五檔委買委賣資料。</div>`;
+  }
+
+  const rows = Array.from({ length }).map((_, index) => {
+    const bid = bids[index] || {};
+    const ask = asks[index] || {};
+
+    return `
+      <div class="quote-level-row">
+        <span class="quote-level-name">${index + 1}</span>
+        <span class="quote-bid-price">${formatPrice(bid.price)}</span>
+        <span>${formatLotsWithUnit(bid.volume_lots, "-")}</span>
+        <span>${formatPrice(ask.price)}</span>
+        <span class="quote-ask-volume">${formatLotsWithUnit(ask.volume_lots, "-")}</span>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="quote-level-table" aria-label="五檔委買委賣">
+      <div class="quote-level-row quote-level-head">
+        <span>檔</span>
+        <span>委買價</span>
+        <span>委買量</span>
+        <span>委賣價</span>
+        <span>委賣量</span>
+      </div>
+      ${rows}
+    </div>
+  `;
+}
+
+function renderRealtimeQuotePanel(quote, fallback = {}) {
+  const realtimeQuote = quote || {};
+
+  if (!hasRealtimeQuote(realtimeQuote)) {
+    return `
+      <section class="detail-section realtime-quote-section quote-empty-section">
+        <h3>盤中即時行情</h3>
+        <div class="result-note error-note">
+          <strong>即時行情暫時讀不到：</strong>${escapeHtml(realtimeQuote.error || "資料來源目前沒有回傳個股即時行情。")}
+        </div>
+      </section>
+    `;
+  }
+
+  const currentPrice = pick(realtimeQuote, ["current_price"], pick(fallback, ["close_price", "closing_price", "close"], "-"));
+  const change = pick(realtimeQuote, ["price_change"], pick(fallback, ["price_change", "change", "change_price"], "-"));
+  const changeClass = getChangeClass(change);
+  const latestTime = [formatDate(pick(realtimeQuote, ["trade_date"], "")), pick(realtimeQuote, ["latest_time"], "")]
+    .filter((item) => item && item !== "-")
+    .join(" ");
+  const tradeSide = pick(realtimeQuote, ["trade_side"], "來源未提供");
+  const tradeSideClass = tradeSide.includes("外盤") ? "good" : tradeSide.includes("內盤") ? "bad" : "warn";
+
+  return `
+    <section class="detail-section realtime-quote-section">
+      <div class="realtime-title-row">
+        <div>
+          <p class="eyebrow">V1.2 第 2 項</p>
+          <h3>盤中即時行情</h3>
+        </div>
+        <span class="summary-date-chip">${escapeHtml(latestTime || "盤中資料")}</span>
+      </div>
+
+      <div class="realtime-hero-row">
+        <div>
+          <span class="realtime-label">現價</span>
+          <strong class="realtime-price ${changeClass}">${formatPrice(currentPrice)}</strong>
+        </div>
+        <div class="realtime-change-box ${changeClass}">
+          <span>漲跌</span>
+          <strong>${formatSignedPrice(change)}</strong>
+          <small>${formatRealtimePercent(pick(realtimeQuote, ["change_percent"], null))}</small>
+        </div>
+      </div>
+
+      <div class="info-grid realtime-info-grid">
+        ${createInfoItem("開盤", formatPrice(pick(realtimeQuote, ["open_price"], null)))}
+        ${createInfoItem("最高", formatPrice(pick(realtimeQuote, ["high_price"], null)))}
+        ${createInfoItem("最低", formatPrice(pick(realtimeQuote, ["low_price"], null)))}
+        ${createInfoItem("昨收", formatPrice(pick(realtimeQuote, ["previous_close"], null)))}
+        ${createInfoItem("成交量", formatLotsWithUnit(pick(realtimeQuote, ["volume_lots"], null)))}
+        ${createInfoItem("單筆量", formatLotsWithUnit(pick(realtimeQuote, ["latest_volume_lots"], null)))}
+        ${createInfoItem("成交金額", formatRealtimeAmount(pick(realtimeQuote, ["total_trade_amount"], null)))}
+        ${createInfoItem("資料來源", escapeHtml(pick(realtimeQuote, ["source"], "即時行情")))}
+      </div>
+
+      <div class="quote-side-panel">
+        <div class="quote-side-card ${tradeSideClass}">
+          <span>內外盤參考</span>
+          <strong>${escapeHtml(tradeSide)}</strong>
+          <small>${escapeHtml(pick(realtimeQuote, ["trade_side_note"], ""))}</small>
+        </div>
+        <div class="quote-side-card">
+          <span>內盤量</span>
+          <strong>${formatLotsWithUnit(pick(realtimeQuote, ["inner_volume_lots"], null))}</strong>
+        </div>
+        <div class="quote-side-card">
+          <span>外盤量</span>
+          <strong>${formatLotsWithUnit(pick(realtimeQuote, ["outer_volume_lots"], null))}</strong>
+        </div>
+      </div>
+
+      <div class="quote-level-block">
+        <div class="chart-title-row">
+          <h3>五檔委買委賣</h3>
+          <span>${escapeHtml(pick(realtimeQuote, ["symbol", "channel"], ""))}</span>
+        </div>
+        ${renderRealtimeLevelRows(realtimeQuote)}
+      </div>
+
+      <p class="chart-note">內盤 / 外盤總量若來源未提供，會先顯示最新成交價相對五檔委買委賣的參考方向。</p>
+    </section>
+  `;
+}
+
 function renderSearchResult(summaryData) {
   const code = pick(summaryData, ["stock_code", "code"], state.lastSearchCode || "-");
   const name = pick(summaryData, ["stock_name", "name"], "股票");
@@ -2189,9 +2345,14 @@ function renderSearchResult(summaryData) {
   const score = pick(summaryData, ["chip_score", "total_score", "score"], "-");
   const scoreClass = getScoreClass(score);
   const scoreText = getScoreText(score);
+  const realtimeQuote = summaryData.realtime_quote || {};
+  const hasRealtime = hasRealtimeQuote(realtimeQuote);
   const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
   const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
-  const changeClass = getChangeClass(change);
+  const displayPrice = hasRealtime ? pick(realtimeQuote, ["current_price"], closePrice) : closePrice;
+  const displayChange = hasRealtime ? pick(realtimeQuote, ["price_change"], change) : change;
+  const changeClass = getChangeClass(displayChange);
+  const priceLabel = hasRealtime ? "現價" : "收盤";
   const foreignNet = pick(summaryData, ["foreign_net", "foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"], "-");
   const trustNet = pick(summaryData, ["investment_trust_net", "investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"], "-");
   const dealerNet = pick(summaryData, ["dealer_net", "dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"], "-");
@@ -2217,8 +2378,10 @@ function renderSearchResult(summaryData) {
 
       <div class="quick-summary search-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+        <span class="summary-text">${priceLabel} ${formatDirectionalClosePrice(displayPrice, displayChange)}，漲跌 <strong class="${changeClass}">${formatSignedPrice(displayChange)}</strong></span>
       </div>
+
+      ${renderRealtimeQuotePanel(realtimeQuote, summaryData)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -2345,12 +2508,24 @@ async function searchStock(codeFromButton = "") {
   `;
 
   try {
-    const result = await fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`);
-    const summaryData = getFirstArrayItem(result);
+    const [summaryResult, realtimeResult] = await Promise.allSettled([
+      fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`),
+      fetchJson(`/stock/${encodeURIComponent(stockCode)}/realtime`),
+    ]);
+
+    if (summaryResult.status !== "fulfilled") {
+      throw summaryResult.reason;
+    }
+
+    const summaryData = getFirstArrayItem(summaryResult.value);
 
     if (!summaryData || !pick(summaryData, ["stock_code", "code"], "")) {
       throw new Error("查不到這檔股票，請確認股票代號是否正確。");
     }
+
+    summaryData.realtime_quote = realtimeResult.status === "fulfilled"
+      ? realtimeResult.value
+      : { error: realtimeResult.reason?.message || "即時行情讀取失敗" };
 
     state.lastSearchCode = stockCode;
     state.lastSearchData = summaryData;
@@ -2480,8 +2655,9 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, prices, trades, scores, holders] = await Promise.allSettled([
+    const [summary, realtime, prices, trades, scores, holders] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
+      fetchJson(`/stock/${stockCode}/realtime`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
@@ -2489,6 +2665,7 @@ async function openDetail(stockCode) {
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
+    const realtimeQuote = realtime.status === "fulfilled" ? realtime.value : { error: realtime.reason?.message || "即時行情讀取失敗" };
     const priceRows = prices.status === "fulfilled" && Array.isArray(prices.value) ? prices.value : [];
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
@@ -2529,6 +2706,7 @@ async function openDetail(stockCode) {
           </div>
         </section>
       `,
+      renderRealtimeQuotePanel(realtimeQuote, summaryData),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
         createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
