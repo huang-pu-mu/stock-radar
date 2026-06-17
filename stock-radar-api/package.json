@@ -13,7 +13,14 @@
     "daily": "node scripts/dailyTwse.js",
     "industries": "node scripts/updateIndustries.js",
     "major-holders:setup": "node scripts/setupMajorHolderStats.js",
-    "major-holders:import": "node scripts/importMajorHolders.js"
+    "major-holders:import": "node scripts/importMajorHolders.js",
+    "official:setup": "node scripts/setupOfficialDataTables.js",
+    "official:market": "node scripts/importMarketDailySummaries.js",
+    "official:revenue": "node scripts/importMonthlyRevenues.js",
+    "official:eps": "node scripts/importQuarterlyEps.js",
+    "official:events": "node scripts/importStockCalendarEvents.js",
+    "official:etf": "node scripts/syncEtfProfilesFromStocks.js",
+    "official:daily": "node scripts/importMarketDailySummaries.js && node scripts/importMonthlyRevenues.js && node scripts/importQuarterlyEps.js && node scripts/syncEtfProfilesFromStocks.js"
   },
   "keywords": [
     "stock",

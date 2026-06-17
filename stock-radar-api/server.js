@@ -407,12 +407,117 @@ async function fetchTwseMarketSummary() {
   return buildTwseMarketSummary(latestRow);
 }
 
+function marketKeyFromType(marketType) {
+  if (marketType === "上市") return "twse";
+  if (marketType === "上櫃") return "tpex";
+  return "market";
+}
+
+async function fetchImportedMarketSummary(marketType) {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        market_type,
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        trade_volume,
+        total_trade_amount,
+        transaction_count,
+        daily_index_point,
+        daily_change_point,
+        source
+      FROM market_daily_summaries
+      WHERE market_type = ?
+      ORDER BY trade_date DESC
+      LIMIT 1
+      `,
+      [marketType],
+    );
+
+    const row = rows[0];
+    if (!row) return null;
+
+    return {
+      key: marketKeyFromType(row.market_type),
+      market_type: row.market_type,
+      trade_date: row.trade_date,
+      trade_volume: toFiniteNumber(row.trade_volume),
+      total_trade_amount: toFiniteNumber(row.total_trade_amount),
+      transaction_count: toFiniteNumber(row.transaction_count),
+      daily_index_point: toFiniteNumber(row.daily_index_point),
+      daily_change_point: toFiniteNumber(row.daily_change_point),
+      source: row.source || "資料庫 market_daily_summaries",
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+async function fetchMarketSummaryFromDatabase(marketType) {
+  const latestRows = await query(
+    `
+    SELECT DATE_FORMAT(MAX(p.trade_date), '%Y-%m-%d') AS latest_date
+    FROM daily_prices p
+    INNER JOIN stocks s
+      ON p.stock_code = s.stock_code
+    WHERE s.market_type = ?
+      AND (p.transaction_amount IS NOT NULL OR p.volume IS NOT NULL OR p.transaction_count IS NOT NULL)
+    `,
+    [marketType],
+  );
+
+  const latestDate = latestRows[0]?.latest_date || null;
+  if (!latestDate) return null;
+
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(p.trade_date, '%Y-%m-%d') AS trade_date,
+      CAST(SUM(COALESCE(p.volume, 0)) AS CHAR) AS trade_volume,
+      CAST(SUM(COALESCE(p.transaction_amount, p.turnover, 0)) AS CHAR) AS total_trade_amount,
+      CAST(SUM(COALESCE(p.transaction_count, 0)) AS CHAR) AS transaction_count
+    FROM daily_prices p
+    INNER JOIN stocks s
+      ON p.stock_code = s.stock_code
+    WHERE s.market_type = ?
+      AND p.trade_date = ?
+    GROUP BY p.trade_date
+    LIMIT 1
+    `,
+    [marketType, latestDate],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    key: marketKeyFromType(marketType),
+    market_type: marketType,
+    trade_date: row.trade_date,
+    trade_volume: toFiniteNumber(row.trade_volume),
+    total_trade_amount: toFiniteNumber(row.total_trade_amount),
+    transaction_count: toFiniteNumber(row.transaction_count),
+    daily_index_point: null,
+    daily_change_point: null,
+    source: "資料庫 daily_prices 匯總",
+  };
+}
+
 async function fetchMarketSummary(config) {
+  const importedSummary = await fetchImportedMarketSummary(config.market_type);
+  if (importedSummary) return importedSummary;
+
   if (config.key === "twse") {
-    return fetchTwseMarketSummary();
+    try {
+      return await fetchTwseMarketSummary();
+    } catch (error) {
+      const dbSummary = await fetchMarketSummaryFromDatabase(config.market_type);
+      if (dbSummary) return dbSummary;
+      throw error;
+    }
   }
 
-  return null;
+  return fetchMarketSummaryFromDatabase(config.market_type);
 }
 
 async function fetchMarketIndexWithSummary(config) {
@@ -1080,25 +1185,49 @@ async function ensureEtfStockInfo(stockCode) {
     security_type: "ETF",
   };
 
-  await query(
-    `
-    INSERT INTO stocks (
-      stock_code,
-      stock_name,
-      market_type,
-      industry,
-      is_active
-    )
-    VALUES (?, ?, ?, 'ETF', 1)
-    ON DUPLICATE KEY UPDATE
-      stock_name = VALUES(stock_name),
-      market_type = VALUES(market_type),
-      industry = 'ETF',
-      is_active = 1,
-      updated_at = NOW()
-    `,
-    [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
-  );
+  try {
+    await query(
+      `
+      INSERT INTO stocks (
+        stock_code,
+        stock_name,
+        market_type,
+        industry,
+        security_type,
+        is_active
+      )
+      VALUES (?, ?, ?, 'ETF', 'ETF', 1)
+      ON DUPLICATE KEY UPDATE
+        stock_name = VALUES(stock_name),
+        market_type = VALUES(market_type),
+        industry = 'ETF',
+        security_type = 'ETF',
+        is_active = 1,
+        updated_at = NOW()
+      `,
+      [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
+    );
+  } catch (error) {
+    await query(
+      `
+      INSERT INTO stocks (
+        stock_code,
+        stock_name,
+        market_type,
+        industry,
+        is_active
+      )
+      VALUES (?, ?, ?, 'ETF', 1)
+      ON DUPLICATE KEY UPDATE
+        stock_name = VALUES(stock_name),
+        market_type = VALUES(market_type),
+        industry = 'ETF',
+        is_active = 1,
+        updated_at = NOW()
+      `,
+      [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
+    );
+  }
 
   return stockInfo;
 }
@@ -1255,7 +1384,7 @@ function getRevenueGrowthStatus(latest, rows = []) {
   return "營收持平觀察";
 }
 
-function buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl) {
+function buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl, source = "Yahoo 股市營收表") {
   const latest = rows[0] || null;
 
   return {
@@ -1274,10 +1403,58 @@ function buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl) {
     latest_cumulative_year_over_year_percent: latest?.cumulative_year_over_year_percent ?? null,
     growth_status: getRevenueGrowthStatus(latest, rows),
     rows,
-    source: "Yahoo 股市營收表",
+    source,
     source_url: sourceUrl,
     updated_at: getTaiwanDateTimeText(),
   };
+}
+
+async function fetchDatabaseMonthlyRevenue(stockInfo, limit = 24) {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        CONCAT(revenue_year, '/', LPAD(revenue_month, 2, '0')) AS period,
+        revenue_year AS year,
+        revenue_month AS month,
+        month_revenue_thousand,
+        month_over_month_percent,
+        last_year_month_revenue_thousand,
+        year_over_year_percent,
+        cumulative_revenue_thousand,
+        last_year_cumulative_revenue_thousand,
+        cumulative_year_over_year_percent
+      FROM monthly_revenues
+      WHERE stock_code = ?
+      ORDER BY revenue_year DESC, revenue_month DESC
+      LIMIT ?
+      `,
+      [stockInfo.stock_code, limit],
+    );
+
+    if (rows.length === 0) return null;
+
+    return buildMonthlyRevenueSummary(
+      stockInfo,
+      stockInfo.stock_code,
+      rows.map((row) => ({
+        period: row.period,
+        year: Number(row.year),
+        month: Number(row.month),
+        month_revenue_thousand: toFiniteNumber(row.month_revenue_thousand),
+        month_over_month_percent: toFiniteNumber(row.month_over_month_percent),
+        last_year_month_revenue_thousand: toFiniteNumber(row.last_year_month_revenue_thousand),
+        year_over_year_percent: toFiniteNumber(row.year_over_year_percent),
+        cumulative_revenue_thousand: toFiniteNumber(row.cumulative_revenue_thousand),
+        last_year_cumulative_revenue_thousand: toFiniteNumber(row.last_year_cumulative_revenue_thousand),
+        cumulative_year_over_year_percent: toFiniteNumber(row.cumulative_year_over_year_percent),
+      })),
+      "database:monthly_revenues",
+      "資料庫 monthly_revenues",
+    );
+  } catch (error) {
+    return null;
+  }
 }
 
 async function fetchYahooMonthlyRevenue(stockInfo, limit = 24) {
@@ -1403,7 +1580,7 @@ function getEpsGrowthStatus(latest, rows = []) {
   return "EPS 持平觀察";
 }
 
-function buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl) {
+function buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl, source = "Yahoo 股市 EPS 表") {
   const latest = rows[0] || null;
   const recentFourRows = rows.slice(0, 4);
   const validRecentEps = recentFourRows
@@ -1431,7 +1608,7 @@ function buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl) {
     average_quarter_eps: averageQuarterEps,
     growth_status: getEpsGrowthStatus(latest, rows),
     rows,
-    source: "Yahoo 股市 EPS 表",
+    source,
     source_url: sourceUrl,
     updated_at: getTaiwanDateTimeText(),
   };
@@ -1460,6 +1637,46 @@ function normalizeYahooQuoteSummaryEpsRows(history = [], limit = 20) {
     .filter(Boolean);
 
   return normalizeEpsRows(rows).slice(0, limit);
+}
+
+async function fetchDatabaseQuarterlyEps(stockInfo, limit = 20) {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        CONCAT(eps_year, ' Q', eps_quarter) AS period,
+        eps_year AS year,
+        eps_quarter AS quarter,
+        eps,
+        quarter_over_quarter_percent,
+        year_over_year_percent
+      FROM quarterly_eps
+      WHERE stock_code = ?
+      ORDER BY eps_year DESC, eps_quarter DESC
+      LIMIT ?
+      `,
+      [stockInfo.stock_code, limit],
+    );
+
+    if (rows.length === 0) return null;
+
+    return buildQuarterlyEpsSummary(
+      stockInfo,
+      stockInfo.stock_code,
+      normalizeEpsRows(rows.map((row) => ({
+        period: row.period,
+        year: Number(row.year),
+        quarter: Number(row.quarter),
+        eps: toFiniteNumber(row.eps),
+        quarter_over_quarter_percent: toFiniteNumber(row.quarter_over_quarter_percent),
+        year_over_year_percent: toFiniteNumber(row.year_over_year_percent),
+      }))).slice(0, limit),
+      "database:quarterly_eps",
+      "資料庫 quarterly_eps",
+    );
+  } catch (error) {
+    return null;
+  }
 }
 
 async function fetchYahooEpsQuoteSummary(stockInfo, limit = 20) {
@@ -1748,6 +1965,50 @@ function buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl, source 
   };
 }
 
+async function fetchDatabaseStockCalendar(stockInfo, limit = 40) {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
+        event_type,
+        title,
+        description,
+        importance
+      FROM stock_calendar_events
+      WHERE stock_code = ?
+        AND is_active = 1
+      ORDER BY
+        CASE WHEN event_date >= CURDATE() THEN 0 ELSE 1 END ASC,
+        CASE WHEN event_date >= CURDATE() THEN event_date END ASC,
+        CASE WHEN event_date < CURDATE() THEN event_date END DESC
+      LIMIT ?
+      `,
+      [stockInfo.stock_code, limit],
+    );
+
+    if (rows.length === 0) return null;
+
+    const events = rows.map((row) => ({
+      event_date: row.event_date,
+      event_type: row.event_type || inferCalendarEventType(row.title || row.description || ""),
+      title: row.title || row.event_type || "個股行事曆事件",
+      description: row.description || "",
+      importance: row.importance || getCalendarEventImportance(row.event_type),
+    }));
+
+    return buildStockCalendarSummary(
+      stockInfo,
+      stockInfo.stock_code,
+      events,
+      "database:stock_calendar_events",
+      "資料庫 stock_calendar_events",
+    );
+  } catch (error) {
+    return null;
+  }
+}
+
 async function fetchYahooStockCalendar(stockInfo, limit = 40) {
   const symbol = getYahooTwSymbol(stockInfo);
   const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/calendar`;
@@ -1886,7 +2147,9 @@ app.get("/stock/:stockCode/revenue", async (req, res) => {
     }
 
     const limit = parseLimit(req.query.limit, 24, 60);
-    const revenue = await fetchYahooMonthlyRevenue(stockInfo, limit);
+    const revenue =
+      (await fetchDatabaseMonthlyRevenue(stockInfo, limit)) ||
+      (await fetchYahooMonthlyRevenue(stockInfo, limit));
 
     res.json({
       success: true,
@@ -1943,7 +2206,9 @@ app.get("/stock/:stockCode/eps", async (req, res) => {
     }
 
     const limit = parseLimit(req.query.limit, 20, 40);
-    const eps = await fetchYahooQuarterlyEps(stockInfo, limit);
+    const eps =
+      (await fetchDatabaseQuarterlyEps(stockInfo, limit)) ||
+      (await fetchYahooQuarterlyEps(stockInfo, limit));
 
     res.json({
       success: true,
@@ -1983,7 +2248,9 @@ app.get("/stock/:stockCode/calendar", async (req, res) => {
     }
 
     const limit = parseLimit(req.query.limit, 40, 80);
-    const calendar = await fetchYahooStockCalendar(stockInfo, limit);
+    const calendar =
+      (await fetchDatabaseStockCalendar(stockInfo, limit)) ||
+      (await fetchYahooStockCalendar(stockInfo, limit));
 
     res.json({
       success: true,
@@ -2903,6 +3170,95 @@ app.get("/radar/institutional-sync-buying", async (req, res) => {
 });
 
 
+
+async function fetchOfficialInstitutionalOverview(targetDate, market, days) {
+  try {
+    const marketCondition = market ? "AND market_type = ?" : "";
+    const params = market ? [targetDate, market] : [targetDate];
+    const summaryRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        ? AS market_type,
+        CAST(SUM(COALESCE(foreign_buy_amount, 0)) AS CHAR) AS foreign_buy_amount,
+        CAST(SUM(COALESCE(foreign_sell_amount, 0)) AS CHAR) AS foreign_sell_amount,
+        CAST(SUM(COALESCE(foreign_net_amount, 0)) AS CHAR) AS foreign_net_amount,
+        CAST(SUM(COALESCE(investment_trust_buy_amount, 0)) AS CHAR) AS investment_trust_buy_amount,
+        CAST(SUM(COALESCE(investment_trust_sell_amount, 0)) AS CHAR) AS investment_trust_sell_amount,
+        CAST(SUM(COALESCE(investment_trust_net_amount, 0)) AS CHAR) AS investment_trust_net_amount,
+        CAST(SUM(COALESCE(dealer_buy_amount, 0)) AS CHAR) AS dealer_buy_amount,
+        CAST(SUM(COALESCE(dealer_sell_amount, 0)) AS CHAR) AS dealer_sell_amount,
+        CAST(SUM(COALESCE(dealer_net_amount, 0)) AS CHAR) AS dealer_net_amount,
+        CAST(SUM(COALESCE(total_buy_amount, 0)) AS CHAR) AS total_buy_amount,
+        CAST(SUM(COALESCE(total_sell_amount, 0)) AS CHAR) AS total_sell_amount,
+        CAST(SUM(COALESCE(total_net_amount, 0)) AS CHAR) AS total_net_amount,
+        GROUP_CONCAT(DISTINCT source ORDER BY source SEPARATOR ', ') AS source
+      FROM institutional_amount_summaries
+      WHERE trade_date = ?
+        ${marketCondition}
+      GROUP BY trade_date
+      `,
+      [market || "全部", ...params],
+    );
+
+    if (summaryRows.length === 0) return null;
+
+    const byMarketRows = await query(
+      `
+      SELECT
+        market_type,
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        CAST(COALESCE(foreign_net_amount, 0) AS CHAR) AS foreign_net_amount,
+        CAST(COALESCE(investment_trust_net_amount, 0) AS CHAR) AS investment_trust_net_amount,
+        CAST(COALESCE(dealer_net_amount, 0) AS CHAR) AS dealer_net_amount,
+        CAST(COALESCE(total_net_amount, 0) AS CHAR) AS total_net_amount,
+        source
+      FROM institutional_amount_summaries
+      WHERE trade_date = ?
+        ${marketCondition}
+      ORDER BY market_type ASC
+      `,
+      params,
+    );
+
+    const historyMarketCondition = market ? "WHERE market_type = ?" : "";
+    const historyParams = market ? [market, days] : [days];
+    const historyRows = await query(
+      `
+      SELECT
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        CAST(SUM(COALESCE(foreign_net_amount, 0)) AS CHAR) AS foreign_net_amount,
+        CAST(SUM(COALESCE(investment_trust_net_amount, 0)) AS CHAR) AS investment_trust_net_amount,
+        CAST(SUM(COALESCE(dealer_net_amount, 0)) AS CHAR) AS dealer_net_amount,
+        CAST(SUM(COALESCE(total_net_amount, 0)) AS CHAR) AS total_net_amount
+      FROM institutional_amount_summaries
+      WHERE trade_date IN (
+        SELECT trade_date
+        FROM (
+          SELECT DISTINCT trade_date
+          FROM institutional_amount_summaries
+          ${historyMarketCondition}
+          ORDER BY trade_date DESC
+          LIMIT ?
+        ) recent_dates
+      )
+      ${market ? "AND market_type = ?" : ""}
+      GROUP BY trade_date
+      ORDER BY trade_date DESC
+      `,
+      market ? [market, days, market] : [days],
+    );
+
+    return {
+      summary: summaryRows[0],
+      by_market: byMarketRows,
+      history: historyRows,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
 // ==============================
 // 三大法人每日買賣總覽
 // GET /market/institutional/summary?market=上市&date=YYYY-MM-DD&days=10
@@ -3115,19 +3471,25 @@ app.get("/market/institutional/summary", async (req, res) => {
       topParams,
     );
 
+    const officialOverview = await fetchOfficialInstitutionalOverview(targetDate, market, days);
+    const hasOfficialAmount = Boolean(officialOverview?.summary);
+
     res.json({
       success: true,
       data: convertBigIntToString({
         trade_date: targetDate,
         market: market || "全部",
         days,
+        official_amount_available: hasOfficialAmount,
         unit: {
           lots: "張",
-          amount: "新台幣，使用法人買賣超張數 × 收盤價 × 1000 估算",
+          amount: hasOfficialAmount
+            ? "新台幣，優先使用 institutional_amount_summaries 官方金額匯入表"
+            : "新台幣，使用法人買賣超張數 × 收盤價 × 1000 估算",
         },
-        summary: summaryRows[0] || null,
-        by_market: byMarketRows,
-        history: historyRows,
+        summary: officialOverview?.summary || summaryRows[0] || null,
+        by_market: officialOverview?.by_market || byMarketRows,
+        history: officialOverview?.history || historyRows,
         top_net_buy: topNetBuyRows,
         top_net_sell: topNetSellRows,
       }),
