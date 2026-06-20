@@ -32,8 +32,10 @@ const state = {
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
   alertFilter: "unread",
+  alertMode: "list",
   alertSummary: null,
   alertUnreadCount: 0,
+  alertRules: [],
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -293,15 +295,20 @@ function updatePageText() {
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
   const isAlertsPage = state.page === "alerts";
+  const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
   marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
 
   if (state.page === "alerts") {
-    pageTitle.textContent = "提醒中心";
-    pageDesc.textContent = "顯示自選股的異常提醒，包含投信連買、主力籌碼、量能、分數與行事曆。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看未讀與高重要性提醒；看完可標記已讀，避免每天重複判斷。</span>`;
+    pageTitle.textContent = isAlertRulesMode ? "提醒設定" : "提醒中心";
+    pageDesc.textContent = isAlertRulesMode
+      ? "調整每一檔自選股的提醒條件，包含法人、主力、成交量、籌碼分數與行事曆。"
+      : "顯示自選股的異常提醒，包含投信連買、主力籌碼、量能、分數與行事曆。";
+    helpCard.innerHTML = isAlertRulesMode
+      ? `<strong>簡單看法：</strong><span>門檻越低，提醒越多；門檻越高，提醒會比較少但訊號較強。</span>`
+      : `<strong>簡單看法：</strong><span>先看未讀與高重要性提醒；看完可標記已讀，避免每天重複判斷。</span>`;
     return;
   }
 
@@ -1279,6 +1286,7 @@ function getAlertFilterQuery() {
   params.set("limit", "50");
 
   if (state.alertFilter === "unread") params.set("unread", "1");
+  if (state.alertFilter === "read") params.set("is_read", "1");
   if (state.alertFilter === "high") params.set("alert_level", "high");
 
   return `/watchlist/alerts?${params.toString()}`;
@@ -1305,6 +1313,7 @@ function renderEmptyAlerts() {
       <p>可以切換成「全部」查看歷史提醒，或到自選股加入更多股票。</p>
       <div class="example-row">
         <button class="example-btn" type="button" data-alert-filter="all">查看全部提醒</button>
+        <button class="example-btn" type="button" data-alert-mode="rules">調整提醒設定</button>
         <button class="example-btn" type="button" data-go-page="watchlist">看自選股</button>
       </div>
     </article>
@@ -1347,11 +1356,15 @@ function renderAlertsToolbar(summary = {}) {
           <h3>提醒中心</h3>
           <p>符合條件的股票會出現在這裡；未讀提醒會排在最前面。</p>
         </div>
-        <button class="detail-btn ${unreadCount > 0 ? "" : "disabled-look"}" type="button" data-alert-read-all="true" ${unreadCount > 0 ? "" : "disabled"}>全部已讀</button>
+        <div class="alerts-toolbar-actions">
+          <button class="detail-btn secondary-action" type="button" data-alert-mode="rules">提醒設定</button>
+          <button class="detail-btn ${unreadCount > 0 ? "" : "disabled-look"}" type="button" data-alert-read-all="true" ${unreadCount > 0 ? "" : "disabled"}>全部已讀</button>
+        </div>
       </div>
       ${renderAlertSummaryCards(summary)}
       <div class="alert-filter-row" aria-label="提醒篩選">
         ${renderAlertFilterButton("unread", "未讀")}
+        ${renderAlertFilterButton("read", "已讀")}
         ${renderAlertFilterButton("all", "全部")}
         ${renderAlertFilterButton("high", "高重要")}
       </div>
@@ -1416,6 +1429,174 @@ function renderAlertsPage(result = null) {
   ].join("");
 }
 
+function normalizeRuleBoolean(value) {
+  return Number(value || 0) === 1;
+}
+
+function getRuleNumber(rule, key, fallback) {
+  const value = toNumber(rule?.[key]);
+  return value === null ? fallback : value;
+}
+
+function renderRuleToggle(rule, key, label, hint) {
+  const checked = normalizeRuleBoolean(rule[key]) ? "checked" : "";
+  return `
+    <label class="rule-toggle-row">
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(hint)}</small>
+      </span>
+      <input type="checkbox" name="${escapeHtml(key)}" value="1" ${checked} />
+    </label>
+  `;
+}
+
+function renderRuleNumberField(rule, key, label, min, step, fallback, suffix) {
+  const value = getRuleNumber(rule, key, fallback);
+  return `
+    <label class="rule-field">
+      <span>${escapeHtml(label)}</span>
+      <div class="rule-input-group">
+        <input type="number" name="${escapeHtml(key)}" min="${escapeHtml(min)}" step="${escapeHtml(step)}" value="${escapeHtml(value)}" />
+        <em>${escapeHtml(suffix)}</em>
+      </div>
+    </label>
+  `;
+}
+
+function renderRuleCard(rule) {
+  const stockCode = normalizeStockCode(rule.stock_code);
+  const stockName = rule.stock_name || stockCode;
+  const active = normalizeRuleBoolean(rule.is_active);
+
+  return `
+    <article class="stock-card alert-rule-card ${active ? "active" : "inactive"}">
+      <form data-alert-rule-form="true" data-stock-code="${escapeHtml(stockCode)}">
+        <div class="stock-top rule-card-header">
+          <div class="stock-main">
+            <span class="rank-badge ${active ? "" : "muted-badge"}">${active ? "啟用" : "停用"}</span>
+            <div class="stock-name">
+              <h3>${escapeHtml(stockName)}</h3>
+              <span class="stock-code">${escapeHtml(stockCode)}</span>
+              <span class="badge">${escapeHtml(rule.market_type || "-")}</span>
+              ${rule.industry ? `<span class="badge">${escapeHtml(rule.industry)}</span>` : ""}
+            </div>
+          </div>
+        </div>
+
+        <div class="rule-master-row">
+          ${renderRuleToggle(rule, "is_active", "啟用這檔股票提醒", "關閉後，每日排程不會再產生這檔股票的新提醒。")}
+        </div>
+
+        <div class="rule-section-grid">
+          <section class="rule-section-card">
+            <h4>法人提醒</h4>
+            ${renderRuleToggle(rule, "foreign_buy_streak_enabled", "外資連買", "外資連續買超達門檻時提醒。")}
+            ${renderRuleNumberField(rule, "foreign_buy_streak_days", "外資連買門檻", 1, 1, 3, "天")}
+            ${renderRuleToggle(rule, "investment_trust_buy_streak_enabled", "投信連買", "投信連續買超達門檻時提醒。")}
+            ${renderRuleNumberField(rule, "investment_trust_buy_streak_days", "投信連買門檻", 1, 1, 3, "天")}
+          </section>
+
+          <section class="rule-section-card">
+            <h4>主力與量能</h4>
+            ${renderRuleToggle(rule, "major_holder_enabled", "大戶持股增加", "TDCC 大戶比例增加達門檻時提醒。")}
+            ${renderRuleNumberField(rule, "major_holder_ratio_change_threshold", "大戶增加門檻", 0, 0.1, 0.3, "%")}
+            ${renderRuleToggle(rule, "volume_enabled", "成交量放大", "最新成交量高於 20 日均量時提醒。")}
+            ${renderRuleNumberField(rule, "volume_ratio_threshold", "成交量放大門檻", 1, 0.1, 1.5, "倍")}
+          </section>
+
+          <section class="rule-section-card">
+            <h4>分數與行事曆</h4>
+            ${renderRuleToggle(rule, "chip_score_enabled", "籌碼分數達標", "籌碼分數達到門檻時提醒。")}
+            ${renderRuleNumberField(rule, "chip_score_threshold", "籌碼分數門檻", 0, 1, 80, "分")}
+            ${renderRuleToggle(rule, "calendar_enabled", "行事曆提前提醒", "除權息、股東會、法說會等事件提前提醒。")}
+            ${renderRuleNumberField(rule, "calendar_days_before", "提前提醒天數", 1, 1, 14, "天")}
+          </section>
+        </div>
+
+        <div class="card-actions alert-actions">
+          <span class="card-note">更新時間：${escapeHtml(rule.updated_at || "-")}</span>
+          <div class="action-buttons">
+            <button class="watch-btn" type="submit">儲存設定</button>
+          </div>
+        </div>
+      </form>
+    </article>
+  `;
+}
+
+function renderAlertRulesPage(result = null) {
+  const rows = Array.isArray(result?.data) ? result.data : [];
+  state.alertRules = rows;
+
+  stockList.innerHTML = [
+    `
+      <article class="alerts-dashboard-card alert-rules-dashboard-card">
+        <div class="alerts-dashboard-header">
+          <div>
+            <p class="eyebrow">自選股提醒</p>
+            <h3>提醒設定</h3>
+            <p>每檔自選股可以分別調整提醒條件。門檻越低，提醒越多；門檻越高，提醒越少。</p>
+          </div>
+          <div class="alerts-toolbar-actions">
+            <button class="detail-btn secondary-action" type="button" data-alert-mode="list">返回提醒中心</button>
+          </div>
+        </div>
+        <div class="rule-help-grid">
+          ${createInfoItem("股票數量", `${formatNumber(rows.length)} 檔`)}
+          ${createInfoItem("外資 / 投信", "連買天數")}
+          ${createInfoItem("主力 / 成交量", "比例與倍數")}
+          ${createInfoItem("行事曆", "提前天數")}
+        </div>
+      </article>
+    `,
+    rows.length > 0 ? rows.map(renderRuleCard).join("") : `
+      <article class="search-intro-card alerts-empty-card">
+        <div class="intro-icon">⚙️</div>
+        <h3>目前沒有可設定的自選股</h3>
+        <p>請先到自選股頁面加入股票，再回來調整提醒條件。</p>
+        <div class="example-row">
+          <button class="example-btn" type="button" data-go-page="watchlist">看自選股</button>
+        </div>
+      </article>
+    `,
+  ].join("");
+}
+
+function readRuleForm(form) {
+  const formData = new FormData(form);
+  const stockCode = normalizeStockCode(form.dataset.stockCode || "");
+  const boolFields = [
+    "is_active",
+    "foreign_buy_streak_enabled",
+    "investment_trust_buy_streak_enabled",
+    "major_holder_enabled",
+    "volume_enabled",
+    "chip_score_enabled",
+    "calendar_enabled",
+  ];
+  const numberFields = [
+    "foreign_buy_streak_days",
+    "investment_trust_buy_streak_days",
+    "major_holder_ratio_change_threshold",
+    "volume_ratio_threshold",
+    "chip_score_threshold",
+    "calendar_days_before",
+  ];
+  const payload = { stock_code: stockCode };
+
+  boolFields.forEach((field) => {
+    payload[field] = formData.has(field) ? 1 : 0;
+  });
+
+  numberFields.forEach((field) => {
+    const value = Number(formData.get(field));
+    payload[field] = Number.isFinite(value) ? value : undefined;
+  });
+
+  return payload;
+}
+
 async function updateAlertsBadge() {
   if (!alertsTabBadge) return;
 
@@ -1441,6 +1622,11 @@ async function updateAlertsBadge() {
 }
 
 async function loadAlerts() {
+  if (state.alertMode === "rules") {
+    await loadAlertRules();
+    return;
+  }
+
   if (!isAuthenticated()) {
     setLoading(false);
     state.latestRows = [];
@@ -1517,6 +1703,69 @@ async function handleAlertsReadAll(button) {
     showStatus(`全部已讀失敗：${escapeHtml(error.message)}`, "error");
     button.disabled = false;
     button.textContent = originalText;
+  }
+}
+
+
+async function loadAlertRules() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    state.alertRules = [];
+    renderAlertsLoginPrompt();
+    await updateAlertsBadge();
+    return;
+  }
+
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const result = await fetchJson("/watchlist/rules", {
+      method: "GET",
+      auth: true,
+      raw: true,
+    });
+    renderAlertRulesPage(result);
+    showTemporaryStatus(`已載入 ${Number(result.count || 0)} 檔自選股提醒設定。`, "success");
+  } catch (error) {
+    stockList.innerHTML = "";
+    showStatus(`提醒設定讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleAlertMode(button) {
+  const mode = button.dataset.alertMode === "rules" ? "rules" : "list";
+  state.alertMode = mode;
+  updatePageText();
+  await loadList();
+}
+
+async function handleAlertRuleSubmit(form) {
+  const submitButton = form.querySelector('button[type="submit"]');
+  const originalText = submitButton ? submitButton.textContent : "";
+
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "儲存中...";
+  }
+
+  try {
+    const payload = readRuleForm(form);
+    await fetchJson("/watchlist/rules", {
+      method: "POST",
+      auth: true,
+      body: payload,
+    });
+    await loadAlertRules();
+    showTemporaryStatus(`${payload.stock_code} 提醒設定已更新。`, "success");
+  } catch (error) {
+    showStatus(`提醒設定儲存失敗：${escapeHtml(error.message)}`, "error");
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalText;
+    }
   }
 }
 
@@ -2571,6 +2820,9 @@ function closeDetail() {
 function switchPage(page) {
   tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.page === page));
   state.page = page;
+  if (page === "alerts") {
+    state.alertMode = "list";
+  }
   loadList();
 }
 
@@ -2589,10 +2841,30 @@ marketButtons.forEach((button) => {
   });
 });
 
+stockList.addEventListener("submit", (event) => {
+  const alertRuleForm = event.target.closest("[data-alert-rule-form]");
+  if (alertRuleForm) {
+    event.preventDefault();
+    handleAlertRuleSubmit(alertRuleForm);
+  }
+});
+
 stockList.addEventListener("click", (event) => {
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
+    return;
+  }
+
+  const alertModeButton = event.target.closest("[data-alert-mode]");
+  if (alertModeButton) {
+    handleAlertMode(alertModeButton);
+    return;
+  }
+
+  const alertRuleForm = event.target.closest("[data-alert-rule-form]");
+  if (alertRuleForm && event.type === "submit") {
+    handleAlertRuleSubmit(alertRuleForm);
     return;
   }
 
