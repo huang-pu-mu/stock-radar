@@ -227,6 +227,304 @@ function isValidDateText(value) {
 }
 
 
+const API_VERSION = "stock-radar-api-v1.3.4.1";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v41";
+
+const V13_CORE_TABLES = [
+  { name: "stocks", label: "股票主檔", date_column: "updated_at" },
+  { name: "daily_prices", label: "每日收盤行情", date_column: "trade_date" },
+  { name: "institutional_trades", label: "三大法人買賣超", date_column: "trade_date" },
+  { name: "chip_scores", label: "籌碼分數", date_column: "trade_date" },
+  { name: "major_holder_stats", label: "TDCC 大戶籌碼", date_column: "data_date" },
+  { name: "stock_calendar_events", label: "個股 / ETF 行事曆", date_column: "event_date" },
+];
+
+const V13_FEATURE_TABLES = [
+  { name: "watchlist_alert_rules", label: "自選股提醒規則", date_column: "updated_at" },
+  { name: "watchlist_alerts", label: "自選股提醒紀錄", date_column: "alert_date" },
+  { name: "strategy_watchlists", label: "策略追蹤", date_column: "created_at" },
+  { name: "strategy_backtest_runs", label: "策略回測任務", date_column: "created_at" },
+  { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_date" },
+];
+
+const V13_MODULES = [
+  {
+    key: "watchlist_alerts",
+    name: "自選股提醒中心",
+    required_tables: ["watchlist_alert_rules", "watchlist_alerts"],
+    required_apis: [
+      "GET /watchlist/alerts",
+      "GET /watchlist/alerts/unread-count",
+      "POST /watchlist/alerts/:alertId/read",
+      "POST /watchlist/alerts/read-all",
+      "GET /watchlist/rules",
+      "POST /watchlist/rules",
+      "POST /watchlist/alerts/generate",
+    ],
+  },
+  {
+    key: "strategy_screening",
+    name: "選股策略清單",
+    required_tables: ["daily_prices", "institutional_trades", "chip_scores", "major_holder_stats", "stock_calendar_events"],
+    required_apis: ["GET /strategies", "GET /strategies/definitions"],
+  },
+  {
+    key: "strategy_tracking",
+    name: "策略追蹤與績效",
+    required_tables: ["strategy_watchlists"],
+    required_apis: [
+      "GET /strategy-watchlist",
+      "GET /strategy-watchlist/performance",
+      "GET /strategy-watchlist/rankings",
+      "PATCH /strategy-watchlist/:trackId/risk-settings",
+    ],
+  },
+  {
+    key: "strategy_backtests",
+    name: "策略回測",
+    required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
+    required_apis: [
+      "GET /strategy-backtests/runs",
+      "GET /strategy-backtests/runs/:runId",
+      "GET /strategy-backtests/results",
+      "GET /strategy-backtests/summary",
+      "GET /strategy-backtests/rankings",
+    ],
+  },
+];
+
+function escapeSqlIdentifier(value) {
+  return `\`${String(value || "").replace(/`/g, "``")}\``;
+}
+
+function nowTaipeiText() {
+  return new Date().toLocaleString("sv-SE", {
+    timeZone: "Asia/Taipei",
+    hour12: false,
+  });
+}
+
+function buildCheck(key, label, status, message, details = {}) {
+  return {
+    key,
+    label,
+    status,
+    message,
+    ...details,
+  };
+}
+
+function summarizeChecks(checks) {
+  if (checks.some((item) => item.status === "fail")) return "fail";
+  if (checks.some((item) => item.status === "warn")) return "warn";
+  return "pass";
+}
+
+async function safeQuery(sql, params = [], fallback = []) {
+  try {
+    return await query(sql, params);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+async function checkTableExists(tableName) {
+  const rows = await safeQuery(
+    `
+    SELECT COUNT(*) AS table_count
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+    `,
+    [tableName],
+  );
+
+  return Number(rows?.[0]?.table_count || 0) > 0;
+}
+
+async function checkColumnExists(tableName, columnName) {
+  const rows = await safeQuery(
+    `
+    SELECT COUNT(*) AS column_count
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+      AND COLUMN_NAME = ?
+    `,
+    [tableName, columnName],
+  );
+
+  return Number(rows?.[0]?.column_count || 0) > 0;
+}
+
+async function getTableRowCount(tableName) {
+  const rows = await safeQuery(
+    `SELECT COUNT(*) AS row_count FROM ${escapeSqlIdentifier(tableName)}`,
+    [],
+    [{ row_count: 0 }],
+  );
+
+  return Number(rows?.[0]?.row_count || 0);
+}
+
+async function getLatestColumnValue(tableName, columnName) {
+  const hasColumn = await checkColumnExists(tableName, columnName);
+
+  if (!hasColumn) return null;
+
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(${escapeSqlIdentifier(columnName)}), '%Y-%m-%d %H:%i:%s') AS latest_value FROM ${escapeSqlIdentifier(tableName)}`,
+    [],
+    [{ latest_value: null }],
+  );
+
+  return rows?.[0]?.latest_value || null;
+}
+
+async function getV13TableStatus(tableDefinition) {
+  const exists = await checkTableExists(tableDefinition.name);
+
+  if (!exists) {
+    return {
+      table_name: tableDefinition.name,
+      label: tableDefinition.label,
+      exists: false,
+      row_count: 0,
+      latest_value: null,
+      status: "fail",
+      message: "資料表不存在",
+    };
+  }
+
+  const rowCount = await getTableRowCount(tableDefinition.name);
+  const latestValue = tableDefinition.date_column
+    ? await getLatestColumnValue(tableDefinition.name, tableDefinition.date_column)
+    : null;
+
+  return {
+    table_name: tableDefinition.name,
+    label: tableDefinition.label,
+    exists: true,
+    row_count: rowCount,
+    latest_column: tableDefinition.date_column || null,
+    latest_value: latestValue,
+    status: rowCount > 0 ? "pass" : "warn",
+    message: rowCount > 0 ? "資料表存在且有資料" : "資料表存在，但目前沒有資料",
+  };
+}
+
+async function getLatestBacktestRun() {
+  if (!(await checkTableExists("strategy_backtest_runs"))) return null;
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      id,
+      status,
+      DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+      market_type,
+      strategy_key,
+      trading_day_count,
+      signal_count,
+      success_count,
+      neutral_count,
+      fail_count,
+      pending_count,
+      avg_return_1d_percent,
+      avg_return_3d_percent,
+      avg_return_5d_percent,
+      win_rate_1d_percent,
+      win_rate_3d_percent,
+      win_rate_5d_percent,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(finished_at, '%Y-%m-%d %H:%i:%s') AS finished_at
+    FROM strategy_backtest_runs
+    ORDER BY id DESC
+    LIMIT 1
+    `,
+  );
+
+  return rows?.[0] || null;
+}
+
+async function getLatestBacktestStrategyStats(runId) {
+  if (!runId || !(await checkTableExists("strategy_backtest_results"))) return [];
+
+  return safeQuery(
+    `
+    SELECT
+      strategy_key,
+      strategy_name,
+      COUNT(*) AS signal_count,
+      ROUND(AVG(return_1d_percent), 4) AS avg_1d,
+      ROUND(AVG(return_3d_percent), 4) AS avg_3d,
+      ROUND(AVG(return_5d_percent), 4) AS avg_5d,
+      ROUND(SUM(CASE WHEN return_5d_percent > 0 THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN return_5d_percent IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 4) AS win_rate_5d,
+      SUM(CASE WHEN result_status = 'success' THEN 1 ELSE 0 END) AS success_count,
+      SUM(CASE WHEN result_status = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
+      SUM(CASE WHEN result_status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
+      SUM(CASE WHEN result_status = 'pending' THEN 1 ELSE 0 END) AS pending_count
+    FROM strategy_backtest_results
+    WHERE run_id = ?
+    GROUP BY strategy_key, strategy_name
+    ORDER BY avg_5d DESC, signal_count DESC
+    `,
+    [runId],
+  );
+}
+
+async function getV13FeatureSnapshot() {
+  const snapshot = {
+    watchlist_alerts: null,
+    strategy_watchlists: null,
+    strategy_backtests: null,
+  };
+
+  if (await checkTableExists("watchlist_alerts")) {
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) AS unread_count,
+        COUNT(DISTINCT stock_code) AS stock_count,
+        DATE_FORMAT(MAX(alert_date), '%Y-%m-%d') AS latest_alert_date,
+        DATE_FORMAT(MAX(created_at), '%Y-%m-%d %H:%i:%s') AS latest_created_at
+      FROM watchlist_alerts
+      `,
+    );
+    snapshot.watchlist_alerts = rows?.[0] || null;
+  }
+
+  if (await checkTableExists("strategy_watchlists")) {
+    const hasRiskColumns =
+      (await checkColumnExists("strategy_watchlists", "take_profit_percent")) &&
+      (await checkColumnExists("strategy_watchlists", "stop_loss_percent"));
+
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
+        COUNT(DISTINCT strategy_key) AS strategy_count,
+        COUNT(DISTINCT stock_code) AS stock_count,
+        DATE_FORMAT(MAX(created_at), '%Y-%m-%d %H:%i:%s') AS latest_created_at
+      FROM strategy_watchlists
+      `,
+    );
+    snapshot.strategy_watchlists = {
+      ...(rows?.[0] || {}),
+      has_risk_columns: hasRiskColumns,
+    };
+  }
+
+  const latestBacktestRun = await getLatestBacktestRun();
+  snapshot.strategy_backtests = latestBacktestRun;
+
+  return snapshot;
+}
+
+
 const STRATEGY_DEFINITIONS = [
   {
     key: "legal_strength",
@@ -1202,8 +1500,173 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1",
+    version: API_VERSION,
   });
+});
+
+app.get("/health", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+
+    res.json({
+      success: true,
+      message: "Stock Radar API health check passed",
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      database: convertBigIntToString(dbInfo),
+      checked_at: nowTaipeiText(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Stock Radar API health check failed",
+      version: API_VERSION,
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v13/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const coreTableStatuses = [];
+    const featureTableStatuses = [];
+
+    for (const tableDefinition of V13_CORE_TABLES) {
+      coreTableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    for (const tableDefinition of V13_FEATURE_TABLES) {
+      featureTableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const allTableStatuses = [...coreTableStatuses, ...featureTableStatuses];
+    const latestDailyPrice = coreTableStatuses.find((item) => item.table_name === "daily_prices")?.latest_value || null;
+    const latestChipScore = coreTableStatuses.find((item) => item.table_name === "chip_scores")?.latest_value || null;
+    const latestInstitutionalTrade = coreTableStatuses.find((item) => item.table_name === "institutional_trades")?.latest_value || null;
+    const featureSnapshot = await getV13FeatureSnapshot();
+    const latestBacktestRun = featureSnapshot.strategy_backtests;
+    const latestBacktestStrategyStats = await getLatestBacktestStrategyStats(latestBacktestRun?.id);
+
+    const missingTables = allTableStatuses
+      .filter((item) => !item.exists)
+      .map((item) => item.table_name);
+
+    const emptyImportantTables = featureTableStatuses
+      .filter((item) => item.exists && Number(item.row_count || 0) === 0)
+      .map((item) => item.table_name);
+
+    const strategyRiskColumnsOk = Boolean(featureSnapshot.strategy_watchlists?.has_risk_columns);
+    const backtestReady = Boolean(latestBacktestRun && latestBacktestRun.status === "completed" && Number(latestBacktestRun.signal_count || 0) > 0);
+    const alertsReady = Number(featureSnapshot.watchlist_alerts?.total_count || 0) > 0;
+    const strategyTrackingReady = Number(featureSnapshot.strategy_watchlists?.total_count || 0) >= 0 && await checkTableExists("strategy_watchlists");
+
+    const checks = [
+      buildCheck(
+        "database",
+        "MariaDB 連線",
+        "pass",
+        "API 可以正常連線到 MariaDB。",
+        { database: dbInfo },
+      ),
+      buildCheck(
+        "tables",
+        "V1.3 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "必要資料表都存在。" : `缺少資料表：${missingTables.join("、")}` ,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "core_market_data",
+        "核心行情 / 籌碼資料",
+        latestDailyPrice && latestChipScore && latestInstitutionalTrade ? "pass" : "warn",
+        latestDailyPrice && latestChipScore && latestInstitutionalTrade
+          ? "每日行情、法人資料與籌碼分數都有可用資料。"
+          : "核心資料部分缺少最新日期，請確認每日排程是否正常。",
+        {
+          latest_daily_price: latestDailyPrice,
+          latest_chip_score: latestChipScore,
+          latest_institutional_trade: latestInstitutionalTrade,
+        },
+      ),
+      buildCheck(
+        "alerts",
+        "自選股提醒資料",
+        alertsReady ? "pass" : "warn",
+        alertsReady ? "自選股提醒已有資料。" : "自選股提醒資料表存在，但目前沒有提醒資料。",
+        { snapshot: featureSnapshot.watchlist_alerts },
+      ),
+      buildCheck(
+        "strategy_tracking",
+        "策略追蹤功能",
+        strategyRiskColumnsOk ? "pass" : "warn",
+        strategyRiskColumnsOk ? "策略追蹤與停利停損欄位都已就緒。" : "策略追蹤資料表存在，但停利停損欄位尚未補齊，請執行 npm run strategy-watchlists:setup。",
+        { snapshot: featureSnapshot.strategy_watchlists },
+      ),
+      buildCheck(
+        "strategy_backtests",
+        "策略回測資料",
+        backtestReady ? "pass" : "warn",
+        backtestReady ? "已有完成的策略回測任務與訊號資料。" : "尚未找到完成且有訊號的策略回測任務。",
+        { latest_run: latestBacktestRun },
+      ),
+      buildCheck(
+        "empty_feature_tables",
+        "V1.3 功能資料量",
+        emptyImportantTables.length === 0 ? "pass" : "warn",
+        emptyImportantTables.length === 0 ? "V1.3 功能資料表已有資料。" : `以下資料表目前沒有資料：${emptyImportantTables.join("、")}` ,
+        { empty_tables: emptyImportantTables },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.3 系統狀態檢查",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.3 主要後端資料與狀態檢查正常。"
+          : overallStatus === "warn"
+            ? "V1.3 主要功能可用，但仍有資料量或欄位需要確認。"
+            : "V1.3 有必要資料表或資料庫狀態異常，需要修正。",
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: {
+        core: coreTableStatuses,
+        v13_features: featureTableStatuses,
+      },
+      latest_data: {
+        daily_prices: latestDailyPrice,
+        chip_scores: latestChipScore,
+        institutional_trades: latestInstitutionalTrade,
+      },
+      feature_snapshot: featureSnapshot,
+      latest_backtest_strategy_stats: latestBacktestStrategyStats,
+      modules: V13_MODULES,
+      next_actions: [
+        "確認 /health 可正常回傳。",
+        "確認 /v13/status 的 overall_status 為 pass 或可接受的 warn。",
+        "下一步可接 V1.3-4-2：我的頁 V1.3 狀態卡片。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.3 系統狀態失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.3 系統狀態檢查",
+      message: "查詢 V1.3 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
 });
 
 
