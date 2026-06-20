@@ -2133,3 +2133,60 @@ body.chart-zoom-open {
     font-size: 23px;
   }
 }
+
+/* V1.2-8 內外盤 / 五檔報價 */
+.microstructure-section .info-grid {
+  margin-bottom: 14px;
+}
+
+.order-book-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.order-book-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.order-book-table th,
+.order-book-table td {
+  padding: 10px 12px;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+.order-book-table th:first-child,
+.order-book-table td:first-child {
+  text-align: center;
+}
+
+.order-book-table thead th {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.order-book-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.microstructure-note {
+  margin-top: 12px;
+}
+
+.status-box.muted {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.status-chip.neutral {
+  color: var(--muted);
+  border-color: rgba(173, 193, 216, 0.28);
+  background: rgba(173, 193, 216, 0.08);
+}

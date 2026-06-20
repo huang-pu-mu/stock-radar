@@ -17,6 +17,7 @@ const requiredFiles = [
   "stock-radar-api/scripts/backfillMarketDailySummaries.js",
   "stock-radar-api/scripts/backfillInstitutionalAmountSummaries.js",
   "stock-radar-api/scripts/syncEtfProfilesFromStocks.js",
+  "stock-radar-api/scripts/setupMicrostructureTables.js",
 ];
 
 const requiredScripts = [
@@ -29,6 +30,8 @@ const requiredScripts = [
   "official:institutional-amounts",
   "official:market:history",
   "official:institutional-amounts:history",
+  "official:microstructure:setup",
+  "microstructure:setup",
   "official:daily",
 ];
 
@@ -48,6 +51,8 @@ const requiredTables = [
   "stock_calendar_events",
   "etf_profiles",
   "institutional_amount_summaries",
+  "realtime_quote_snapshots",
+  "market_order_flow_snapshots",
 ];
 
 function okText(ok) {

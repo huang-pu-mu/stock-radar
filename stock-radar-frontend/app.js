@@ -2042,6 +2042,120 @@ function renderDetailSection(title, rows) {
   `;
 }
 
+function hasDisplayValue(value) {
+  return value !== null && value !== undefined && value !== "" && value !== "-";
+}
+
+function formatSnapshotTime(value) {
+  if (!value || value === "-") return "-";
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(text)) return escapeHtml(text.slice(0, 19));
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return escapeHtml(text.replace("T", " ").slice(0, 19));
+  return escapeHtml(text);
+}
+
+function formatQuoteType(row = {}) {
+  if (row.is_realtime === true || row.is_realtime === 1 || row.is_realtime === "1") {
+    return `<span class="status-chip good">即時 / 近即時快照</span>`;
+  }
+
+  const quoteType = String(row.quote_type || "").toLowerCase();
+  if (quoteType.includes("snapshot")) {
+    return `<span class="status-chip neutral">行情快照</span>`;
+  }
+
+  return `<span class="status-chip warn">最新收盤備援</span>`;
+}
+
+function normalizeOrderBookLevels(orderBookData = {}) {
+  if (Array.isArray(orderBookData.levels)) return orderBookData.levels;
+
+  return [1, 2, 3, 4, 5].map((level) => ({
+    level,
+    buy_price: orderBookData[`buy_price_${level}`],
+    buy_volume: orderBookData[`buy_volume_${level}`],
+    sell_price: orderBookData[`sell_price_${level}`],
+    sell_volume: orderBookData[`sell_volume_${level}`],
+  }));
+}
+
+function hasOrderBookLevelData(levels) {
+  return levels.some((level) => (
+    hasDisplayValue(level.buy_price) ||
+    hasDisplayValue(level.buy_volume) ||
+    hasDisplayValue(level.sell_price) ||
+    hasDisplayValue(level.sell_volume)
+  ));
+}
+
+function renderOrderBookTable(orderBookData = {}) {
+  const levels = normalizeOrderBookLevels(orderBookData);
+
+  if (!hasOrderBookLevelData(levels)) {
+    return `
+      <div class="status-box muted">
+        目前尚未接入授權五檔委買委賣資料源；此區塊已先完成，等資料表有快照後會自動顯示。
+      </div>
+    `;
+  }
+
+  return `
+    <div class="order-book-table-wrap">
+      <table class="order-book-table">
+        <thead>
+          <tr>
+            <th>檔位</th>
+            <th>委買價</th>
+            <th>委買張</th>
+            <th>委賣價</th>
+            <th>委賣張</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${levels.map((level) => `
+            <tr>
+              <td>${escapeHtml(level.level || "-")}</td>
+              <td class="price-up">${formatPrice(level.buy_price)}</td>
+              <td>${formatNumber(level.buy_volume)}</td>
+              <td class="price-down">${formatPrice(level.sell_price)}</td>
+              <td>${formatNumber(level.sell_volume)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMicrostructureDetailSection(quoteData = {}, orderBookData = {}) {
+  const quote = quoteData || {};
+  const orderBook = orderBookData || {};
+  const snapshotAt = pick(quote, ["snapshot_at", "updated_at", "trade_date"], pick(orderBook, ["snapshot_at", "updated_at", "quote_date"], "-"));
+  const insideLots = pick(quote, ["inside_volume_lots"], pick(orderBook, ["inside_volume_lots"], "-"));
+  const outsideLots = pick(quote, ["outside_volume_lots"], pick(orderBook, ["outside_volume_lots"], "-"));
+  const buyTotalLots = pick(orderBook, ["buy_total_lots"], "-");
+  const sellTotalLots = pick(orderBook, ["sell_total_lots"], "-");
+  const quoteNotice = pick(quote, ["notice"], pick(orderBook, ["notice"], ""));
+
+  return `
+    <section class="detail-section microstructure-section">
+      <h3>內外盤 / 五檔報價</h3>
+      <div class="info-grid">
+        ${createInfoItem("資料型態", formatQuoteType(quote))}
+        ${createInfoItem("快照時間", formatSnapshotTime(snapshotAt))}
+        ${createInfoItem("最新價", formatPrice(pick(quote, ["last_price", "close_price"])), getPriceDirectionClass(pick(quote, ["price_change"]), pick(quote, ["last_price", "close_price"]))) }
+        ${createInfoItem("漲跌", `${formatPrice(pick(quote, ["price_change"]))} / ${formatPercent(pick(quote, ["price_change_percent"]))}`, getChangeClass(pick(quote, ["price_change"]))) }
+        ${createInfoItem("內盤張數", hasDisplayValue(insideLots) ? formatNumber(insideLots) : "尚無資料")}
+        ${createInfoItem("外盤張數", hasDisplayValue(outsideLots) ? formatNumber(outsideLots) : "尚無資料")}
+        ${createInfoItem("五檔委買合計", hasDisplayValue(buyTotalLots) ? formatNumber(buyTotalLots) : "尚無資料")}
+        ${createInfoItem("五檔委賣合計", hasDisplayValue(sellTotalLots) ? formatNumber(sellTotalLots) : "尚無資料")}
+      </div>
+      ${renderOrderBookTable(orderBook)}
+      ${quoteNotice ? `<div class="result-note microstructure-note"><strong>資料說明：</strong>${escapeHtml(quoteNotice)}</div>` : ""}
+    </section>
+  `;
+}
+
 function renderSearchResult(summaryData) {
   const code = pick(summaryData, ["stock_code", "code"], state.lastSearchCode || "-");
   const name = pick(summaryData, ["stock_name", "name"], "股票");
@@ -2337,7 +2451,7 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, prices, trades, scores, holders, calendar, etfProfile] = await Promise.allSettled([
+    const [summary, prices, trades, scores, holders, calendar, etfProfile, quote, orderBook] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
@@ -2345,6 +2459,8 @@ async function openDetail(stockCode) {
       fetchJson(`/major-holders/${stockCode}?limit=12`),
       fetchJson(`/calendar-events/${stockCode}?limit=30`),
       fetchJson(`/etf-profiles/${stockCode}`),
+      fetchJson(`/quote/${stockCode}`),
+      fetchJson(`/order-book/${stockCode}`),
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
@@ -2355,6 +2471,8 @@ async function openDetail(stockCode) {
     const holderRows = holders.status === "fulfilled" && Array.isArray(holders.value) ? holders.value : [];
     const calendarRows = calendar.status === "fulfilled" && Array.isArray(calendar.value) ? calendar.value : [];
     const etfProfileData = etfProfile.status === "fulfilled" ? getFirstArrayItem(etfProfile.value) : {};
+    const quoteData = quote.status === "fulfilled" ? getFirstArrayItem(quote.value) : {};
+    const orderBookData = orderBook.status === "fulfilled" ? getFirstArrayItem(orderBook.value) : {};
 
     const latestPrice = priceRows[0] || summaryData || {};
     const latestTrade = tradeRows[0] || summaryData || {};
@@ -2401,6 +2519,7 @@ async function openDetail(stockCode) {
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
+      renderMicrostructureDetailSection(quoteData, orderBookData),
       renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
       renderTechnicalCharts(enrichedPriceRows),
       renderDetailSection("三大法人", [

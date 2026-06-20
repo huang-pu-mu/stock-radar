@@ -292,7 +292,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.7",
+    version: "stock-radar-api-v1.2.8",
   });
 });
 
@@ -300,7 +300,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.7",
+    version: "stock-radar-api-v1.2.8",
     time: new Date().toISOString(),
   });
 });
@@ -627,17 +627,157 @@ async function getLatestQuoteFromDailyPrices(stockCode) {
   };
 }
 
-async function latestQuoteFallbackHandler(req, res) {
+
+function isMissingMicrostructureTableError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.code === "ER_NO_SUCH_TABLE" || error?.errno === 1146 || message.includes("doesn't exist");
+}
+
+function normalizeRealtimeQuoteRow(row) {
+  if (!row) return null;
+
+  const isRealtime = Number(row.is_realtime || 0) === 1;
+  return {
+    ...row,
+    is_realtime: isRealtime,
+    quote_type: isRealtime ? "realtime_snapshot" : "quote_snapshot",
+    source: row.source || "realtime_quote_snapshots",
+    notice: isRealtime
+      ? "此資料來自已匯入的即時/近即時行情快照。"
+      : "此資料來自行情快照資料表；若尚未接入授權即時資料源，請以最新收盤資料輔助判斷。",
+  };
+}
+
+async function getLatestRealtimeQuoteSnapshot(stockCode) {
+  const rows = await query(
+    `
+    SELECT
+      rqs.stock_code,
+      COALESCE(rqs.stock_name, s.stock_name) AS stock_name,
+      COALESCE(rqs.market_type, s.market_type) AS market_type,
+      s.industry,
+      DATE_FORMAT(rqs.snapshot_at, '%Y-%m-%d %H:%i:%s') AS snapshot_at,
+      DATE_FORMAT(rqs.quote_date, '%Y-%m-%d') AS quote_date,
+      TIME_FORMAT(rqs.quote_time, '%H:%i:%s') AS quote_time,
+      rqs.last_price,
+      rqs.price_change,
+      rqs.price_change_percent,
+      rqs.open_price,
+      rqs.high_price,
+      rqs.low_price,
+      rqs.previous_close,
+      CAST(rqs.total_volume AS CHAR) AS total_volume,
+      CAST(rqs.total_amount AS CHAR) AS total_amount,
+      rqs.inside_volume_lots,
+      rqs.outside_volume_lots,
+      rqs.buy_price_1,
+      rqs.buy_volume_1,
+      rqs.buy_price_2,
+      rqs.buy_volume_2,
+      rqs.buy_price_3,
+      rqs.buy_volume_3,
+      rqs.buy_price_4,
+      rqs.buy_volume_4,
+      rqs.buy_price_5,
+      rqs.buy_volume_5,
+      rqs.sell_price_1,
+      rqs.sell_volume_1,
+      rqs.sell_price_2,
+      rqs.sell_volume_2,
+      rqs.sell_price_3,
+      rqs.sell_volume_3,
+      rqs.sell_price_4,
+      rqs.sell_volume_4,
+      rqs.sell_price_5,
+      rqs.sell_volume_5,
+      rqs.source,
+      rqs.source_url,
+      rqs.is_realtime,
+      DATE_FORMAT(rqs.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM realtime_quote_snapshots rqs
+    LEFT JOIN stocks s ON s.stock_code = rqs.stock_code
+    WHERE rqs.stock_code = ?
+    ORDER BY rqs.snapshot_at DESC, rqs.id DESC
+    LIMIT 1
+    `,
+    [stockCode],
+  );
+
+  return normalizeRealtimeQuoteRow(rows[0] || null);
+}
+
+async function getLatestQuoteData(stockCode) {
+  try {
+    const snapshot = await getLatestRealtimeQuoteSnapshot(stockCode);
+    if (snapshot) return snapshot;
+  } catch (error) {
+    if (!isMissingMicrostructureTableError(error)) {
+      throw error;
+    }
+  }
+
+  return getLatestQuoteFromDailyPrices(stockCode);
+}
+
+function buildOrderBookLevels(row) {
+  if (!row) return [];
+
+  return [1, 2, 3, 4, 5].map((level) => ({
+    level,
+    buy_price: row[`buy_price_${level}`] ?? null,
+    buy_volume: row[`buy_volume_${level}`] ?? null,
+    sell_price: row[`sell_price_${level}`] ?? null,
+    sell_volume: row[`sell_volume_${level}`] ?? null,
+  }));
+}
+
+function buildOrderBookResponse(row) {
+  if (!row) return null;
+
+  const levels = buildOrderBookLevels(row);
+  const hasLevelData = levels.some((level) => (
+    level.buy_price !== null ||
+    level.buy_volume !== null ||
+    level.sell_price !== null ||
+    level.sell_volume !== null
+  ));
+  const buyVolumes = levels.map((level) => toPlainNumber(level.buy_volume)).filter((value) => value > 0);
+  const sellVolumes = levels.map((level) => toPlainNumber(level.sell_volume)).filter((value) => value > 0);
+
+  return {
+    stock_code: row.stock_code,
+    stock_name: row.stock_name,
+    market_type: row.market_type,
+    snapshot_at: row.snapshot_at || row.updated_at || null,
+    quote_date: row.quote_date || row.trade_date || null,
+    quote_time: row.quote_time || null,
+    last_price: row.last_price || row.close_price || null,
+    is_realtime: Boolean(row.is_realtime),
+    quote_type: row.quote_type || "latest_close",
+    source: row.source || "daily_prices",
+    source_url: row.source_url || null,
+    inside_volume_lots: row.inside_volume_lots ?? null,
+    outside_volume_lots: row.outside_volume_lots ?? null,
+    buy_total_lots: hasLevelData ? buyVolumes.reduce((sum, value) => sum + value, 0) : null,
+    sell_total_lots: hasLevelData ? sellVolumes.reduce((sum, value) => sum + value, 0) : null,
+    levels,
+    notice: row.quote_type === "latest_close"
+      ? "目前尚未接入授權即時五檔資料源，先顯示最新收盤行情，五檔欄位會是空值。"
+      : row.notice,
+  };
+}
+
+async function latestQuoteHandler(req, res) {
   try {
     const stockCode = req.params.stockCode;
-    const quote = await getLatestQuoteFromDailyPrices(stockCode);
+    const quote = await getLatestQuoteData(stockCode);
 
     if (!quote) {
       return res.json({
         success: true,
         stock_code: stockCode,
         data: null,
-        message: "目前查無最新收盤行情資料。",
+        message: "目前查無最新行情資料。",
       });
     }
 
@@ -647,11 +787,33 @@ async function latestQuoteFallbackHandler(req, res) {
       data: convertBigIntToString(quote),
     });
   } catch (error) {
-    console.error("Get latest quote fallback failed:", error);
+    console.error("Get latest quote failed:", error);
 
     return res.status(500).json({
       success: false,
       message: "查詢最新行情失敗",
+      error: error.message,
+    });
+  }
+}
+
+async function orderBookHandler(req, res) {
+  try {
+    const stockCode = req.params.stockCode;
+    const quote = await getLatestQuoteData(stockCode);
+    const orderBook = buildOrderBookResponse(quote);
+
+    return res.json({
+      success: true,
+      stock_code: stockCode,
+      data: convertBigIntToString(orderBook),
+    });
+  } catch (error) {
+    console.error("Get order book failed:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "查詢五檔委買委賣失敗",
       error: error.message,
     });
   }
@@ -676,8 +838,218 @@ app.get(
     "/api/stocks/:stockCode/quote",
     "/api/stocks/:stockCode/realtime",
   ],
-  latestQuoteFallbackHandler,
+  latestQuoteHandler,
 );
+
+app.get(
+  [
+    "/order-book/:stockCode",
+    "/stock/:stockCode/order-book",
+    "/stocks/:stockCode/order-book",
+    "/stock/:stockCode/five-level-quotes",
+    "/stocks/:stockCode/five-level-quotes",
+    "/stock/:stockCode/buy-sell-force",
+    "/stocks/:stockCode/buy-sell-force",
+    "/api/order-book/:stockCode",
+    "/api/stock/:stockCode/order-book",
+    "/api/stocks/:stockCode/order-book",
+  ],
+  orderBookHandler,
+);
+
+async function getMarketMicrostructureFallback(marketType, limit) {
+  const params = [];
+  let whereSql = "";
+
+  if (marketType) {
+    whereSql = "WHERE market_type = ?";
+    params.push(marketType);
+  }
+
+  params.push(limit);
+
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      market_type,
+      daily_index_point AS market_index,
+      daily_change_point AS index_change,
+      CAST(trade_volume AS CHAR) AS trade_volume,
+      CAST(total_trade_amount AS CHAR) AS total_trade_amount,
+      CAST(transaction_count AS CHAR) AS transaction_count,
+      source,
+      source_url,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM market_daily_summaries
+    ${whereSql}
+    ORDER BY trade_date DESC, market_type ASC
+    LIMIT ?
+    `,
+    params,
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    snapshot_at: row.updated_at,
+    is_realtime: false,
+    quote_type: "market_daily_summary",
+    buy_sell_volume_diff: null,
+    buy_sell_amount_diff: null,
+    notice: "目前尚未接入授權即時大盤委買委賣資料源，先顯示市場每日成交總覽。",
+  }));
+}
+
+async function marketMicrostructureHandler(req, res) {
+  const marketType = parseMarket(req.query.market);
+  const limit = parseLimit(req.query.limit, 20, 100);
+
+  try {
+    const params = [];
+    let whereSql = "";
+
+    if (marketType) {
+      whereSql = "WHERE mofs.market_type = ?";
+      params.push(marketType);
+    }
+
+    params.push(limit);
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(mofs.snapshot_at, '%Y-%m-%d %H:%i:%s') AS snapshot_at,
+        mofs.market_type,
+        mofs.market_index,
+        mofs.index_change,
+        CAST(mofs.total_buy_volume AS CHAR) AS total_buy_volume,
+        CAST(mofs.total_sell_volume AS CHAR) AS total_sell_volume,
+        CAST(mofs.buy_sell_volume_diff AS CHAR) AS buy_sell_volume_diff,
+        CAST(mofs.total_buy_amount AS CHAR) AS total_buy_amount,
+        CAST(mofs.total_sell_amount AS CHAR) AS total_sell_amount,
+        CAST(mofs.buy_sell_amount_diff AS CHAR) AS buy_sell_amount_diff,
+        CAST(mofs.total_trade_amount AS CHAR) AS total_trade_amount,
+        mofs.source,
+        mofs.source_url,
+        mofs.is_realtime,
+        DATE_FORMAT(mofs.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM market_order_flow_snapshots mofs
+      ${whereSql}
+      ORDER BY mofs.snapshot_at DESC, mofs.market_type ASC
+      LIMIT ?
+      `,
+      params,
+    );
+
+    if (rows.length > 0) {
+      return res.json({
+        success: true,
+        count: rows.length,
+        data: convertBigIntToString(rows.map((row) => ({
+          ...row,
+          is_realtime: Number(row.is_realtime || 0) === 1,
+          quote_type: Number(row.is_realtime || 0) === 1 ? "market_realtime_snapshot" : "market_snapshot",
+        }))),
+      });
+    }
+  } catch (error) {
+    if (!isMissingMicrostructureTableError(error)) {
+      console.error("Get market microstructure failed:", error);
+      return res.status(500).json({
+        success: false,
+        message: "查詢大盤買賣力道失敗",
+        error: error.message,
+      });
+    }
+  }
+
+  try {
+    const fallbackRows = await getMarketMicrostructureFallback(marketType, limit);
+    return res.json({
+      success: true,
+      count: fallbackRows.length,
+      data: convertBigIntToString(fallbackRows),
+      message: "目前尚未匯入大盤委買委賣快照，已改用市場每日成交總覽。",
+    });
+  } catch (error) {
+    console.error("Get market microstructure fallback failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "查詢大盤買賣力道備援資料失敗",
+      error: error.message,
+    });
+  }
+}
+
+app.get(
+  [
+    "/market/microstructure",
+    "/market/order-flow",
+    "/api/market/microstructure",
+    "/api/market/order-flow",
+  ],
+  marketMicrostructureHandler,
+);
+
+app.get("/microstructure/status", async (req, res) => {
+  try {
+    const [quoteStats, marketStats] = await Promise.all([
+      query(
+        `
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT stock_code) AS stock_count,
+          DATE_FORMAT(MAX(snapshot_at), '%Y-%m-%d %H:%i:%s') AS latest_snapshot_at
+        FROM realtime_quote_snapshots
+        `,
+      ),
+      query(
+        `
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT market_type) AS market_count,
+          DATE_FORMAT(MAX(snapshot_at), '%Y-%m-%d %H:%i:%s') AS latest_snapshot_at
+        FROM market_order_flow_snapshots
+        `,
+      ),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        realtime_quote_snapshots: convertBigIntToString(quoteStats[0] || {}),
+        market_order_flow_snapshots: convertBigIntToString(marketStats[0] || {}),
+      },
+    });
+  } catch (error) {
+    if (isMissingMicrostructureTableError(error)) {
+      return res.json({
+        success: true,
+        data: {
+          realtime_quote_snapshots: {
+            total_rows: 0,
+            stock_count: 0,
+            latest_snapshot_at: null,
+          },
+          market_order_flow_snapshots: {
+            total_rows: 0,
+            market_count: 0,
+            latest_snapshot_at: null,
+          },
+        },
+        message: "尚未建立即時行情 / 五檔 / 買賣力道資料表，請先執行 npm run official:setup。",
+      });
+    }
+
+    console.error("Get microstructure status failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "查詢微結構資料狀態失敗",
+      error: error.message,
+    });
+  }
+});
+
 
 app.get("/institutional-trades/:stockCode", async (req, res) => {
   try {
@@ -2922,7 +3294,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.7",
+    version: "stock-radar-api-v1.2.8",
   });
 });
 

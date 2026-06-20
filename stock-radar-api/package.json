@@ -15,7 +15,7 @@
     "major-holders:setup": "node scripts/setupMajorHolderStats.js",
     "major-holders:import": "node scripts/importMajorHolders.js",
     "v12:check": "node scripts/checkV12Status.js",
-    "official:setup": "node scripts/setupOfficialTables.js",
+    "official:setup": "node scripts/setupOfficialTables.js && node scripts/setupMicrostructureTables.js",
     "official:market": "node scripts/importMarketDailySummaries.js",
     "official:revenue": "node scripts/importMonthlyRevenues.js",
     "official:eps": "node scripts/importQuarterlyEps.js",
@@ -31,7 +31,9 @@
     "docker:scheduler:logs": "docker logs -f stock-radar-scheduler",
     "docker:scheduler:test": "docker exec stock-radar-scheduler /bin/sh /app/docker/run-scheduled-daily.sh",
     "official:market:history": "node scripts/backfillMarketDailySummaries.js",
-    "official:institutional-amounts:history": "node scripts/backfillInstitutionalAmountSummaries.js"
+    "official:institutional-amounts:history": "node scripts/backfillInstitutionalAmountSummaries.js",
+    "official:microstructure:setup": "node scripts/setupMicrostructureTables.js",
+    "microstructure:setup": "node scripts/setupMicrostructureTables.js"
   },
   "keywords": [
     "stock",
