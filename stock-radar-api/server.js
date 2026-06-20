@@ -227,7 +227,7 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.3.4.1";
+const API_VERSION = "stock-radar-api-v1.3.4.1.1";
 const PWA_EXPECTED_VERSION = "stock-radar-pwa-v41";
 
 const V13_CORE_TABLES = [
@@ -244,7 +244,7 @@ const V13_FEATURE_TABLES = [
   { name: "watchlist_alerts", label: "自選股提醒紀錄", date_column: "alert_date" },
   { name: "strategy_watchlists", label: "策略追蹤", date_column: "created_at" },
   { name: "strategy_backtest_runs", label: "策略回測任務", date_column: "created_at" },
-  { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_date" },
+  { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_trade_date" },
 ];
 
 const V13_MODULES = [
@@ -420,26 +420,41 @@ async function getLatestBacktestRun() {
     `
     SELECT
       id,
+      run_name,
       status,
       DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
       DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
       market_type,
       strategy_key,
-      trading_day_count,
+      limit_per_strategy,
+      trading_days_count,
+      trading_days_count AS trading_day_count,
       signal_count,
+      signal_count AS total_signals,
       success_count,
       neutral_count,
       fail_count,
       pending_count,
-      avg_return_1d_percent,
-      avg_return_3d_percent,
-      avg_return_5d_percent,
-      win_rate_1d_percent,
-      win_rate_3d_percent,
-      win_rate_5d_percent,
+      avg_return_1d,
+      avg_return_1d AS avg_return_1d_percent,
+      avg_return_3d,
+      avg_return_3d AS avg_return_3d_percent,
+      avg_return_5d,
+      avg_return_5d AS avg_return_5d_percent,
+      win_rate_1d,
+      win_rate_1d AS win_rate_1d_percent,
+      win_rate_3d,
+      win_rate_3d AS win_rate_3d_percent,
+      win_rate_5d,
+      win_rate_5d AS win_rate_5d_percent,
+      DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+      DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+      DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS finished_at,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(finished_at, '%Y-%m-%d %H:%i:%s') AS finished_at
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
     FROM strategy_backtest_runs
+    WHERE status = 'completed'
+      AND signal_count > 0
     ORDER BY id DESC
     LIMIT 1
     `,
@@ -460,11 +475,12 @@ async function getLatestBacktestStrategyStats(runId) {
       ROUND(AVG(return_1d_percent), 4) AS avg_1d,
       ROUND(AVG(return_3d_percent), 4) AS avg_3d,
       ROUND(AVG(return_5d_percent), 4) AS avg_5d,
+      ROUND(AVG(latest_return_percent), 4) AS avg_latest,
       ROUND(SUM(CASE WHEN return_5d_percent > 0 THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN return_5d_percent IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 4) AS win_rate_5d,
-      SUM(CASE WHEN result_status = 'success' THEN 1 ELSE 0 END) AS success_count,
-      SUM(CASE WHEN result_status = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
-      SUM(CASE WHEN result_status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
-      SUM(CASE WHEN result_status = 'pending' THEN 1 ELSE 0 END) AS pending_count
+      SUM(CASE WHEN outcome_label = 'success' THEN 1 ELSE 0 END) AS success_count,
+      SUM(CASE WHEN outcome_label = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
+      SUM(CASE WHEN outcome_label = 'fail' THEN 1 ELSE 0 END) AS fail_count,
+      SUM(CASE WHEN outcome_label = 'pending' THEN 1 ELSE 0 END) AS pending_count
     FROM strategy_backtest_results
     WHERE run_id = ?
     GROUP BY strategy_key, strategy_name
@@ -1558,7 +1574,7 @@ app.get("/v13/status", async (req, res) => {
       .map((item) => item.table_name);
 
     const strategyRiskColumnsOk = Boolean(featureSnapshot.strategy_watchlists?.has_risk_columns);
-    const backtestReady = Boolean(latestBacktestRun && latestBacktestRun.status === "completed" && Number(latestBacktestRun.signal_count || 0) > 0);
+    const backtestReady = Boolean(latestBacktestRun && latestBacktestRun.status === "completed" && Number(latestBacktestRun.signal_count || latestBacktestRun.total_signals || 0) > 0);
     const alertsReady = Number(featureSnapshot.watchlist_alerts?.total_count || 0) > 0;
     const strategyTrackingReady = Number(featureSnapshot.strategy_watchlists?.total_count || 0) >= 0 && await checkTableExists("strategy_watchlists");
 
