@@ -18,7 +18,8 @@
     "alerts:generate": "node scripts/generateWatchlistAlerts.js",
     "strategy-watchlists:setup": "node scripts/setupStrategyWatchlists.js",
     "strategy-backtests:setup": "node scripts/setupStrategyBacktests.js",
-    "strategy-backtests:generate": "node scripts/generateStrategyBacktests.js"
+    "strategy-backtests:generate": "node scripts/generateStrategyBacktests.js",
+    "v13:check": "node scripts/checkV13.js"
   },
   "keywords": [
     "stock",

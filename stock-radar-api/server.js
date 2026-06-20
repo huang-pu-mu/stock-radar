@@ -227,8 +227,8 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.3.4.2";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v42";
+const API_VERSION = "stock-radar-api-v1.3.4.3";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v43";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -289,6 +289,36 @@ const V13_MODULES = [
       "GET /strategy-backtests/results",
       "GET /strategy-backtests/summary",
       "GET /strategy-backtests/rankings",
+    ],
+  },
+];
+
+const V13_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "API",
+    items: [
+      "GET /health 回傳目前 API 版本",
+      "GET /v13/status 回傳 overall_status=pass 或可接受的 warn",
+      "策略選股、策略追蹤、策略回測 API 可正常回 JSON",
+      "Google 登入保護 API 未登入時會回請先登入",
+    ],
+  },
+  {
+    group: "資料庫",
+    items: [
+      "V1.3 必要資料表都存在",
+      "自選股提醒、策略追蹤、策略回測資料表已有資料",
+      "strategy_watchlists 已補停利停損欄位",
+      "strategy_backtest_runs 有完成的回測任務",
+    ],
+  },
+  {
+    group: "前端 / PWA",
+    items: [
+      "提醒中心、策略選股、策略追蹤、策略回測頁籤可正常開啟",
+      "我的頁 V1.3 狀態卡片可正常顯示",
+      "service-worker.js 快取版本與 API 預期 PWA 版本一致",
+      "手機與 iPad 不再看到舊版快取畫面",
     ],
   },
 ];
@@ -1667,8 +1697,9 @@ app.get("/v13/status", async (req, res) => {
       modules: V13_MODULES,
       next_actions: [
         "確認 /health 可正常回傳。",
-        "確認 /v13/status 的 overall_status 為 pass 或可接受的 warn。",
-        "下一步可接 V1.3-4-2：我的頁 V1.3 狀態卡片。",
+        "確認 /v13/status 的 overall_status 為 pass。",
+        "執行 npm run v13:check 做本機靜態驗收。",
+        "最後進行 V1.3 正式版 Git tag。",
       ],
     }));
   } catch (error) {
@@ -1683,6 +1714,30 @@ app.get("/v13/status", async (req, res) => {
       checked_at: nowTaipeiText(),
     });
   }
+});
+
+app.get("/v13/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.3 收尾驗收清單",
+    acceptance_status: "ready_for_final_validation",
+    checklist: V13_FINAL_ACCEPTANCE_ITEMS,
+    recommended_commands: [
+      "npm run v13:check",
+      "npm run v13:check -- --api=https://stock-radar-api-ten.vercel.app",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v13/status",
+      "/v13/acceptance",
+      "/strategy-backtests/runs",
+      "/strategy-backtests/summary",
+      "/strategy-backtests/rankings",
+    ],
+    checked_at: nowTaipeiText(),
+  });
 });
 
 
