@@ -10,41 +10,6 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_VERSION = "stock-radar-api-v1.2.11";
-const PWA_VERSION = "stock-radar-pwa-v29";
-const V12_STATUS_TABLES = [
-  { table: "market_daily_summaries", label: "市場每日成交總覽", dateColumn: "trade_date" },
-  { table: "monthly_revenues", label: "個股每月營收", dateColumn: "revenue_month" },
-  { table: "quarterly_eps", label: "每季 EPS", dateColumn: "quarter" },
-  { table: "stock_calendar_events", label: "個股 / ETF 行事曆", dateColumn: "event_date" },
-  { table: "etf_profiles", label: "ETF 官方主檔", dateColumn: "updated_at" },
-  { table: "institutional_amount_summaries", label: "三大法人官方金額", dateColumn: "trade_date" },
-  { table: "realtime_quote_snapshots", label: "內外盤 / 五檔快照", dateColumn: "snapshot_at" },
-  { table: "market_order_flow_snapshots", label: "大盤買賣力道快照", dateColumn: "snapshot_at" },
-  { table: "major_holder_stats", label: "TDCC 主力籌碼週資料", dateColumn: "data_date" },
-];
-const V12_FEATURES = [
-  { id: "v12-4", name: "ETF / 個股行事曆前端顯示", status: "done" },
-  { id: "v12-5", name: "ETF 官方主檔完整化", status: "done" },
-  { id: "v12-6", name: "股東會 / 法說會 / 停止過戶資料來源修正", status: "done" },
-  { id: "v12-7", name: "官方歷史資料回補", status: "done" },
-  { id: "v12-8", name: "內外盤 / 五檔 / 大盤買賣力道基礎框架", status: "foundation" },
-  { id: "v12-9", name: "資金流向分析強化", status: "done" },
-  { id: "v12-10", name: "主力籌碼分析強化", status: "done" },
-  { id: "v12-11", name: "V1.2 完整收尾檢查與前端細修", status: "done" },
-];
-const V12_REQUIRED_ROUTES = [
-  "/health",
-  "/v12/status",
-  "/market/flow/summary",
-  "/calendar-events/:stockCode",
-  "/etf-profiles/:stockCode",
-  "/quote/:stockCode",
-  "/order-book/:stockCode",
-  "/microstructure/status",
-  "/major-holders/:stockCode/analysis",
-  "/radar/major-holder",
-];
 const SESSION_EXPIRE_SECONDS = 60 * 60 * 24 * 7;
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -309,152 +274,13 @@ function getMajorHolderStatus(row) {
   return "大戶持股穩定";
 }
 
-function clampNumber(value, min, max) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return min;
-  return Math.min(Math.max(numberValue, min), max);
-}
-
-function roundNumber(value, digits = 4) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return 0;
-  const base = 10 ** digits;
-  return Math.round(numberValue * base) / base;
-}
-
-function sharesDiffToLotsString(currentValue, baseValue) {
-  return sharesToLotsString(toBigIntValue(currentValue) - toBigIntValue(baseValue));
-}
-
-function calculateConcentrationScoreFromTrend(latest, trend = {}) {
-  const largeRatio = toPlainNumber(latest.large_holder_ratio);
-  const thousandRatio = toPlainNumber(latest.thousand_lot_ratio);
-  const smallRatio = toPlainNumber(latest.small_holder_ratio);
-  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
-  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
-  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
-  const upWeeks = toPlainNumber(trend.trend_weeks_up);
-
-  let score = 0;
-  score += clampNumber(largeRatio, 0, 75) * 0.52;
-  score += clampNumber(thousandRatio, 0, 45) * 0.28;
-  score += clampNumber(25 - smallRatio, -10, 25) * 0.35;
-  score += clampNumber(ratioChange4w * 7, -14, 21);
-  score += clampNumber(ratioChange12w * 3, -12, 18);
-  if (smallRatioChange4w < 0 && ratioChange4w > 0) score += 8;
-  if (upWeeks >= 3) score += 6;
-
-  return Math.round(clampNumber(score, 0, 100));
-}
-
-function getMajorHolderTrendStatus(trend = {}) {
-  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
-  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
-  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
-  const shareChange4wLots = toPlainNumber(trend.large_holder_share_change_lots_4w);
-  const upWeeks = toPlainNumber(trend.trend_weeks_up);
-  const downWeeks = toPlainNumber(trend.trend_weeks_down);
-
-  if (ratioChange4w >= 1.5 && shareChange4wLots > 0 && smallRatioChange4w < 0) return "主力明顯加碼";
-  if (upWeeks >= 3 && ratioChange4w > 0) return "大戶連續增加";
-  if (ratioChange4w >= 0.5 && ratioChange12w >= 0) return "籌碼集中轉強";
-  if (ratioChange4w <= -1.5 || downWeeks >= 3) return "主力減碼警訊";
-  if (ratioChange4w < 0) return "大戶比重下降";
-  return "籌碼持平觀察";
-}
-
-function getMajorHolderTrendDirection(trend = {}) {
-  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
-  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
-  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
-
-  if (ratioChange4w > 0.3 && ratioChange12w >= 0 && smallRatioChange4w <= 0) return "up";
-  if (ratioChange4w < -0.3 || ratioChange12w < -1) return "down";
-  if (Math.abs(ratioChange4w) <= 0.3) return "flat";
-  return "mixed";
-}
-
-function buildMajorHolderTrendSummary(rows) {
-  const safeRows = Array.isArray(rows)
-    ? rows.filter((row) => row && row.data_date).sort((a, b) => String(b.data_date).localeCompare(String(a.data_date)))
-    : [];
-
-  if (safeRows.length === 0) {
-    return {
-      data_points: 0,
-      concentration_score: 0,
-      major_holder_trend_status: "尚無大戶資料",
-      trend_direction: "flat",
-      trend_weeks_up: 0,
-      trend_weeks_down: 0,
-    };
-  }
-
-  const latest = safeRows[0];
-  const previous = safeRows[1] || latest;
-  const base4w = safeRows[Math.min(4, safeRows.length - 1)] || previous || latest;
-  const base12w = safeRows[Math.min(12, safeRows.length - 1)] || base4w || previous || latest;
-
-  let trendWeeksUp = 0;
-  let trendWeeksDown = 0;
-
-  for (let index = 0; index < safeRows.length - 1; index += 1) {
-    const currentRatio = toPlainNumber(safeRows[index].large_holder_ratio);
-    const previousRatio = toPlainNumber(safeRows[index + 1].large_holder_ratio);
-
-    if (currentRatio > previousRatio) trendWeeksUp += 1;
-    else break;
-  }
-
-  for (let index = 0; index < safeRows.length - 1; index += 1) {
-    const currentRatio = toPlainNumber(safeRows[index].large_holder_ratio);
-    const previousRatio = toPlainNumber(safeRows[index + 1].large_holder_ratio);
-
-    if (currentRatio < previousRatio) trendWeeksDown += 1;
-    else break;
-  }
-
-  const trend = {
-    data_points: safeRows.length,
-    current_data_date: latest.data_date,
-    previous_data_date: previous.data_date,
-    four_week_base_date: base4w.data_date,
-    twelve_week_base_date: base12w.data_date,
-    trend_weeks_up: trendWeeksUp,
-    trend_weeks_down: trendWeeksDown,
-    large_holder_ratio_change_1w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(previous.large_holder_ratio), 4),
-    large_holder_ratio_change_4w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(base4w.large_holder_ratio), 4),
-    large_holder_ratio_change_12w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(base12w.large_holder_ratio), 4),
-    small_holder_ratio_change_4w: roundNumber(toPlainNumber(latest.small_holder_ratio) - toPlainNumber(base4w.small_holder_ratio), 4),
-    small_holder_ratio_change_12w: roundNumber(toPlainNumber(latest.small_holder_ratio) - toPlainNumber(base12w.small_holder_ratio), 4),
-    thousand_lot_ratio_change_4w: roundNumber(toPlainNumber(latest.thousand_lot_ratio) - toPlainNumber(base4w.thousand_lot_ratio), 4),
-    thousand_lot_ratio_change_12w: roundNumber(toPlainNumber(latest.thousand_lot_ratio) - toPlainNumber(base12w.thousand_lot_ratio), 4),
-    large_holder_count_change_4w: String(toBigIntValue(latest.large_holder_count) - toBigIntValue(base4w.large_holder_count)),
-    large_holder_count_change_12w: String(toBigIntValue(latest.large_holder_count) - toBigIntValue(base12w.large_holder_count)),
-    large_holder_share_change_lots_4w: sharesDiffToLotsString(latest.large_holder_share_count, base4w.large_holder_share_count),
-    large_holder_share_change_lots_12w: sharesDiffToLotsString(latest.large_holder_share_count, base12w.large_holder_share_count),
-  };
-
-  trend.concentration_score = calculateConcentrationScoreFromTrend(latest, trend);
-  trend.major_holder_trend_status = getMajorHolderTrendStatus(trend);
-  trend.trend_direction = getMajorHolderTrendDirection(trend);
-
-  return trend;
-}
-
 function enrichMajorHolderRow(row) {
   const majorHolderScore = calculateMajorHolderScore(row);
-  const concentrationScore = row.concentration_score !== undefined
-    ? toPlainNumber(row.concentration_score)
-    : calculateConcentrationScoreFromTrend(row, row);
 
   return {
     ...row,
     major_holder_score: majorHolderScore,
-    concentration_score: concentrationScore,
     major_holder_status: getMajorHolderStatus(row),
-    major_holder_trend_status: row.major_holder_trend_status || getMajorHolderTrendStatus(row),
-    trend_direction: row.trend_direction || getMajorHolderTrendDirection(row),
     large_holder_share_change_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_change)),
     large_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_count)),
     small_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.small_holder_share_count)),
@@ -462,212 +288,12 @@ function enrichMajorHolderRow(row) {
   };
 }
 
-function enrichMajorHolderHistoryRows(rows) {
-  const safeRows = Array.isArray(rows)
-    ? rows.filter((row) => row && row.data_date).sort((a, b) => String(b.data_date).localeCompare(String(a.data_date)))
-    : [];
-
-  return safeRows.map((row, index) => {
-    const previous = safeRows[index + 1] || row;
-    return enrichMajorHolderRow({
-      ...row,
-      has_previous: safeRows[index + 1] ? 1 : 0,
-      large_holder_count_change: String(toBigIntValue(row.large_holder_count) - toBigIntValue(previous.large_holder_count)),
-      large_holder_share_change: String(toBigIntValue(row.large_holder_share_count) - toBigIntValue(previous.large_holder_share_count)),
-      large_holder_ratio_change: roundNumber(toPlainNumber(row.large_holder_ratio) - toPlainNumber(previous.large_holder_ratio), 4),
-      small_holder_ratio_change: roundNumber(toPlainNumber(row.small_holder_ratio) - toPlainNumber(previous.small_holder_ratio), 4),
-      thousand_lot_ratio_change: roundNumber(toPlainNumber(row.thousand_lot_ratio) - toPlainNumber(previous.thousand_lot_ratio), 4),
-    });
-  });
-}
-
-async function getMajorHolderHistories(stockCodes, targetDate, maxPoints = 13) {
-  const codes = Array.from(new Set((stockCodes || []).map((code) => String(code || "").trim()).filter(Boolean)));
-
-  if (codes.length === 0 || !targetDate) return new Map();
-
-  const dateRows = await query(
-    `
-    SELECT DATE_FORMAT(data_date, '%Y-%m-%d') AS data_date
-    FROM (
-      SELECT DISTINCT data_date
-      FROM major_holder_stats
-      WHERE data_date <= ?
-      ORDER BY data_date DESC
-      LIMIT ?
-    ) d
-    ORDER BY data_date DESC
-    `,
-    [targetDate, maxPoints],
-  );
-
-  const dates = dateRows.map((row) => row.data_date).filter(Boolean);
-  if (dates.length === 0) return new Map();
-
-  const codePlaceholders = codes.map(() => "?").join(",");
-  const datePlaceholders = dates.map(() => "?").join(",");
-  const rows = await query(
-    `
-    SELECT
-      DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
-      m.stock_code,
-      s.stock_name,
-      s.market_type,
-      s.industry,
-      m.total_holder_count,
-      CAST(m.total_share_count AS CHAR) AS total_share_count,
-      m.small_holder_count,
-      CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
-      m.small_holder_ratio,
-      m.mid_holder_count,
-      CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
-      m.mid_holder_ratio,
-      m.large_holder_count,
-      CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
-      m.large_holder_ratio,
-      m.thousand_lot_holder_count,
-      CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
-      m.thousand_lot_ratio,
-      m.avg_large_holder_lots,
-      m.source
-    FROM major_holder_stats m
-    LEFT JOIN stocks s
-      ON s.stock_code = m.stock_code
-    WHERE m.stock_code IN (${codePlaceholders})
-      AND m.data_date IN (${datePlaceholders})
-    ORDER BY m.stock_code ASC, m.data_date DESC
-    `,
-    [...codes, ...dates],
-  );
-
-  const map = new Map();
-  for (const row of rows) {
-    const code = String(row.stock_code || "");
-    if (!map.has(code)) map.set(code, []);
-    map.get(code).push(row);
-  }
-
-  return map;
-}
-
-
-function escapeSqlIdentifier(identifier) {
-  return `\`${String(identifier).replaceAll("`", "``")}\``;
-}
-
-async function tableExists(tableName) {
-  const rows = await query(
-    `
-    SELECT COUNT(*) AS total
-    FROM information_schema.tables
-    WHERE table_schema = DATABASE()
-      AND table_name = ?
-    `,
-    [tableName],
-  );
-
-  return Number(rows[0]?.total || 0) > 0;
-}
-
-async function getTableStatus({ table, label, dateColumn }) {
-  const exists = await tableExists(table);
-
-  if (!exists) {
-    return {
-      table,
-      label,
-      exists: false,
-      total_rows: 0,
-      latest_date: null,
-      status: "missing",
-    };
-  }
-
-  const tableSql = escapeSqlIdentifier(table);
-  const dateSql = dateColumn ? escapeSqlIdentifier(dateColumn) : null;
-  const rows = await query(
-    `
-    SELECT
-      COUNT(*) AS total_rows
-      ${dateSql ? `, DATE_FORMAT(MAX(${dateSql}), '%Y-%m-%d %H:%i:%s') AS latest_date` : ", NULL AS latest_date"}
-    FROM ${tableSql}
-    `,
-  );
-
-  const totalRows = Number(rows[0]?.total_rows || 0);
-
-  return {
-    table,
-    label,
-    exists: true,
-    total_rows: totalRows,
-    latest_date: rows[0]?.latest_date || null,
-    status: totalRows > 0 ? "ready" : "empty",
-  };
-}
-
 app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: API_VERSION,
-    pwa_version: PWA_VERSION,
+    version: "stock-radar-api-v1",
   });
-});
-
-app.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "API health check OK",
-    version: API_VERSION,
-    pwa_version: PWA_VERSION,
-    time: new Date().toISOString(),
-  });
-});
-
-app.get("/v12/status", async (req, res) => {
-  try {
-    const database = await testConnection();
-    const tables = [];
-
-    for (const tableConfig of V12_STATUS_TABLES) {
-      tables.push(await getTableStatus(tableConfig));
-    }
-
-    const missingTables = tables.filter((item) => item.status === "missing");
-    const emptyTables = tables.filter((item) => item.status === "empty");
-
-    res.json({
-      success: true,
-      data: convertBigIntToString({
-        api_version: API_VERSION,
-        pwa_version: PWA_VERSION,
-        checked_at: new Date().toISOString(),
-        database,
-        tables,
-        table_summary: {
-          total: tables.length,
-          ready: tables.filter((item) => item.status === "ready").length,
-          empty: emptyTables.length,
-          missing: missingTables.length,
-        },
-        features: V12_FEATURES,
-        required_routes: V12_REQUIRED_ROUTES,
-        warnings: [
-          ...missingTables.map((item) => `${item.label} 資料表不存在`),
-          ...emptyTables.map((item) => `${item.label} 目前 0 筆資料`),
-        ],
-      }),
-    });
-  } catch (error) {
-    console.error("查詢 V1.2 狀態失敗：", error);
-    res.status(500).json({
-      success: false,
-      message: "查詢 V1.2 狀態失敗，請確認資料庫連線與 V1.2 資料表。",
-      version: API_VERSION,
-      error: error.message,
-    });
-  }
 });
 
 
@@ -944,816 +570,6 @@ app.get("/prices/:stockCode", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Get prices failed",
-      error: error.message,
-    });
-  }
-});
-
-
-async function getLatestQuoteFromDailyPrices(stockCode) {
-  const rows = await query(
-    `
-    SELECT
-      s.stock_code,
-      s.stock_name,
-      s.market_type,
-      s.industry,
-      DATE_FORMAT(dp.trade_date, '%Y-%m-%d') AS trade_date,
-      dp.open_price,
-      dp.high_price,
-      dp.low_price,
-      dp.close_price,
-      dp.close_price AS last_price,
-      dp.price_change,
-      dp.price_change_percent,
-      CAST(dp.volume AS CHAR) AS volume,
-      CAST(dp.transaction_amount AS CHAR) AS transaction_amount,
-      CAST(dp.transaction_count AS CHAR) AS transaction_count,
-      DATE_FORMAT(dp.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM daily_prices dp
-    LEFT JOIN stocks s ON s.stock_code = dp.stock_code
-    WHERE dp.stock_code = ?
-    ORDER BY dp.trade_date DESC
-    LIMIT 1
-    `,
-    [stockCode],
-  );
-
-  if (!rows.length) {
-    return null;
-  }
-
-  return {
-    ...rows[0],
-    source: "daily_prices",
-    is_realtime: false,
-    quote_type: "latest_close",
-    notice: "目前尚未接入即時行情資料源，先以資料庫最新收盤行情顯示。",
-  };
-}
-
-
-function isMissingMicrostructureTableError(error) {
-  const message = String(error?.message || "").toLowerCase();
-  return error?.code === "ER_NO_SUCH_TABLE" || error?.errno === 1146 || message.includes("doesn't exist");
-}
-
-function normalizeRealtimeQuoteRow(row) {
-  if (!row) return null;
-
-  const isRealtime = Number(row.is_realtime || 0) === 1;
-  return {
-    ...row,
-    is_realtime: isRealtime,
-    quote_type: isRealtime ? "realtime_snapshot" : "quote_snapshot",
-    source: row.source || "realtime_quote_snapshots",
-    notice: isRealtime
-      ? "此資料來自已匯入的即時/近即時行情快照。"
-      : "此資料來自行情快照資料表；若尚未接入授權即時資料源，請以最新收盤資料輔助判斷。",
-  };
-}
-
-async function getLatestRealtimeQuoteSnapshot(stockCode) {
-  const rows = await query(
-    `
-    SELECT
-      rqs.stock_code,
-      COALESCE(rqs.stock_name, s.stock_name) AS stock_name,
-      COALESCE(rqs.market_type, s.market_type) AS market_type,
-      s.industry,
-      DATE_FORMAT(rqs.snapshot_at, '%Y-%m-%d %H:%i:%s') AS snapshot_at,
-      DATE_FORMAT(rqs.quote_date, '%Y-%m-%d') AS quote_date,
-      TIME_FORMAT(rqs.quote_time, '%H:%i:%s') AS quote_time,
-      rqs.last_price,
-      rqs.price_change,
-      rqs.price_change_percent,
-      rqs.open_price,
-      rqs.high_price,
-      rqs.low_price,
-      rqs.previous_close,
-      CAST(rqs.total_volume AS CHAR) AS total_volume,
-      CAST(rqs.total_amount AS CHAR) AS total_amount,
-      rqs.inside_volume_lots,
-      rqs.outside_volume_lots,
-      rqs.buy_price_1,
-      rqs.buy_volume_1,
-      rqs.buy_price_2,
-      rqs.buy_volume_2,
-      rqs.buy_price_3,
-      rqs.buy_volume_3,
-      rqs.buy_price_4,
-      rqs.buy_volume_4,
-      rqs.buy_price_5,
-      rqs.buy_volume_5,
-      rqs.sell_price_1,
-      rqs.sell_volume_1,
-      rqs.sell_price_2,
-      rqs.sell_volume_2,
-      rqs.sell_price_3,
-      rqs.sell_volume_3,
-      rqs.sell_price_4,
-      rqs.sell_volume_4,
-      rqs.sell_price_5,
-      rqs.sell_volume_5,
-      rqs.source,
-      rqs.source_url,
-      rqs.is_realtime,
-      DATE_FORMAT(rqs.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM realtime_quote_snapshots rqs
-    LEFT JOIN stocks s ON s.stock_code = rqs.stock_code
-    WHERE rqs.stock_code = ?
-    ORDER BY rqs.snapshot_at DESC, rqs.id DESC
-    LIMIT 1
-    `,
-    [stockCode],
-  );
-
-  return normalizeRealtimeQuoteRow(rows[0] || null);
-}
-
-async function getLatestQuoteData(stockCode) {
-  try {
-    const snapshot = await getLatestRealtimeQuoteSnapshot(stockCode);
-    if (snapshot) return snapshot;
-  } catch (error) {
-    if (!isMissingMicrostructureTableError(error)) {
-      throw error;
-    }
-  }
-
-  return getLatestQuoteFromDailyPrices(stockCode);
-}
-
-function buildOrderBookLevels(row) {
-  if (!row) return [];
-
-  return [1, 2, 3, 4, 5].map((level) => ({
-    level,
-    buy_price: row[`buy_price_${level}`] ?? null,
-    buy_volume: row[`buy_volume_${level}`] ?? null,
-    sell_price: row[`sell_price_${level}`] ?? null,
-    sell_volume: row[`sell_volume_${level}`] ?? null,
-  }));
-}
-
-function buildOrderBookResponse(row) {
-  if (!row) return null;
-
-  const levels = buildOrderBookLevels(row);
-  const hasLevelData = levels.some((level) => (
-    level.buy_price !== null ||
-    level.buy_volume !== null ||
-    level.sell_price !== null ||
-    level.sell_volume !== null
-  ));
-  const buyVolumes = levels.map((level) => toPlainNumber(level.buy_volume)).filter((value) => value > 0);
-  const sellVolumes = levels.map((level) => toPlainNumber(level.sell_volume)).filter((value) => value > 0);
-
-  return {
-    stock_code: row.stock_code,
-    stock_name: row.stock_name,
-    market_type: row.market_type,
-    snapshot_at: row.snapshot_at || row.updated_at || null,
-    quote_date: row.quote_date || row.trade_date || null,
-    quote_time: row.quote_time || null,
-    last_price: row.last_price || row.close_price || null,
-    is_realtime: Boolean(row.is_realtime),
-    quote_type: row.quote_type || "latest_close",
-    source: row.source || "daily_prices",
-    source_url: row.source_url || null,
-    inside_volume_lots: row.inside_volume_lots ?? null,
-    outside_volume_lots: row.outside_volume_lots ?? null,
-    buy_total_lots: hasLevelData ? buyVolumes.reduce((sum, value) => sum + value, 0) : null,
-    sell_total_lots: hasLevelData ? sellVolumes.reduce((sum, value) => sum + value, 0) : null,
-    levels,
-    notice: row.quote_type === "latest_close"
-      ? "目前尚未接入授權即時五檔資料源，先顯示最新收盤行情，五檔欄位會是空值。"
-      : row.notice,
-  };
-}
-
-async function latestQuoteHandler(req, res) {
-  try {
-    const stockCode = req.params.stockCode;
-    const quote = await getLatestQuoteData(stockCode);
-
-    if (!quote) {
-      return res.json({
-        success: true,
-        stock_code: stockCode,
-        data: null,
-        message: "目前查無最新行情資料。",
-      });
-    }
-
-    return res.json({
-      success: true,
-      stock_code: stockCode,
-      data: convertBigIntToString(quote),
-    });
-  } catch (error) {
-    console.error("Get latest quote failed:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "查詢最新行情失敗",
-      error: error.message,
-    });
-  }
-}
-
-async function orderBookHandler(req, res) {
-  try {
-    const stockCode = req.params.stockCode;
-    const quote = await getLatestQuoteData(stockCode);
-    const orderBook = buildOrderBookResponse(quote);
-
-    return res.json({
-      success: true,
-      stock_code: stockCode,
-      data: convertBigIntToString(orderBook),
-    });
-  } catch (error) {
-    console.error("Get order book failed:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "查詢五檔委買委賣失敗",
-      error: error.message,
-    });
-  }
-}
-
-app.get(
-  [
-    "/quote/:stockCode",
-    "/quotes/:stockCode",
-    "/realtime/:stockCode",
-    "/realtime-quotes/:stockCode",
-    "/stock/:stockCode/quote",
-    "/stock/:stockCode/realtime",
-    "/stocks/:stockCode/quote",
-    "/stocks/:stockCode/realtime",
-    "/api/quote/:stockCode",
-    "/api/quotes/:stockCode",
-    "/api/realtime/:stockCode",
-    "/api/realtime-quotes/:stockCode",
-    "/api/stock/:stockCode/quote",
-    "/api/stock/:stockCode/realtime",
-    "/api/stocks/:stockCode/quote",
-    "/api/stocks/:stockCode/realtime",
-  ],
-  latestQuoteHandler,
-);
-
-app.get(
-  [
-    "/order-book/:stockCode",
-    "/stock/:stockCode/order-book",
-    "/stocks/:stockCode/order-book",
-    "/stock/:stockCode/five-level-quotes",
-    "/stocks/:stockCode/five-level-quotes",
-    "/stock/:stockCode/buy-sell-force",
-    "/stocks/:stockCode/buy-sell-force",
-    "/api/order-book/:stockCode",
-    "/api/stock/:stockCode/order-book",
-    "/api/stocks/:stockCode/order-book",
-  ],
-  orderBookHandler,
-);
-
-async function getMarketMicrostructureFallback(marketType, limit) {
-  const params = [];
-  let whereSql = "";
-
-  if (marketType) {
-    whereSql = "WHERE market_type = ?";
-    params.push(marketType);
-  }
-
-  params.push(limit);
-
-  const rows = await query(
-    `
-    SELECT
-      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
-      market_type,
-      daily_index_point AS market_index,
-      daily_change_point AS index_change,
-      CAST(trade_volume AS CHAR) AS trade_volume,
-      CAST(total_trade_amount AS CHAR) AS total_trade_amount,
-      CAST(transaction_count AS CHAR) AS transaction_count,
-      source,
-      source_url,
-      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM market_daily_summaries
-    ${whereSql}
-    ORDER BY trade_date DESC, market_type ASC
-    LIMIT ?
-    `,
-    params,
-  );
-
-  return rows.map((row) => ({
-    ...row,
-    snapshot_at: row.updated_at,
-    is_realtime: false,
-    quote_type: "market_daily_summary",
-    buy_sell_volume_diff: null,
-    buy_sell_amount_diff: null,
-    notice: "目前尚未接入授權即時大盤委買委賣資料源，先顯示市場每日成交總覽。",
-  }));
-}
-
-async function marketMicrostructureHandler(req, res) {
-  const marketType = parseMarket(req.query.market);
-  const limit = parseLimit(req.query.limit, 20, 100);
-
-  try {
-    const params = [];
-    let whereSql = "";
-
-    if (marketType) {
-      whereSql = "WHERE mofs.market_type = ?";
-      params.push(marketType);
-    }
-
-    params.push(limit);
-
-    const rows = await query(
-      `
-      SELECT
-        DATE_FORMAT(mofs.snapshot_at, '%Y-%m-%d %H:%i:%s') AS snapshot_at,
-        mofs.market_type,
-        mofs.market_index,
-        mofs.index_change,
-        CAST(mofs.total_buy_volume AS CHAR) AS total_buy_volume,
-        CAST(mofs.total_sell_volume AS CHAR) AS total_sell_volume,
-        CAST(mofs.buy_sell_volume_diff AS CHAR) AS buy_sell_volume_diff,
-        CAST(mofs.total_buy_amount AS CHAR) AS total_buy_amount,
-        CAST(mofs.total_sell_amount AS CHAR) AS total_sell_amount,
-        CAST(mofs.buy_sell_amount_diff AS CHAR) AS buy_sell_amount_diff,
-        CAST(mofs.total_trade_amount AS CHAR) AS total_trade_amount,
-        mofs.source,
-        mofs.source_url,
-        mofs.is_realtime,
-        DATE_FORMAT(mofs.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-      FROM market_order_flow_snapshots mofs
-      ${whereSql}
-      ORDER BY mofs.snapshot_at DESC, mofs.market_type ASC
-      LIMIT ?
-      `,
-      params,
-    );
-
-    if (rows.length > 0) {
-      return res.json({
-        success: true,
-        count: rows.length,
-        data: convertBigIntToString(rows.map((row) => ({
-          ...row,
-          is_realtime: Number(row.is_realtime || 0) === 1,
-          quote_type: Number(row.is_realtime || 0) === 1 ? "market_realtime_snapshot" : "market_snapshot",
-        }))),
-      });
-    }
-  } catch (error) {
-    if (!isMissingMicrostructureTableError(error)) {
-      console.error("Get market microstructure failed:", error);
-      return res.status(500).json({
-        success: false,
-        message: "查詢大盤買賣力道失敗",
-        error: error.message,
-      });
-    }
-  }
-
-  try {
-    const fallbackRows = await getMarketMicrostructureFallback(marketType, limit);
-    return res.json({
-      success: true,
-      count: fallbackRows.length,
-      data: convertBigIntToString(fallbackRows),
-      message: "目前尚未匯入大盤委買委賣快照，已改用市場每日成交總覽。",
-    });
-  } catch (error) {
-    console.error("Get market microstructure fallback failed:", error);
-    return res.status(500).json({
-      success: false,
-      message: "查詢大盤買賣力道備援資料失敗",
-      error: error.message,
-    });
-  }
-}
-
-app.get(
-  [
-    "/market/microstructure",
-    "/market/order-flow",
-    "/api/market/microstructure",
-    "/api/market/order-flow",
-  ],
-  marketMicrostructureHandler,
-);
-
-app.get("/microstructure/status", async (req, res) => {
-  try {
-    const [quoteStats, marketStats] = await Promise.all([
-      query(
-        `
-        SELECT
-          COUNT(*) AS total_rows,
-          COUNT(DISTINCT stock_code) AS stock_count,
-          DATE_FORMAT(MAX(snapshot_at), '%Y-%m-%d %H:%i:%s') AS latest_snapshot_at
-        FROM realtime_quote_snapshots
-        `,
-      ),
-      query(
-        `
-        SELECT
-          COUNT(*) AS total_rows,
-          COUNT(DISTINCT market_type) AS market_count,
-          DATE_FORMAT(MAX(snapshot_at), '%Y-%m-%d %H:%i:%s') AS latest_snapshot_at
-        FROM market_order_flow_snapshots
-        `,
-      ),
-    ]);
-
-    return res.json({
-      success: true,
-      data: {
-        realtime_quote_snapshots: convertBigIntToString(quoteStats[0] || {}),
-        market_order_flow_snapshots: convertBigIntToString(marketStats[0] || {}),
-      },
-    });
-  } catch (error) {
-    if (isMissingMicrostructureTableError(error)) {
-      return res.json({
-        success: true,
-        data: {
-          realtime_quote_snapshots: {
-            total_rows: 0,
-            stock_count: 0,
-            latest_snapshot_at: null,
-          },
-          market_order_flow_snapshots: {
-            total_rows: 0,
-            market_count: 0,
-            latest_snapshot_at: null,
-          },
-        },
-        message: "尚未建立即時行情 / 五檔 / 買賣力道資料表，請先執行 npm run official:setup。",
-      });
-    }
-
-    console.error("Get microstructure status failed:", error);
-    return res.status(500).json({
-      success: false,
-      message: "查詢微結構資料狀態失敗",
-      error: error.message,
-    });
-  }
-});
-
-
-
-// ==============================
-// 資金流向分析強化
-// GET /market/flow?market=上市&days=20
-// GET /market/flow/summary?market=上市&days=20&industryLimit=10
-// ==============================
-function getFlowStrength(totalNetAmount, netRatioPercent = 0) {
-  const netValue = toPlainNumber(totalNetAmount);
-  const ratioValue = toPlainNumber(netRatioPercent);
-
-  if (netValue >= 5000000000 || ratioValue >= 1.5) return "強勢流入";
-  if (netValue >= 1000000000 || ratioValue >= 0.5) return "溫和流入";
-  if (netValue <= -5000000000 || ratioValue <= -1.5) return "明顯流出";
-  if (netValue <= -1000000000 || ratioValue <= -0.5) return "偏弱流出";
-  return "資金中性";
-}
-
-function getFlowDirection(totalNetAmount) {
-  const netValue = toPlainNumber(totalNetAmount);
-  if (netValue > 0) return "法人資金淨流入";
-  if (netValue < 0) return "法人資金淨流出";
-  return "法人資金中性";
-}
-
-function numberPercent(numerator, denominator, digits = 2) {
-  const top = toPlainNumber(numerator);
-  const bottom = toPlainNumber(denominator);
-  if (!bottom) return 0;
-  return Number(((top / bottom) * 100).toFixed(digits));
-}
-
-function enrichMarketFlowRows(rows) {
-  const sortedRows = [...rows].sort((a, b) => {
-    const marketCompare = String(a.market_type || "").localeCompare(String(b.market_type || ""), "zh-Hant");
-    if (marketCompare !== 0) return marketCompare;
-    return String(a.trade_date || "").localeCompare(String(b.trade_date || ""));
-  });
-
-  const previousByMarket = new Map();
-
-  const enrichedAscending = sortedRows.map((row) => {
-    const previous = previousByMarket.get(row.market_type) || null;
-    const tradeAmount = toPlainNumber(row.total_trade_amount);
-    const previousTradeAmount = previous ? toPlainNumber(previous.total_trade_amount) : null;
-    const tradeAmountChange = previous ? tradeAmount - previousTradeAmount : null;
-    const totalNetAmount = toPlainNumber(row.total_net_amount);
-    const previousTotalNetAmount = previous ? toPlainNumber(previous.total_net_amount) : null;
-    const totalNetAmountChange = previous ? totalNetAmount - previousTotalNetAmount : null;
-    const netRatioPercent = numberPercent(totalNetAmount, tradeAmount, 3);
-
-    const enriched = {
-      ...row,
-      institutional_net_ratio_percent: netRatioPercent,
-      market_amount_change: tradeAmountChange === null ? null : String(Math.round(tradeAmountChange)),
-      market_amount_change_percent: tradeAmountChange === null || !previousTradeAmount
-        ? null
-        : Number(((tradeAmountChange / previousTradeAmount) * 100).toFixed(2)),
-      total_net_amount_change: totalNetAmountChange === null ? null : String(Math.round(totalNetAmountChange)),
-      previous_total_trade_amount: previous ? previous.total_trade_amount : null,
-      previous_total_net_amount: previous ? previous.total_net_amount : null,
-      flow_direction: getFlowDirection(totalNetAmount),
-      flow_strength: getFlowStrength(totalNetAmount, netRatioPercent),
-    };
-
-    previousByMarket.set(row.market_type, row);
-    return enriched;
-  });
-
-  return enrichedAscending.sort((a, b) => {
-    const dateCompare = String(b.trade_date || "").localeCompare(String(a.trade_date || ""));
-    if (dateCompare !== 0) return dateCompare;
-    return String(a.market_type || "").localeCompare(String(b.market_type || ""), "zh-Hant");
-  });
-}
-
-function aggregateMarketFlowRows(rows) {
-  const byDate = new Map();
-
-  for (const row of rows) {
-    const date = row.trade_date;
-    if (!date) continue;
-
-    if (!byDate.has(date)) {
-      byDate.set(date, {
-        trade_date: date,
-        market_type: "全部",
-        market_count: 0,
-        trade_volume: 0,
-        total_trade_amount: 0,
-        transaction_count: 0,
-        foreign_net_amount: 0,
-        investment_trust_net_amount: 0,
-        dealer_net_amount: 0,
-        total_buy_amount: 0,
-        total_sell_amount: 0,
-        total_net_amount: 0,
-        market_index: null,
-        index_change: null,
-      });
-    }
-
-    const target = byDate.get(date);
-    target.market_count += 1;
-    target.trade_volume += toPlainNumber(row.trade_volume);
-    target.total_trade_amount += toPlainNumber(row.total_trade_amount);
-    target.transaction_count += toPlainNumber(row.transaction_count);
-    target.foreign_net_amount += toPlainNumber(row.foreign_net_amount);
-    target.investment_trust_net_amount += toPlainNumber(row.investment_trust_net_amount);
-    target.dealer_net_amount += toPlainNumber(row.dealer_net_amount);
-    target.total_buy_amount += toPlainNumber(row.total_buy_amount);
-    target.total_sell_amount += toPlainNumber(row.total_sell_amount);
-    target.total_net_amount += toPlainNumber(row.total_net_amount);
-
-    if (target.market_index === null && row.market_index !== null && row.market_index !== undefined) {
-      target.market_index = row.market_index;
-      target.index_change = row.index_change;
-    }
-  }
-
-  const ascending = [...byDate.values()].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
-  let previous = null;
-
-  return ascending.map((row) => {
-    const tradeAmountChange = previous ? row.total_trade_amount - previous.total_trade_amount : null;
-    const totalNetAmountChange = previous ? row.total_net_amount - previous.total_net_amount : null;
-    const netRatioPercent = numberPercent(row.total_net_amount, row.total_trade_amount, 3);
-    const result = {
-      ...row,
-      trade_volume: String(Math.round(row.trade_volume)),
-      total_trade_amount: String(Math.round(row.total_trade_amount)),
-      transaction_count: String(Math.round(row.transaction_count)),
-      foreign_net_amount: String(Math.round(row.foreign_net_amount)),
-      investment_trust_net_amount: String(Math.round(row.investment_trust_net_amount)),
-      dealer_net_amount: String(Math.round(row.dealer_net_amount)),
-      total_buy_amount: String(Math.round(row.total_buy_amount)),
-      total_sell_amount: String(Math.round(row.total_sell_amount)),
-      total_net_amount: String(Math.round(row.total_net_amount)),
-      institutional_net_ratio_percent: netRatioPercent,
-      market_amount_change: tradeAmountChange === null ? null : String(Math.round(tradeAmountChange)),
-      market_amount_change_percent: tradeAmountChange === null || !previous?.total_trade_amount
-        ? null
-        : Number(((tradeAmountChange / previous.total_trade_amount) * 100).toFixed(2)),
-      total_net_amount_change: totalNetAmountChange === null ? null : String(Math.round(totalNetAmountChange)),
-      flow_direction: getFlowDirection(row.total_net_amount),
-      flow_strength: getFlowStrength(row.total_net_amount, netRatioPercent),
-    };
-
-    previous = row;
-    return result;
-  });
-}
-
-async function getMarketFlowRows({ market = null, days = 20, extraDays = 8 } = {}) {
-  const safeDays = Math.min(Math.max(Number(days) || 20, 1), 120);
-  const limit = market ? safeDays + extraDays : safeDays * 2 + extraDays * 2;
-  const params = [];
-  let whereSql = "";
-
-  if (market) {
-    whereSql = "WHERE m.market_type = ?";
-    params.push(market);
-  }
-
-  params.push(limit);
-
-  const rows = await query(
-    `
-    SELECT
-      DATE_FORMAT(m.trade_date, '%Y-%m-%d') AS trade_date,
-      m.market_type,
-      m.daily_index_point AS market_index,
-      m.daily_change_point AS index_change,
-      CAST(m.trade_volume AS CHAR) AS trade_volume,
-      CAST(m.total_trade_amount AS CHAR) AS total_trade_amount,
-      CAST(m.transaction_count AS CHAR) AS transaction_count,
-      CAST(COALESCE(a.foreign_net_amount, 0) AS CHAR) AS foreign_net_amount,
-      CAST(COALESCE(a.investment_trust_net_amount, 0) AS CHAR) AS investment_trust_net_amount,
-      CAST(COALESCE(a.dealer_net_amount, 0) AS CHAR) AS dealer_net_amount,
-      CAST(COALESCE(a.total_buy_amount, 0) AS CHAR) AS total_buy_amount,
-      CAST(COALESCE(a.total_sell_amount, 0) AS CHAR) AS total_sell_amount,
-      CAST(COALESCE(a.total_net_amount, 0) AS CHAR) AS total_net_amount,
-      m.source AS market_source,
-      a.source AS institutional_source,
-      DATE_FORMAT(GREATEST(m.updated_at, COALESCE(a.updated_at, m.updated_at)), '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM market_daily_summaries m
-    LEFT JOIN institutional_amount_summaries a
-      ON a.trade_date = m.trade_date
-     AND a.market_type = m.market_type
-    ${whereSql}
-    ORDER BY m.trade_date DESC, m.market_type ASC
-    LIMIT ?
-    `,
-    params,
-  );
-
-  const enrichedRows = enrichMarketFlowRows(rows);
-
-  if (market) {
-    return enrichedRows.slice(0, safeDays);
-  }
-
-  const dateSet = new Set();
-  const limited = [];
-
-  for (const row of enrichedRows) {
-    if (!dateSet.has(row.trade_date) && dateSet.size >= safeDays) continue;
-    dateSet.add(row.trade_date);
-    limited.push(row);
-  }
-
-  return limited;
-}
-
-async function getIndustryFlowSummaryRows({ market = null, tradeDate = null, limit = 10 } = {}) {
-  if (!tradeDate) return [];
-
-  const marketCondition = market ? "AND s.market_type = ?" : "";
-  const params = market ? [tradeDate, market, limit] : [tradeDate, limit];
-
-  const rows = await query(
-    `
-    SELECT
-      DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
-      COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
-      GROUP_CONCAT(DISTINCT s.market_type ORDER BY s.market_type SEPARATOR '、') AS market_types,
-      COUNT(DISTINCT i.stock_code) AS stock_count,
-      SUM(CASE WHEN COALESCE(i.total_net, 0) > 0 THEN 1 ELSE 0 END) AS net_buy_stock_count,
-      SUM(CASE WHEN COALESCE(p.price_change, 0) > 0 THEN 1 ELSE 0 END) AS up_stock_count,
-      SUM(CASE WHEN COALESCE(p.price_change, 0) < 0 THEN 1 ELSE 0 END) AS down_stock_count,
-      CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
-      CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
-      CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
-      CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
-      CAST(SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) AS CHAR) AS foreign_trust_net_lots,
-      CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS total_transaction_amount,
-      ROUND(AVG(c.chip_score), 2) AS avg_chip_score
-    FROM institutional_trades i
-    LEFT JOIN stocks s
-      ON i.stock_code = s.stock_code
-    LEFT JOIN daily_prices p
-      ON i.stock_code = p.stock_code
-     AND i.trade_date = p.trade_date
-    LEFT JOIN chip_scores c
-      ON i.stock_code = c.stock_code
-     AND i.trade_date = c.trade_date
-    WHERE i.trade_date = ?
-      ${marketCondition}
-      AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
-    GROUP BY i.trade_date, COALESCE(NULLIF(s.industry, ''), '未分類')
-    ORDER BY
-      SUM(COALESCE(i.total_net, 0)) DESC,
-      SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) DESC,
-      SUM(COALESCE(p.transaction_amount, 0)) DESC,
-      industry ASC
-    LIMIT ?
-    `,
-    params,
-  );
-
-  return rows.map((row, index) => {
-    const stockCount = Number(row.stock_count || 0);
-    const netBuyStockCount = Number(row.net_buy_stock_count || 0);
-    const netBuyRatio = stockCount > 0 ? Number(((netBuyStockCount / stockCount) * 100).toFixed(1)) : 0;
-    const totalNet = toBigIntValue(row.total_net_lots);
-    const foreignTrustNet = toBigIntValue(row.foreign_trust_net_lots);
-
-    return {
-      rank: index + 1,
-      ...row,
-      stock_count: stockCount,
-      net_buy_stock_count: netBuyStockCount,
-      up_stock_count: Number(row.up_stock_count || 0),
-      down_stock_count: Number(row.down_stock_count || 0),
-      net_buy_ratio: netBuyRatio,
-      flow_direction: getFlowDirection(totalNet.toString()),
-      flow_strength: totalNet >= 5000n || foreignTrustNet >= 2000n
-        ? "強勢流入"
-        : totalNet > 0n
-          ? "溫和流入"
-          : totalNet < 0n
-            ? "資金淨流出"
-            : "資金中性",
-    };
-  });
-}
-
-app.get("/market/flow", async (req, res) => {
-  try {
-    const market = parseMarket(req.query.market);
-    const days = parseLimit(req.query.days, 20, 120);
-    const rows = await getMarketFlowRows({ market, days });
-
-    res.json({
-      success: true,
-      market: market || "全部",
-      days,
-      count: rows.length,
-      data: convertBigIntToString(rows),
-    });
-  } catch (error) {
-    console.error("查詢市場資金流向失敗：", error);
-    res.status(500).json({
-      success: false,
-      message: "查詢市場資金流向失敗，請確認 market_daily_summaries 與 institutional_amount_summaries 已建立並匯入資料。",
-      error: error.message,
-    });
-  }
-});
-
-app.get("/market/flow/summary", async (req, res) => {
-  try {
-    const market = parseMarket(req.query.market);
-    const days = parseLimit(req.query.days, 20, 120);
-    const industryLimit = parseLimit(req.query.industryLimit, 10, 30);
-    const rows = await getMarketFlowRows({ market, days });
-    const latestDate = rows[0]?.trade_date || null;
-    const latestMarkets = latestDate ? rows.filter((row) => row.trade_date === latestDate) : [];
-    const aggregateTrend = aggregateMarketFlowRows(rows).slice(-days);
-    const latestTotal = aggregateTrend[aggregateTrend.length - 1] || null;
-    const industryTop = await getIndustryFlowSummaryRows({ market, tradeDate: latestDate, limit: industryLimit });
-
-    res.json({
-      success: true,
-      data: convertBigIntToString({
-        market: market || "全部",
-        days,
-        latest_date: latestDate,
-        latest_total: latestTotal,
-        latest_markets: latestMarkets,
-        trend: aggregateTrend,
-        industry_top: industryTop,
-      }),
-    });
-  } catch (error) {
-    console.error("查詢資金流向總覽失敗：", error);
-    res.status(500).json({
-      success: false,
-      message: "查詢資金流向總覽失敗，請確認 V1.2 官方市場總覽與法人金額資料已匯入。",
       error: error.message,
     });
   }
@@ -2831,79 +1647,6 @@ app.get("/major-holders/status", async (req, res) => {
   }
 });
 
-app.get("/major-holders/:stockCode/analysis", async (req, res) => {
-  try {
-    const stockCode = String(req.params.stockCode || "").trim();
-    const limit = parseLimit(req.query.limit, 24, 80);
-
-    if (!stockCode) {
-      return res.status(400).json({
-        success: false,
-        message: "請輸入股票代號",
-      });
-    }
-
-    const rows = await query(
-      `
-      SELECT
-        DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
-        m.stock_code,
-        s.stock_name,
-        s.market_type,
-        s.industry,
-        m.total_holder_count,
-        CAST(m.total_share_count AS CHAR) AS total_share_count,
-        m.small_holder_count,
-        CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
-        m.small_holder_ratio,
-        m.mid_holder_count,
-        CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
-        m.mid_holder_ratio,
-        m.large_holder_count,
-        CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
-        m.large_holder_ratio,
-        m.thousand_lot_holder_count,
-        CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
-        m.thousand_lot_ratio,
-        m.avg_large_holder_lots,
-        m.source
-      FROM major_holder_stats m
-      LEFT JOIN stocks s
-        ON m.stock_code = s.stock_code
-      WHERE m.stock_code = ?
-      ORDER BY m.data_date DESC
-      LIMIT ?
-      `,
-      [stockCode, limit],
-    );
-
-    const history = enrichMajorHolderHistoryRows(rows);
-    const trend = buildMajorHolderTrendSummary(rows);
-    const latest = history[0] || null;
-
-    res.json({
-      success: true,
-      data: convertBigIntToString({
-        stock_code: stockCode,
-        stock_name: latest?.stock_name || null,
-        market_type: latest?.market_type || null,
-        industry: latest?.industry || null,
-        latest,
-        trend,
-        history,
-      }),
-    });
-  } catch (error) {
-    console.error("查詢個股主力籌碼分析失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢個股主力籌碼分析失敗，請先執行 npm run major-holders:import 匯入 TDCC 集保資料。",
-      error: error.message,
-    });
-  }
-});
-
 app.get("/major-holders/:stockCode", async (req, res) => {
   try {
     const stockCode = String(req.params.stockCode || "").trim();
@@ -2985,7 +1728,6 @@ app.get("/radar/major-holder", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
-    const sortMode = String(req.query.sort || req.query.mode || "trend").trim();
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3101,34 +1843,9 @@ app.get("/radar/major-holder", async (req, res) => {
       params,
     );
 
-    const histories = await getMajorHolderHistories(rows.map((row) => row.stock_code), targetDate, 13);
-    const enrichedRows = rows.map((row) => {
-      const trend = buildMajorHolderTrendSummary(histories.get(String(row.stock_code)) || [row]);
-      return enrichMajorHolderRow({
-        ...row,
-        ...trend,
-      });
-    });
-
-    const data = enrichedRows
+    const data = rows
+      .map(enrichMajorHolderRow)
       .sort((a, b) => {
-        if (sortMode === "concentration") {
-          const concentrationDiff = toPlainNumber(b.concentration_score) - toPlainNumber(a.concentration_score);
-          if (concentrationDiff !== 0) return concentrationDiff;
-        }
-
-        if (sortMode === "distribution" || sortMode === "weak") {
-          const ratioDiff = toPlainNumber(a.large_holder_ratio_change_4w) - toPlainNumber(b.large_holder_ratio_change_4w);
-          if (ratioDiff !== 0) return ratioDiff;
-          const smallDiff = toPlainNumber(b.small_holder_ratio_change_4w) - toPlainNumber(a.small_holder_ratio_change_4w);
-          if (smallDiff !== 0) return smallDiff;
-        } else {
-          const trendScoreDiff = toPlainNumber(b.concentration_score) - toPlainNumber(a.concentration_score);
-          if (trendScoreDiff !== 0) return trendScoreDiff;
-          const ratio4wDiff = toPlainNumber(b.large_holder_ratio_change_4w) - toPlainNumber(a.large_holder_ratio_change_4w);
-          if (ratio4wDiff !== 0) return ratio4wDiff;
-        }
-
         if (b.major_holder_score !== a.major_holder_score) return b.major_holder_score - a.major_holder_score;
         const ratioDiff = toPlainNumber(b.large_holder_ratio_change) - toPlainNumber(a.large_holder_ratio_change);
         if (ratioDiff !== 0) return ratioDiff;
@@ -3149,7 +1866,6 @@ app.get("/radar/major-holder", async (req, res) => {
       data_date: targetDate,
       trade_date: latestTradeDate,
       market: market || "全部",
-      sort: sortMode,
       limit,
       count: data.length,
       data: convertBigIntToString(data),
@@ -3410,255 +2126,6 @@ app.get("/foreign/top", async (req, res) => {
   }
 });
 
-
-// ==============================
-// 個股 / ETF 行事曆事件
-// GET /calendar-events/:stockCode
-// ==============================
-app.get("/calendar-events/:stockCode", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-    const limit = parseLimit(req.query.limit, 30, 100);
-    const fromDate = isValidDateText(req.query.from) ? String(req.query.from) : null;
-    const toDate = isValidDateText(req.query.to) ? String(req.query.to) : null;
-    const includePast = String(req.query.includePast || "").toLowerCase() === "true" || String(req.query.includePast || "") === "1";
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票代號格式不正確。",
-      });
-    }
-
-    const params = [stockCode];
-    const conditions = ["stock_code = ?", "is_active = 1"];
-
-    if (fromDate) {
-      conditions.push("event_date >= ?");
-      params.push(fromDate);
-    } else if (!includePast) {
-      conditions.push("event_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)");
-    }
-
-    if (toDate) {
-      conditions.push("event_date <= ?");
-      params.push(toDate);
-    }
-
-    params.push(limit);
-
-    const events = await query(
-      `
-      SELECT
-        id,
-        stock_code,
-        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
-        event_type,
-        title,
-        description,
-        importance,
-        source,
-        source_url,
-        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-      FROM stock_calendar_events
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY
-        CASE WHEN event_date >= CURDATE() THEN 0 ELSE 1 END,
-        event_date ASC,
-        FIELD(importance, 'high', 'normal', 'low'),
-        id ASC
-      LIMIT ?
-      `,
-      params,
-    );
-
-    res.json({
-      success: true,
-      stock_code: stockCode,
-      count: events.length,
-      data: convertBigIntToString(events),
-    });
-  } catch (error) {
-    console.error("查詢行事曆事件失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢行事曆事件失敗",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// ETF 主檔列表
-// GET /etf-profiles
-// ==============================
-app.get("/etf-profiles", async (req, res) => {
-  try {
-    const limit = parseLimit(req.query.limit, 50, 500);
-    const market = parseMarket(req.query.market);
-    const keyword = String(req.query.keyword || "").trim();
-
-    const conditions = [];
-    const params = [];
-
-    if (market) {
-      conditions.push("e.market_type = ?");
-      params.push(market);
-    }
-
-    if (keyword) {
-      conditions.push("(e.stock_code LIKE ? OR e.stock_name LIKE ? OR e.issuer LIKE ? OR e.underlying_index LIKE ?)");
-      const keywordLike = `%${keyword}%`;
-      params.push(keywordLike, keywordLike, keywordLike, keywordLike);
-    }
-
-    params.push(limit);
-
-    const rows = await query(
-      `
-      SELECT
-        e.stock_code,
-        e.stock_name,
-        e.market_type,
-        e.fund_type,
-        e.underlying_index,
-        e.issuer,
-        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
-        e.source,
-        e.source_url,
-        DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-        DATE_FORMAT(e.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-      FROM etf_profiles e
-      ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
-      ORDER BY
-        CASE e.market_type WHEN '上市' THEN 0 WHEN '上櫃' THEN 1 ELSE 2 END,
-        e.stock_code ASC
-      LIMIT ?
-      `,
-      params,
-    );
-
-    res.json({
-      success: true,
-      count: rows.length,
-      data: convertBigIntToString(rows),
-    });
-  } catch (error) {
-    console.error("查詢 ETF 主檔列表失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢 ETF 主檔列表失敗",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// ETF 主檔完整度統計
-// GET /etf-profiles/stats
-// ==============================
-app.get("/etf-profiles/stats", async (req, res) => {
-  try {
-    const rows = await query(
-      `
-      SELECT
-        COUNT(*) AS total_count,
-        SUM(CASE WHEN market_type = '上市' THEN 1 ELSE 0 END) AS listed_count,
-        SUM(CASE WHEN market_type = '上櫃' THEN 1 ELSE 0 END) AS otc_count,
-        SUM(CASE WHEN source <> 'stocks table sync' THEN 1 ELSE 0 END) AS official_count,
-        SUM(CASE WHEN issuer IS NOT NULL AND issuer <> '' THEN 1 ELSE 0 END) AS issuer_count,
-        SUM(CASE WHEN underlying_index IS NOT NULL AND underlying_index <> '' THEN 1 ELSE 0 END) AS index_count,
-        SUM(CASE WHEN listing_date IS NOT NULL THEN 1 ELSE 0 END) AS listing_date_count,
-        MAX(updated_at) AS latest_updated_at
-      FROM etf_profiles
-      `,
-    );
-
-    res.json({
-      success: true,
-      data: convertBigIntToString(rows[0] || {}),
-    });
-  } catch (error) {
-    console.error("查詢 ETF 主檔統計失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢 ETF 主檔統計失敗",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// ETF 主檔資料
-// GET /etf-profiles/:stockCode
-// ==============================
-app.get("/etf-profiles/:stockCode", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "ETF 代號格式不正確。",
-      });
-    }
-
-    const rows = await query(
-      `
-      SELECT
-        COALESCE(e.stock_code, s.stock_code) AS stock_code,
-        COALESCE(e.stock_name, s.stock_name) AS stock_name,
-        COALESCE(e.market_type, s.market_type) AS market_type,
-        e.fund_type,
-        e.underlying_index,
-        e.issuer,
-        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
-        e.source,
-        e.source_url,
-        s.security_type,
-        CASE
-          WHEN e.stock_code IS NULL THEN 0
-          WHEN e.issuer IS NULL OR e.underlying_index IS NULL OR e.listing_date IS NULL THEN 0
-          ELSE 1
-        END AS is_complete,
-        DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-        DATE_FORMAT(e.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-      FROM stocks s
-      LEFT JOIN etf_profiles e
-        ON s.stock_code = e.stock_code
-      WHERE s.stock_code = ?
-        AND (s.security_type = 'ETF' OR s.industry = 'ETF' OR s.stock_code REGEXP '^00[0-9A-Z]+')
-      LIMIT 1
-      `,
-      [stockCode],
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "ETF profile not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: convertBigIntToString(rows[0]),
-    });
-  } catch (error) {
-    console.error("查詢 ETF 主檔失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢 ETF 主檔失敗",
-      error: error.message,
-    });
-  }
-});
-
 // ==============================
 // 個股摘要
 // GET /stock/:stockCode/summary
@@ -3678,14 +2145,6 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
         s.stock_name,
         s.market_type,
         s.industry,
-        s.security_type,
-
-        e.fund_type,
-        e.underlying_index,
-        e.issuer,
-        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
-        e.source AS etf_profile_source,
-        e.source_url AS etf_profile_source_url,
 
         p.trade_date,
         p.open_price,
@@ -3720,8 +2179,6 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
         c.volume_status,
         c.price_position
       FROM stocks s
-      LEFT JOIN etf_profiles e
-        ON s.stock_code = e.stock_code
       LEFT JOIN daily_prices p
         ON s.stock_code = p.stock_code
        AND p.trade_date = (
@@ -4096,23 +2553,646 @@ app.delete("/watchlist/:stockCode", requireAuth, async (req, res) => {
   }
 });
 
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
-    path: req.originalUrl,
-    method: req.method,
-    version: API_VERSION,
-  });
+
+function parsePositiveInteger(value, defaultValue, minValue = 1, maxValue = 100) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return defaultValue;
+  }
+
+  return Math.max(minValue, Math.min(parsed, maxValue));
+}
+
+function parseBooleanFlag(value, defaultValue = true) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue ? 1 : 0;
+  }
+
+  const text = String(value).trim().toLowerCase();
+
+  if (["1", "true", "yes", "y", "on"].includes(text)) return 1;
+  if (["0", "false", "no", "n", "off"].includes(text)) return 0;
+
+  return defaultValue ? 1 : 0;
+}
+
+function parseDecimalValue(value, defaultValue, minValue, maxValue) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return defaultValue;
+  }
+
+  return Math.max(minValue, Math.min(parsed, maxValue));
+}
+
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+
+  if (!text) return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+
+  return text;
+}
+
+function normalizeAlertTypeValue(value) {
+  return String(value || "").trim().replace(/\s+/g, "_").toLowerCase();
+}
+
+function normalizeAlertLevelValue(value) {
+  const level = String(value || "").trim().toLowerCase();
+  return ["high", "normal", "low"].includes(level) ? level : "";
+}
+
+function buildWatchlistAlertFilters(userId, queryParams = {}) {
+  const conditions = ["a.user_id = ?"];
+  const params = [userId];
+
+  const stockCode = normalizeStockCodeValue(queryParams.stock_code || queryParams.stockCode);
+  const alertType = normalizeAlertTypeValue(queryParams.alert_type || queryParams.alertType);
+  const alertLevel = normalizeAlertLevelValue(queryParams.alert_level || queryParams.alertLevel);
+  const fromDate = parseDateValue(queryParams.from || queryParams.from_date || queryParams.start_date);
+  const toDate = parseDateValue(queryParams.to || queryParams.to_date || queryParams.end_date);
+  const isRead = queryParams.is_read ?? queryParams.isRead;
+  const unread = queryParams.unread;
+
+  if (stockCode) {
+    conditions.push("a.stock_code = ?");
+    params.push(stockCode);
+  }
+
+  if (alertType) {
+    conditions.push("a.alert_type = ?");
+    params.push(alertType);
+  }
+
+  if (alertLevel) {
+    conditions.push("a.alert_level = ?");
+    params.push(alertLevel);
+  }
+
+  if (fromDate) {
+    conditions.push("a.alert_date >= ?");
+    params.push(fromDate);
+  }
+
+  if (toDate) {
+    conditions.push("a.alert_date <= ?");
+    params.push(toDate);
+  }
+
+  if (isRead !== undefined && isRead !== null && isRead !== "") {
+    conditions.push("a.is_read = ?");
+    params.push(parseBooleanFlag(isRead, false));
+  } else if (unread !== undefined && unread !== null && unread !== "") {
+    const unreadFlag = parseBooleanFlag(unread, false);
+    if (unreadFlag === 1) {
+      conditions.push("a.is_read = 0");
+    }
+  }
+
+  return {
+    whereSql: conditions.join(" AND "),
+    params,
+  };
+}
+
+async function ensureWatchlistRuleForStock(userId, stockCode) {
+  await query(
+    `
+    INSERT IGNORE INTO watchlist_alert_rules (user_id, stock_code)
+    SELECT ?, w.stock_code
+    FROM watchlists w
+    WHERE w.user_id = ?
+      AND w.stock_code = ?
+    LIMIT 1
+    `,
+    [userId, userId, stockCode],
+  );
+}
+
+function normalizeWatchlistRulePayload(body = {}) {
+  return {
+    is_active: parseBooleanFlag(body.is_active, true),
+    foreign_buy_streak_enabled: parseBooleanFlag(body.foreign_buy_streak_enabled, true),
+    foreign_buy_streak_days: parsePositiveInteger(body.foreign_buy_streak_days, 3, 1, 20),
+    investment_trust_buy_streak_enabled: parseBooleanFlag(body.investment_trust_buy_streak_enabled, true),
+    investment_trust_buy_streak_days: parsePositiveInteger(body.investment_trust_buy_streak_days, 3, 1, 20),
+    major_holder_enabled: parseBooleanFlag(body.major_holder_enabled, true),
+    major_holder_ratio_change_threshold: parseDecimalValue(body.major_holder_ratio_change_threshold, 0.3, 0.01, 20),
+    volume_enabled: parseBooleanFlag(body.volume_enabled, true),
+    volume_ratio_threshold: parseDecimalValue(body.volume_ratio_threshold, 1.5, 1, 20),
+    chip_score_enabled: parseBooleanFlag(body.chip_score_enabled, true),
+    chip_score_threshold: parsePositiveInteger(body.chip_score_threshold, 80, 1, 100),
+    calendar_enabled: parseBooleanFlag(body.calendar_enabled, true),
+    calendar_days_before: parsePositiveInteger(body.calendar_days_before, 14, 1, 60),
+  };
+}
+
+// ==============================
+// V1.3-1-2：提醒中心 API
+// GET /watchlist/alerts
+// query: ?unread=1&stock_code=2330&alert_type=volume_spike&limit=50&offset=0
+// ==============================
+app.get("/watchlist/alerts", requireAuth, async (req, res) => {
+  try {
+    const limit = parsePositiveInteger(req.query.limit, 50, 1, 100);
+    const offset = parsePositiveInteger(req.query.offset, 0, 0, 100000);
+    const filters = buildWatchlistAlertFilters(req.user.id, req.query);
+
+    const rows = await query(
+      `
+      SELECT
+        a.id,
+        a.user_id,
+        a.stock_code,
+        a.stock_name,
+        DATE_FORMAT(a.alert_date, '%Y-%m-%d') AS alert_date,
+        DATE_FORMAT(a.reference_date, '%Y-%m-%d') AS reference_date,
+        a.alert_type,
+        a.alert_level,
+        a.title,
+        a.message,
+        a.metric_name,
+        a.metric_value,
+        a.threshold_value,
+        a.source_table,
+        CAST(a.source_id AS CHAR) AS source_id,
+        a.is_read,
+        DATE_FORMAT(a.read_at, '%Y-%m-%d %H:%i:%s') AS read_at,
+        DATE_FORMAT(a.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(a.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM watchlist_alerts a
+      WHERE ${filters.whereSql}
+      ORDER BY a.is_read ASC, a.alert_level = 'high' DESC, a.alert_date DESC, a.created_at DESC, a.id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...filters.params, limit, offset],
+    );
+
+    const countRows = await query(
+      `
+      SELECT COUNT(*) AS total_count
+      FROM watchlist_alerts a
+      WHERE ${filters.whereSql}
+      `,
+      filters.params,
+    );
+
+    const summaryRows = await query(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN a.is_read = 0 THEN 1 ELSE 0 END) AS unread_count,
+        SUM(CASE WHEN a.alert_level = 'high' THEN 1 ELSE 0 END) AS high_count,
+        MAX(DATE_FORMAT(a.alert_date, '%Y-%m-%d')) AS latest_alert_date
+      FROM watchlist_alerts a
+      WHERE ${filters.whereSql}
+      `,
+      filters.params,
+    );
+
+    const typeRows = await query(
+      `
+      SELECT
+        a.alert_type,
+        COUNT(*) AS count
+      FROM watchlist_alerts a
+      WHERE ${filters.whereSql}
+      GROUP BY a.alert_type
+      ORDER BY count DESC, a.alert_type ASC
+      `,
+      filters.params,
+    );
+
+    res.json({
+      success: true,
+      count: rows.length,
+      total_count: Number(countRows[0]?.total_count || 0),
+      limit,
+      offset,
+      summary: convertBigIntToString({
+        total_count: Number(summaryRows[0]?.total_count || 0),
+        unread_count: Number(summaryRows[0]?.unread_count || 0),
+        high_count: Number(summaryRows[0]?.high_count || 0),
+        latest_alert_date: summaryRows[0]?.latest_alert_date || null,
+        by_type: typeRows.map((row) => ({
+          alert_type: row.alert_type,
+          count: Number(row.count || 0),
+        })),
+      }),
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢自選股提醒失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢自選股提醒失敗",
+      error: error.message,
+    });
+  }
 });
 
-app.use((error, req, res, next) => {
-  console.error("API 未處理錯誤：", error);
-  res.status(500).json({
-    success: false,
-    message: "API 發生未處理錯誤",
-    error: error.message,
-  });
+// ==============================
+// V1.3-1-2：未讀提醒數量
+// GET /watchlist/alerts/unread-count
+// ==============================
+app.get("/watchlist/alerts/unread-count", requireAuth, async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        COUNT(*) AS unread_count,
+        SUM(CASE WHEN alert_level = 'high' THEN 1 ELSE 0 END) AS high_unread_count,
+        MAX(DATE_FORMAT(alert_date, '%Y-%m-%d')) AS latest_alert_date
+      FROM watchlist_alerts
+      WHERE user_id = ?
+        AND is_read = 0
+      `,
+      [req.user.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        unread_count: Number(rows[0]?.unread_count || 0),
+        high_unread_count: Number(rows[0]?.high_unread_count || 0),
+        latest_alert_date: rows[0]?.latest_alert_date || null,
+      },
+    });
+  } catch (error) {
+    console.error("查詢未讀提醒數失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢未讀提醒數失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-1-2：單筆提醒標記已讀
+// POST /watchlist/alerts/:alertId/read
+// ==============================
+app.post("/watchlist/alerts/:alertId/read", requireAuth, async (req, res) => {
+  try {
+    const alertId = parsePositiveInteger(req.params.alertId, 0, 0, Number.MAX_SAFE_INTEGER);
+
+    if (!alertId) {
+      return res.status(400).json({
+        success: false,
+        message: "提醒 ID 格式不正確。",
+      });
+    }
+
+    const result = await query(
+      `
+      UPDATE watchlist_alerts
+      SET is_read = 1,
+          read_at = COALESCE(read_at, NOW()),
+          updated_at = NOW()
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [alertId, req.user.id],
+    );
+
+    if (Number(result?.affectedRows || 0) === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "查不到這筆提醒，或這筆提醒不屬於目前登入者。",
+      });
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        id,
+        user_id,
+        stock_code,
+        stock_name,
+        DATE_FORMAT(alert_date, '%Y-%m-%d') AS alert_date,
+        DATE_FORMAT(reference_date, '%Y-%m-%d') AS reference_date,
+        alert_type,
+        alert_level,
+        title,
+        message,
+        metric_name,
+        metric_value,
+        threshold_value,
+        source_table,
+        CAST(source_id AS CHAR) AS source_id,
+        is_read,
+        DATE_FORMAT(read_at, '%Y-%m-%d %H:%i:%s') AS read_at,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM watchlist_alerts
+      WHERE id = ?
+        AND user_id = ?
+      LIMIT 1
+      `,
+      [alertId, req.user.id],
+    );
+
+    res.json({
+      success: true,
+      message: "提醒已標記為已讀",
+      data: convertBigIntToString(rows[0]),
+    });
+  } catch (error) {
+    console.error("標記提醒已讀失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "標記提醒已讀失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-1-2：全部提醒標記已讀
+// POST /watchlist/alerts/read-all
+// body 可選：{ stock_code: "2330" }
+// ==============================
+app.post("/watchlist/alerts/read-all", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.body?.stock_code || req.query?.stock_code);
+    const params = [req.user.id];
+    let stockCondition = "";
+
+    if (stockCode) {
+      if (!isValidStockCodeValue(stockCode)) {
+        return res.status(400).json({
+          success: false,
+          message: "股票代號格式不正確。",
+        });
+      }
+
+      stockCondition = "AND stock_code = ?";
+      params.push(stockCode);
+    }
+
+    const result = await query(
+      `
+      UPDATE watchlist_alerts
+      SET is_read = 1,
+          read_at = COALESCE(read_at, NOW()),
+          updated_at = NOW()
+      WHERE user_id = ?
+        AND is_read = 0
+        ${stockCondition}
+      `,
+      params,
+    );
+
+    res.json({
+      success: true,
+      message: stockCode ? `${stockCode} 的提醒已全部標記為已讀` : "全部提醒已標記為已讀",
+      affected_rows: Number(result?.affectedRows || 0),
+    });
+  } catch (error) {
+    console.error("全部提醒標記已讀失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "全部提醒標記已讀失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-1-2：查詢自選股提醒規則
+// GET /watchlist/rules
+// ==============================
+app.get("/watchlist/rules", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.query.stock_code || req.query.stockCode);
+    const params = [req.user.id, req.user.id];
+    let stockCondition = "";
+
+    if (stockCode) {
+      if (!isValidStockCodeValue(stockCode)) {
+        return res.status(400).json({
+          success: false,
+          message: "股票代號格式不正確。",
+        });
+      }
+
+      stockCondition = "AND w.stock_code = ?";
+      params.push(stockCode);
+    }
+
+    await query(
+      `
+      INSERT IGNORE INTO watchlist_alert_rules (user_id, stock_code)
+      SELECT w.user_id, w.stock_code
+      FROM watchlists w
+      WHERE w.user_id = ?
+      `,
+      [req.user.id],
+    );
+
+    const rows = await query(
+      `
+      SELECT
+        r.id,
+        w.user_id,
+        w.stock_code,
+        COALESCE(s.stock_name, ep.stock_name, w.stock_code) AS stock_name,
+        COALESCE(s.market_type, ep.market_type) AS market_type,
+        s.industry,
+        r.is_active,
+        r.foreign_buy_streak_enabled,
+        r.foreign_buy_streak_days,
+        r.investment_trust_buy_streak_enabled,
+        r.investment_trust_buy_streak_days,
+        r.major_holder_enabled,
+        r.major_holder_ratio_change_threshold,
+        r.volume_enabled,
+        r.volume_ratio_threshold,
+        r.chip_score_enabled,
+        r.chip_score_threshold,
+        r.calendar_enabled,
+        r.calendar_days_before,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM watchlists w
+      LEFT JOIN watchlist_alert_rules r
+        ON r.user_id = w.user_id
+       AND r.stock_code = w.stock_code
+      LEFT JOIN stocks s
+        ON s.stock_code = w.stock_code
+      LEFT JOIN etf_profiles ep
+        ON ep.stock_code = w.stock_code
+      WHERE w.user_id = ?
+        ${stockCondition}
+      ORDER BY w.sort_order ASC, w.created_at ASC, w.stock_code ASC
+      `,
+      params.slice(1),
+    );
+
+    res.json({
+      success: true,
+      count: rows.length,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢自選股提醒規則失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢自選股提醒規則失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-1-2：新增 / 更新自選股提醒規則
+// POST /watchlist/rules
+// body: { stock_code: "2330", chip_score_threshold: 85, volume_ratio_threshold: 2 }
+// ==============================
+app.post("/watchlist/rules", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.body?.stock_code || req.body?.stockCode);
+
+    if (!stockCode || !isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "請提供正確的股票代號。",
+      });
+    }
+
+    const watchlistRows = await query(
+      `
+      SELECT stock_code
+      FROM watchlists
+      WHERE user_id = ?
+        AND stock_code = ?
+      LIMIT 1
+      `,
+      [req.user.id, stockCode],
+    );
+
+    if (watchlistRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "這檔股票尚未加入自選股，請先加入自選股後再設定提醒。",
+      });
+    }
+
+    const rule = normalizeWatchlistRulePayload(req.body || {});
+
+    await query(
+      `
+      INSERT INTO watchlist_alert_rules (
+        user_id,
+        stock_code,
+        is_active,
+        foreign_buy_streak_enabled,
+        foreign_buy_streak_days,
+        investment_trust_buy_streak_enabled,
+        investment_trust_buy_streak_days,
+        major_holder_enabled,
+        major_holder_ratio_change_threshold,
+        volume_enabled,
+        volume_ratio_threshold,
+        chip_score_enabled,
+        chip_score_threshold,
+        calendar_enabled,
+        calendar_days_before
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        is_active = VALUES(is_active),
+        foreign_buy_streak_enabled = VALUES(foreign_buy_streak_enabled),
+        foreign_buy_streak_days = VALUES(foreign_buy_streak_days),
+        investment_trust_buy_streak_enabled = VALUES(investment_trust_buy_streak_enabled),
+        investment_trust_buy_streak_days = VALUES(investment_trust_buy_streak_days),
+        major_holder_enabled = VALUES(major_holder_enabled),
+        major_holder_ratio_change_threshold = VALUES(major_holder_ratio_change_threshold),
+        volume_enabled = VALUES(volume_enabled),
+        volume_ratio_threshold = VALUES(volume_ratio_threshold),
+        chip_score_enabled = VALUES(chip_score_enabled),
+        chip_score_threshold = VALUES(chip_score_threshold),
+        calendar_enabled = VALUES(calendar_enabled),
+        calendar_days_before = VALUES(calendar_days_before),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        req.user.id,
+        stockCode,
+        rule.is_active,
+        rule.foreign_buy_streak_enabled,
+        rule.foreign_buy_streak_days,
+        rule.investment_trust_buy_streak_enabled,
+        rule.investment_trust_buy_streak_days,
+        rule.major_holder_enabled,
+        rule.major_holder_ratio_change_threshold,
+        rule.volume_enabled,
+        rule.volume_ratio_threshold,
+        rule.chip_score_enabled,
+        rule.chip_score_threshold,
+        rule.calendar_enabled,
+        rule.calendar_days_before,
+      ],
+    );
+
+    const rows = await query(
+      `
+      SELECT
+        r.id,
+        r.user_id,
+        r.stock_code,
+        COALESCE(s.stock_name, ep.stock_name, r.stock_code) AS stock_name,
+        COALESCE(s.market_type, ep.market_type) AS market_type,
+        s.industry,
+        r.is_active,
+        r.foreign_buy_streak_enabled,
+        r.foreign_buy_streak_days,
+        r.investment_trust_buy_streak_enabled,
+        r.investment_trust_buy_streak_days,
+        r.major_holder_enabled,
+        r.major_holder_ratio_change_threshold,
+        r.volume_enabled,
+        r.volume_ratio_threshold,
+        r.chip_score_enabled,
+        r.chip_score_threshold,
+        r.calendar_enabled,
+        r.calendar_days_before,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM watchlist_alert_rules r
+      LEFT JOIN stocks s
+        ON s.stock_code = r.stock_code
+      LEFT JOIN etf_profiles ep
+        ON ep.stock_code = r.stock_code
+      WHERE r.user_id = ?
+        AND r.stock_code = ?
+      LIMIT 1
+      `,
+      [req.user.id, stockCode],
+    );
+
+    res.json({
+      success: true,
+      message: "自選股提醒規則已更新",
+      data: convertBigIntToString(rows[0]),
+    });
+  } catch (error) {
+    console.error("更新自選股提醒規則失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "更新自選股提醒規則失敗",
+      error: error.message,
+    });
+  }
 });
 
 app.listen(PORT, () => {

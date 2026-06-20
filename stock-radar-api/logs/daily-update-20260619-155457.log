@@ -1,0 +1,120 @@
+====================================
+Stock Radar 每日排程更新
+====================================
+工作目錄：/app
+Log 檔案：/app/logs/daily-update-20260619-155457.log
+開始時間：2026/6/19 15:54:57
+--------------------------------------------------
+開始：原本每日資料更新 npm run daily
+指令：npm run daily
+
+> stock-radar-api@1.0.0 daily
+> node scripts/dailyTwse.js
+
+====================================
+開始每日台股資料流程：2026-06-19
+====================================
+
+步驟 1：匯入 TWSE 上市資料
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+file:///app/node_modules/mariadb/lib/misc/errors.js:65
+  if (cause) return new SqlError(msg, sql, fatal, info, sqlState, errno, additionalStack, addHeader, { cause: cause });
+                    ^
+
+SqlError: (conn:-1, no: 45028, SQLState: HY000) pool failed to retrieve a connection from pool
+    (pool connections: active=0 idle=0 limit=5)
+    at Module.createError (file:///app/node_modules/mariadb/lib/misc/errors.js:65:21)
+    at Pool._rejectTimedOutRequest (file:///app/node_modules/mariadb/lib/pool.js:366:22)
+    at Pool._checkRequestTimeouts (file:///app/node_modules/mariadb/lib/pool.js:334:14)
+    at listOnTimeout (node:internal/timers:581:17)
+    at process.processTimers (node:internal/timers:519:7) {
+  sqlMessage: 'pool failed to retrieve a connection from pool\n' +
+    '    (pool connections: active=0 idle=0 limit=5)',
+  sql: null,
+  fatal: false,
+  errno: 45028,
+  sqlState: 'HY000',
+  code: 'ER_GET_CONNECTION_TIMEOUT',
+  [cause]: Error: connect EHOSTUNREACH 192.168.1.35:3306
+      at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+   From event:
+      at file:///app/node_modules/mariadb/lib/connection.js:146:13
+      at new Promise (<anonymous>)
+      at Connection.connect (file:///app/node_modules/mariadb/lib/connection.js:131:12)
+      at Pool._createPoolConnection (file:///app/node_modules/mariadb/lib/pool.js:172:8)
+      at Pool._initiateConnectionCreation (file:///app/node_modules/mariadb/lib/pool.js:59:10)
+      at Pool._managePoolSize (file:///app/node_modules/mariadb/lib/pool.js:51:10)
+      at new Pool (file:///app/node_modules/mariadb/lib/pool.js:33:10)
+      at new PoolPromise (file:///app/node_modules/mariadb/lib/pool-promise.js:17:18)
+      at Object.createPool (file:///app/node_modules/mariadb/promise.js:46:16)
+      at file:///app/db.js:6:22 {
+    errno: -113,
+    code: 'EHOSTUNREACH',
+    syscall: 'connect',
+    address: '192.168.1.35',
+    port: 3306,
+    fatal: true,
+    sqlState: 'HY000'
+  }
+}
+
+Node.js v20.20.2
+
+每日流程失敗
+node scripts/importDailyTwse.js 2026-06-19 執行失敗，代碼：1
+錯誤：原本每日資料更新 npm run daily 失敗，exit code: 1，耗時 0分10秒
+--------------------------------------------------
+開始：V1.2 官方資料更新 npm run official:daily
+指令：npm run official:daily
+
+> stock-radar-api@1.0.0 official:daily
+> npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+
+
+> stock-radar-api@1.0.0 official:market
+> node scripts/importMarketDailySummaries.js
+
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+file:///app/node_modules/mariadb/lib/misc/errors.js:65
+  if (cause) return new SqlError(msg, sql, fatal, info, sqlState, errno, additionalStack, addHeader, { cause: cause });
+                    ^
+
+SqlError: (conn:-1, no: 45028, SQLState: HY000) pool failed to retrieve a connection from pool
+    (pool connections: active=0 idle=0 limit=5)
+    at Module.createError (file:///app/node_modules/mariadb/lib/misc/errors.js:65:21)
+    at Pool._rejectTimedOutRequest (file:///app/node_modules/mariadb/lib/pool.js:366:22)
+    at Pool._checkRequestTimeouts (file:///app/node_modules/mariadb/lib/pool.js:334:14)
+    at listOnTimeout (node:internal/timers:581:17)
+    at process.processTimers (node:internal/timers:519:7) {
+  sqlMessage: 'pool failed to retrieve a connection from pool\n' +
+    '    (pool connections: active=0 idle=0 limit=5)',
+  sql: null,
+  fatal: false,
+  errno: 45028,
+  sqlState: 'HY000',
+  code: 'ER_GET_CONNECTION_TIMEOUT',
+  [cause]: Error: connect EHOSTUNREACH 192.168.1.35:3306
+      at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+   From event:
+      at file:///app/node_modules/mariadb/lib/connection.js:146:13
+      at new Promise (<anonymous>)
+      at Connection.connect (file:///app/node_modules/mariadb/lib/connection.js:131:12)
+      at Pool._createPoolConnection (file:///app/node_modules/mariadb/lib/pool.js:172:8)
+      at Pool._initiateConnectionCreation (file:///app/node_modules/mariadb/lib/pool.js:59:10)
+      at Pool._managePoolSize (file:///app/node_modules/mariadb/lib/pool.js:51:10)
+      at new Pool (file:///app/node_modules/mariadb/lib/pool.js:33:10)
+      at new PoolPromise (file:///app/node_modules/mariadb/lib/pool-promise.js:17:18)
+      at Object.createPool (file:///app/node_modules/mariadb/promise.js:46:16)
+      at file:///app/db.js:6:22 {
+    errno: -113,
+    code: 'EHOSTUNREACH',
+    syscall: 'connect',
+    address: '192.168.1.35',
+    port: 3306,
+    fatal: true,
+    sqlState: 'HY000'
+  }
+}
+
+Node.js v20.20.2
+錯誤：V1.2 官方資料更新 npm run official:daily 失敗，exit code: 1，耗時 0分10秒

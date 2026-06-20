@@ -1,0 +1,358 @@
+====================================
+Stock Radar Docker 排程啟動
+時間：2026-06-19 18:30:00
+工作目錄：/app
+Node：v20.20.2
+NPM：10.8.2
+====================================
+
+> stock-radar-api@1.0.0 scheduled:daily
+> node scripts/runScheduledDailyUpdate.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+====================================
+Stock Radar 每日排程更新
+====================================
+工作目錄：/app
+Log 檔案：/app/logs/daily-update-20260619-183000.log
+開始時間：2026/6/19 18:30:00
+--------------------------------------------------
+開始：原本每日資料更新 npm run daily
+指令：npm run daily
+
+> stock-radar-api@1.0.0 daily
+> node scripts/dailyTwse.js
+
+未指定日期，自動尋找最近可用交易日，起始日期：2026-06-19
+最多往前檢查 10 天
+略過 2026-06-19：TWSE=無資料，TPEx=有資料
+今日或指定日期無完整交易資料，改用最近可用交易日：2026-06-18
+====================================
+開始每日台股資料流程：2026-06-18
+====================================
+
+步驟 1：匯入 TWSE 上市資料
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+開始匯入上市資料：2026-06-18
+匯入完成
+每日收盤行情：1079 筆
+三大法人買賣超：1066 筆
+
+步驟 2：匯入 TPEx 上櫃資料
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+開始匯入上櫃資料：2026-06-18
+TPEx 民國日期：115/06/18
+匯入失敗
+terminated
+
+每日流程失敗
+node scripts/importDailyTpex.js 2026-06-18 執行失敗，代碼：1
+錯誤：原本每日資料更新 npm run daily 失敗，exit code: 1，耗時 0分9秒
+--------------------------------------------------
+開始：V1.2 官方資料更新 npm run official:daily
+指令：npm run official:daily
+
+> stock-radar-api@1.0.0 official:daily
+> npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+
+
+> stock-radar-api@1.0.0 official:market
+> node scripts/importMarketDailySummaries.js
+
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+開始匯入市場每日成交總覽
+完成：上市 2026-06-18 TWSE OpenAPI FMTQIK
+完成：上櫃 2026-06-18 DATABASE daily_prices aggregate
+
+> stock-radar-api@1.0.0 official:revenue
+> node scripts/importMonthlyRevenues.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+開始匯入每月營收資料
+完成：上市，匯入 1082 筆，略過 0 筆
+來源：https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv
+完成：上櫃，匯入 890 筆，略過 0 筆
+來源：https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv
+
+> stock-radar-api@1.0.0 official:eps
+> node scripts/importQuarterlyEps.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+開始匯入每季 EPS 資料
+資料來源：MOPSOV / MOPS ajax_t163sb04，季度：2026Q1, 2025Q4, 2025Q3, 2025Q2, 2025Q1, 2024Q4, 2024Q3, 2024Q2, 2024Q1, 2023Q4, 2023Q3, 2023Q2
+完成：上市 2026 Q1，匯入 1079 筆，略過 0 筆
+完成：上市 2025 Q4，匯入 1079 筆，略過 0 筆
+完成：上市 2025 Q3，匯入 1080 筆，略過 0 筆
+完成：上市 2025 Q2，匯入 1078 筆，略過 0 筆
+完成：上市 2025 Q1，匯入 1060 筆，略過 0 筆
+完成：上市 2024 Q4，匯入 1079 筆，略過 0 筆
+完成：上市 2024 Q3，匯入 1043 筆，略過 0 筆
+完成：上市 2024 Q2，匯入 1070 筆，略過 0 筆
+完成：上市 2024 Q1，匯入 1026 筆，略過 0 筆
+完成：上市 2023 Q4，匯入 1078 筆，略過 0 筆
+完成：上市 2023 Q3，匯入 1008 筆，略過 0 筆
+完成：上市 2023 Q2，匯入 1045 筆，略過 0 筆
+完成：上市，成功季度 12，匯入 12725 筆，略過 0 筆
+完成：上櫃 2026 Q1，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q4，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q3，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q2，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q1，匯入 875 筆，略過 0 筆
+完成：上櫃 2024 Q4，匯入 890 筆，略過 0 筆
+完成：上櫃 2024 Q3，匯入 851 筆，略過 0 筆
+完成：上櫃 2024 Q2，匯入 884 筆，略過 0 筆
+完成：上櫃 2024 Q1，匯入 836 筆，略過 0 筆
+完成：上櫃 2023 Q4，匯入 885 筆，略過 0 筆
+完成：上櫃 2023 Q3，匯入 815 筆，略過 0 筆
+完成：上櫃 2023 Q2，匯入 866 筆，略過 0 筆
+完成：上櫃，成功季度 12，匯入 10462 筆，略過 0 筆
+開始回填 EPS 季增率 / 年增率
+EPS 成長率回填完成
+
+> stock-radar-api@1.0.0 official:etf
+> node scripts/syncEtfProfilesFromStocks.js
+
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+開始同步 ETF 主檔
+ETF 主檔同步完成，目前 2 筆
+異動筆數：4
+
+> stock-radar-api@1.0.0 official:events
+> node scripts/importStockCalendarEvents.js
+
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+開始匯入個股/ETF 行事曆事件：官方 / 半官方資料來源
+完成來源：TWSE 除權息預告表，原始 289 筆，可匯入事件 289 筆
+完成來源：TWSE 除權息計算結果表，原始 20 筆，可匯入事件 20 筆
+完成來源：TPEx 除權息預告表，原始 0 筆，可匯入事件 0 筆
+完成來源：TPEx 除權息計算結果表，原始 0 筆，可匯入事件 0 筆
+略過來源：MOPS 上市股東會資料候選來源，HTTP 404
+略過來源：MOPS 上櫃股東會資料候選來源，HTTP 404
+略過來源：MOPS 上市法說會資料候選來源，HTTP 404
+略過來源：MOPS 上櫃法說會資料候選來源，HTTP 404
+完成：匯入 / 更新 289 筆，略過 0 筆
+
+> stock-radar-api@1.0.0 official:institutional-amounts
+> node scripts/importInstitutionalAmountSummaries.js
+
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+開始匯入三大法人官方買賣金額
+交易日期：2026-06-18
+完成：上市，原始 6 列，可解析 6 列，買賣超 31278202977
+來源：https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate=20260618&type=day&response=json
+完成：上櫃，原始 8 列，可解析 8 列，買賣超 38617305183
+來源：https://www.tpex.org.tw/www/zh-tw/insti/summary?date=115%2F06%2F18&response=json
+完成：匯入 / 更新 2 筆市場法人金額總覽
+完成：V1.2 官方資料更新 npm run official:daily，耗時 1分5秒
+--------------------------------------------------
+結束時間：2026/6/19 18:31:14
+總耗時：1分14秒
+結果：失敗 1 項
+1. 原本每日資料更新 npm run daily 失敗，exit code: 1，耗時 0分9秒
+====================================
+Stock Radar Docker 排程啟動
+時間：2026-06-20 18:30:00
+工作目錄：/app
+Node：v20.20.2
+NPM：10.8.2
+====================================
+
+> stock-radar-api@1.0.0 scheduled:daily
+> node scripts/runScheduledDailyUpdate.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+====================================
+Stock Radar 每日排程更新
+====================================
+工作目錄：/app
+Log 檔案：/app/logs/daily-update-20260620-183000.log
+開始時間：2026/6/20 18:30:00
+--------------------------------------------------
+開始：原本每日資料更新 npm run daily
+指令：npm run daily
+
+> stock-radar-api@1.0.0 daily
+> node scripts/dailyTwse.js
+
+未指定日期，自動尋找最近可用交易日，起始日期：2026-06-20
+最多往前檢查 10 天
+略過 2026-06-20：TWSE=無資料，TPEx=有資料
+略過 2026-06-19：TWSE=無資料，TPEx=有資料
+今日或指定日期無完整交易資料，改用最近可用交易日：2026-06-18
+====================================
+開始每日台股資料流程：2026-06-18
+====================================
+
+步驟 1：匯入 TWSE 上市資料
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+開始匯入上市資料：2026-06-18
+匯入完成
+每日收盤行情：1079 筆
+三大法人買賣超：1067 筆
+
+步驟 2：匯入 TPEx 上櫃資料
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+開始匯入上櫃資料：2026-06-18
+TPEx 民國日期：115/06/18
+匯入完成
+上櫃每日收盤行情：876 筆
+上櫃三大法人買賣超：811 筆
+
+步驟 3：補齊上市＋上櫃產業分類
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+開始補齊股票產業分類
+讀取：TWSE 上市公司基本資料
+完成：上市，更新 1084 筆，略過 6 筆
+來源：https://openapi.twse.com.tw/v1/opendata/t187ap03_L
+讀取：TPEx 上櫃公司基本資料
+完成：上櫃，更新 890 筆，略過 0 筆
+來源：https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv
+
+產業分類統計：
+┌─────────┬─────────────┬─────────────┬────────────────────┬────────────────┐
+│ (index) │ market_type │ total_count │ unclassified_count │ industry_count │
+├─────────┼─────────────┼─────────────┼────────────────────┼────────────────┤
+│ 0       │ '上市'      │ 1136        │ 50                 │ 34             │
+│ 1       │ '上櫃'      │ 890         │ 0                  │ 28             │
+└─────────┴─────────────┴─────────────┴────────────────────┴────────────────┘
+補齊股票產業分類完成
+
+步驟 4：匯入 TDCC 集保大戶籌碼資料
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+讀取：TDCC 集保戶股權分散表
+來源：https://opendata.tdcc.com.tw/getOD.ashx?id=1-5
+集保大戶籌碼匯入完成
+解析資料：67864 筆
+更新股票：3343 檔
+略過資料：11033 筆
+┌─────────┬──────────────┬─────────────┐
+│ (index) │ latest_date  │ stock_count │
+├─────────┼──────────────┼─────────────┤
+│ 0       │ '2026-06-18' │ 3343n       │
+└─────────┴──────────────┴─────────────┘
+
+步驟 5：計算上市＋上櫃籌碼分數
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+開始計算籌碼分數：2026-06-18
+籌碼分數計算完成
+股票數量：1955
+成功計算：1955
+略過股票：0
+上市成功計算：1079，略過：0
+上櫃成功計算：876，略過：0
+
+====================================
+每日流程完成
+日期：2026-06-18
+可以查詢：
+http://localhost:3000/radar/top
+http://localhost:3000/foreign/top
+http://localhost:3000/radar/today
+http://localhost:3000/radar/major-holder
+====================================
+完成：原本每日資料更新 npm run daily，耗時 1分27秒
+--------------------------------------------------
+開始：V1.2 官方資料更新 npm run official:daily
+指令：npm run official:daily
+
+> stock-radar-api@1.0.0 official:daily
+> npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+
+
+> stock-radar-api@1.0.0 official:market
+> node scripts/importMarketDailySummaries.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+開始匯入市場每日成交總覽
+完成：上市 2026-06-18 TWSE OpenAPI FMTQIK
+完成：上櫃 2026-06-18 DATABASE daily_prices aggregate
+
+> stock-radar-api@1.0.0 official:revenue
+> node scripts/importMonthlyRevenues.js
+
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+開始匯入每月營收資料
+完成：上市，匯入 1082 筆，略過 0 筆
+來源：https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv
+完成：上櫃，匯入 890 筆，略過 0 筆
+來源：https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv
+
+> stock-radar-api@1.0.0 official:eps
+> node scripts/importQuarterlyEps.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+開始匯入每季 EPS 資料
+資料來源：MOPSOV / MOPS ajax_t163sb04，季度：2026Q1, 2025Q4, 2025Q3, 2025Q2, 2025Q1, 2024Q4, 2024Q3, 2024Q2, 2024Q1, 2023Q4, 2023Q3, 2023Q2
+完成：上市 2026 Q1，匯入 1079 筆，略過 0 筆
+完成：上市 2025 Q4，匯入 1079 筆，略過 0 筆
+完成：上市 2025 Q3，匯入 1080 筆，略過 0 筆
+完成：上市 2025 Q2，匯入 1078 筆，略過 0 筆
+完成：上市 2025 Q1，匯入 1060 筆，略過 0 筆
+完成：上市 2024 Q4，匯入 1079 筆，略過 0 筆
+完成：上市 2024 Q3，匯入 1043 筆，略過 0 筆
+完成：上市 2024 Q2，匯入 1070 筆，略過 0 筆
+完成：上市 2024 Q1，匯入 1026 筆，略過 0 筆
+完成：上市 2023 Q4，匯入 1078 筆，略過 0 筆
+完成：上市 2023 Q3，匯入 1008 筆，略過 0 筆
+完成：上市 2023 Q2，匯入 1045 筆，略過 0 筆
+完成：上市，成功季度 12，匯入 12725 筆，略過 0 筆
+完成：上櫃 2026 Q1，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q4，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q3，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q2，匯入 890 筆，略過 0 筆
+完成：上櫃 2025 Q1，匯入 875 筆，略過 0 筆
+完成：上櫃 2024 Q4，匯入 890 筆，略過 0 筆
+完成：上櫃 2024 Q3，匯入 851 筆，略過 0 筆
+完成：上櫃 2024 Q2，匯入 884 筆，略過 0 筆
+完成：上櫃 2024 Q1，匯入 836 筆，略過 0 筆
+完成：上櫃 2023 Q4，匯入 885 筆，略過 0 筆
+完成：上櫃 2023 Q3，匯入 815 筆，略過 0 筆
+完成：上櫃 2023 Q2，匯入 866 筆，略過 0 筆
+完成：上櫃，成功季度 12，匯入 10462 筆，略過 0 筆
+開始回填 EPS 季增率 / 年增率
+EPS 成長率回填完成
+
+> stock-radar-api@1.0.0 official:etf
+> node scripts/syncEtfProfilesFromStocks.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+開始同步 ETF 主檔
+ETF 主檔同步完成，目前 2 筆
+異動筆數：4
+
+> stock-radar-api@1.0.0 official:events
+> node scripts/importStockCalendarEvents.js
+
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+開始匯入個股/ETF 行事曆事件：官方 / 半官方資料來源
+完成來源：TWSE 除權息預告表，原始 289 筆，可匯入事件 289 筆
+完成來源：TWSE 除權息計算結果表，原始 20 筆，可匯入事件 20 筆
+完成來源：TPEx 除權息預告表，原始 0 筆，可匯入事件 0 筆
+完成來源：TPEx 除權息計算結果表，原始 0 筆，可匯入事件 0 筆
+略過來源：MOPS 上市股東會資料候選來源，HTTP 404
+略過來源：MOPS 上櫃股東會資料候選來源，HTTP 404
+略過來源：MOPS 上市法說會資料候選來源，HTTP 404
+略過來源：MOPS 上櫃法說會資料候選來源，HTTP 404
+完成：匯入 / 更新 289 筆，略過 0 筆
+
+> stock-radar-api@1.0.0 official:institutional-amounts
+> node scripts/importInstitutionalAmountSummaries.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+開始匯入三大法人官方買賣金額
+交易日期：2026-06-18
+完成：上市，原始 6 列，可解析 6 列，買賣超 31278202977
+來源：https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate=20260618&type=day&response=json
+完成：上櫃，原始 8 列，可解析 8 列，買賣超 38617305183
+來源：https://www.tpex.org.tw/www/zh-tw/insti/summary?date=115%2F06%2F18&response=json
+完成：匯入 / 更新 2 筆市場法人金額總覽
+完成：V1.2 官方資料更新 npm run official:daily，耗時 1分3秒
+--------------------------------------------------
+結束時間：2026/6/20 18:32:31
+總耗時：2分30秒
+結果：全部成功
+====================================
+Stock Radar Docker 排程結束
+時間：2026-06-20 18:32:31
+Exit Code：0
+====================================

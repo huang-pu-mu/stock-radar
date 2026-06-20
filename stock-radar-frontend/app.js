@@ -14,7 +14,6 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
-const FRONTEND_VERSION = "stock-radar-pwa-v29";
 const RECENT_SEARCH_STORAGE_KEY = "STOCK_RADAR_RECENT_SEARCHES";
 const AUTH_TOKEN_STORAGE_KEY = "STOCK_RADAR_AUTH_TOKEN";
 
@@ -32,8 +31,6 @@ const state = {
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
-  systemStatus: null,
-  systemStatusError: "",
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -228,44 +225,26 @@ async function fetchJson(path, options = {}) {
     headers.set("Authorization", `Bearer ${state.authToken}`);
   }
 
-  const requestUrl = `${API_BASE_URL}${path}`;
-  const response = await fetch(requestUrl, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     ...fetchOptions,
     headers,
   });
-
-  const rawText = await response.text();
   let result = null;
 
   try {
-    result = rawText ? JSON.parse(rawText) : null;
+    result = await response.json();
   } catch (error) {
-    const preview = rawText
-      .replace(/\s+/g, " ")
-      .slice(0, 120);
-    const looksLikeHtml = /^\s*</.test(rawText);
-    const hint = looksLikeHtml
-      ? "目前打到的網址回傳 HTML，通常代表 API 網址指到前端站、API 路由尚未部署，或 Vercel 部署失敗。"
-      : "目前回傳內容不是合法 JSON。";
-
-    throw new Error(
-      `${hint} HTTP ${response.status}，URL：${requestUrl}，回傳開頭：${preview || "空白回應"}`
-    );
+    throw new Error("API 回傳不是 JSON，請確認後端是否正常啟動。特殊錯誤：" + error.message);
   }
 
-  if (!response.ok || result?.success === false) {
-    throw new Error(result?.message || result?.error || `API 查詢失敗：HTTP ${response.status}`);
+  if (!response.ok || result.success === false) {
+    throw new Error(result.message || result.error || "API 查詢失敗");
   }
 
   if (Array.isArray(result)) return result;
-  if (result?.data !== undefined) return result.data;
+  if (result.data) return result.data;
   return result;
 }
-
-window.resetStockRadarApiUrl = function resetStockRadarApiUrl() {
-  window.localStorage.removeItem("STOCK_RADAR_API_BASE_URL");
-  window.location.reload();
-};
 function buildListPath() {
   const params = new URLSearchParams();
 
@@ -285,19 +264,6 @@ function buildListPath() {
     return `/radar/institutional-sync-buying?${params.toString()}`;
   }
 
-  if (state.page === "marketFlow" || state.page === "institutionalOverview") {
-    params.set("days", "20");
-    params.set("industryLimit", "10");
-    if (state.market) params.set("market", state.market);
-    return `/market/flow/summary?${params.toString()}`;
-  }
-
-  if (state.page === "marketIndex") {
-    params.set("days", "30");
-    if (state.market) params.set("market", state.market);
-    return `/market/flow/summary?${params.toString()}`;
-  }
-
   if (state.page === "industryFlow") {
     params.set("limit", "50");
     if (state.market) params.set("market", state.market);
@@ -306,7 +272,6 @@ function buildListPath() {
 
   if (state.page === "majorHolder") {
     params.set("limit", "100");
-    params.set("sort", "trend");
     if (state.market) params.set("market", state.market);
     return `/radar/major-holder?${params.toString()}`;
   }
@@ -350,27 +315,6 @@ function updatePageText() {
     return;
   }
 
-  if (state.page === "marketIndex") {
-    pageTitle.textContent = "大盤走勢";
-    pageDesc.textContent = `${marketText}市場成交金額、指數漲跌與量能趨勢。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>成交金額放大代表市場熱度上升；再搭配法人金額，看資金是流入還是流出。</span>`;
-    return;
-  }
-
-  if (state.page === "marketFlow") {
-    pageTitle.textContent = "資金流向分析";
-    pageDesc.textContent = `${marketText}整合市場成交金額、法人買賣金額、產業資金流向。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看三大法人淨買賣金額，再看成交金額是否放大，最後看產業資金集中在哪裡。</span>`;
-    return;
-  }
-
-  if (state.page === "institutionalOverview") {
-    pageTitle.textContent = "法人總覽";
-    pageDesc.textContent = `${marketText}三大法人買賣金額趨勢，觀察外資、投信、自營商方向。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>法人總金額為正代表淨流入；外資與投信同向時，資金方向更明確。</span>`;
-    return;
-  }
-
   if (state.page === "foreign") {
     pageTitle.textContent = "外資排行";
     pageDesc.textContent = `${marketText}外資買超排行，先看外資今天買最多的股票。`;
@@ -408,8 +352,8 @@ function updatePageText() {
 
   if (state.page === "majorHolder") {
     pageTitle.textContent = "主力籌碼分析";
-    pageDesc.textContent = `${marketText}用 TDCC 集保股權分散資料，看 400 張以上大戶、千張大戶與散戶比重變化。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>優先看集中度分數、4 週大戶比重變化、散戶比重是否下降；這是每週資料，不是每日即時資料。</span>`;
+    pageDesc.textContent = `${marketText}用 TDCC 集保股權分散資料，看 400 張以上大戶持股是否增加。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>大戶比重上升、散戶比重下降，代表籌碼可能更集中；這是每週資料，不是每日即時資料。</span>`;
     return;
   }
 
@@ -1283,150 +1227,6 @@ function renderGoogleButton() {
   }
 }
 
-
-function renderSystemStatusShell() {
-  return `
-    <article class="account-card system-status-card">
-      <div class="system-status-header">
-        <div>
-          <p class="eyebrow">V1.2 收尾檢查</p>
-          <h3>系統狀態</h3>
-          <p>檢查前端目前打到的 API、後端版本、V1.2 資料表與主要功能狀態。</p>
-        </div>
-        <span class="system-version-pill">${escapeHtml(FRONTEND_VERSION)}</span>
-      </div>
-      <div id="systemStatusCard" class="system-status-body">
-        <div class="status-box muted">系統狀態讀取中...</div>
-      </div>
-      <div class="account-actions system-actions">
-        <button class="detail-btn" type="button" data-system-refresh="true">重新檢查</button>
-        <button class="ghost-btn small-ghost" type="button" data-reset-api-url="true">清除 API 網址快取</button>
-      </div>
-    </article>
-  `;
-}
-
-function getSystemStatusClass(status) {
-  if (status === "ready" || status === "done") return "good";
-  if (status === "foundation" || status === "empty") return "warn";
-  if (status === "missing") return "bad";
-  return "warn";
-}
-
-function getSystemStatusText(status) {
-  const map = {
-    ready: "正常",
-    done: "完成",
-    foundation: "基礎版",
-    empty: "尚無資料",
-    missing: "缺少",
-  };
-  return map[status] || status || "待確認";
-}
-
-function renderSystemTableRows(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return `<div class="result-note">目前沒有回傳資料表檢查結果。</div>`;
-  }
-
-  return `
-    <div class="system-table-list">
-      ${rows.map((row) => `
-        <div class="system-table-row">
-          <div>
-            <strong>${escapeHtml(row.label || row.table)}</strong>
-            <small>${escapeHtml(row.table)}｜最新 ${formatDate(row.latest_date)}</small>
-          </div>
-          <div class="system-table-meta">
-            <span>${formatNumber(row.total_rows || 0)} 筆</span>
-            <span class="status-chip ${getSystemStatusClass(row.status)}">${escapeHtml(getSystemStatusText(row.status))}</span>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderSystemFeatureRows(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-
-  return `
-    <div class="system-feature-grid">
-      ${rows.map((row) => `
-        <div class="system-feature-item">
-          <span class="status-chip ${getSystemStatusClass(row.status)}">${escapeHtml(row.id || "V1.2")}</span>
-          <strong>${escapeHtml(row.name || "功能")}</strong>
-          <small>${escapeHtml(getSystemStatusText(row.status))}</small>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderSystemStatusContent(status = {}) {
-  const tableSummary = status.table_summary || {};
-  const warnings = Array.isArray(status.warnings) ? status.warnings : [];
-  const hasWarning = warnings.length > 0;
-
-  return `
-    <div class="system-summary-grid">
-      ${createInfoItem("前端版本", escapeHtml(FRONTEND_VERSION))}
-      ${createInfoItem("API 版本", escapeHtml(status.api_version || "未知"))}
-      ${createInfoItem("API 網址", `<code>${escapeHtml(API_BASE_URL || "未設定")}</code>`)}
-      ${createInfoItem("檢查時間", escapeHtml(formatDate(status.checked_at) || "-"))}
-      ${createInfoItem("資料表正常", `${formatNumber(tableSummary.ready || 0)} / ${formatNumber(tableSummary.total || 0)}`)}
-      ${createInfoItem("警告數", `<span class="${hasWarning ? "price-down" : "price-up"}">${formatNumber(warnings.length)}</span>`)}
-    </div>
-
-    ${hasWarning ? `
-      <div class="result-note warning-note">
-        <strong>待確認：</strong>${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-      </div>
-    ` : `
-      <div class="result-note success-note">
-        <strong>目前狀態：</strong>V1.2 主要資料表與 API 狀態檢查完成，未發現缺表警告。
-      </div>
-    `}
-
-    <section class="system-section">
-      <h4>V1.2 功能狀態</h4>
-      ${renderSystemFeatureRows(status.features)}
-    </section>
-
-    <section class="system-section">
-      <h4>V1.2 資料表狀態</h4>
-      ${renderSystemTableRows(status.tables)}
-    </section>
-  `;
-}
-
-async function loadSystemStatus() {
-  const box = document.getElementById("systemStatusCard");
-  if (!box) return;
-
-  box.innerHTML = `<div class="status-box muted">系統狀態讀取中...</div>`;
-
-  try {
-    const status = await fetchJson("/v12/status");
-    state.systemStatus = status;
-    state.systemStatusError = "";
-    box.innerHTML = renderSystemStatusContent(status || {});
-  } catch (error) {
-    state.systemStatus = null;
-    state.systemStatusError = error.message;
-    box.innerHTML = `
-      <div class="status-box error">
-        <strong>系統狀態讀取失敗</strong><br />
-        ${escapeHtml(error.message)}
-      </div>
-      <div class="result-note">
-        <strong>目前 API 網址：</strong><code>${escapeHtml(API_BASE_URL || "未設定")}</code><br />
-        如果網址錯誤，按「清除 API 網址快取」後重新整理。
-      </div>
-    `;
-  }
-}
-
 function renderAccountPage() {
   hideStatus();
 
@@ -1458,9 +1258,7 @@ function renderAccountPage() {
           <button class="detail-btn" type="button" data-logout="true">登出</button>
         </div>
       </article>
-      ${renderSystemStatusShell()}
     `;
-    window.setTimeout(loadSystemStatus, 0);
     return;
   }
 
@@ -1475,11 +1273,9 @@ function renderAccountPage() {
         <strong>管理提醒：</strong>API 端只需要設定 <code>GOOGLE_CLIENT_ID</code> 與 <code>JWT_SECRET</code>。
       </div>
     </article>
-    ${renderSystemStatusShell()}
   `;
 
   renderGoogleButton();
-  window.setTimeout(loadSystemStatus, 0);
 }
 
 
@@ -1783,235 +1579,6 @@ function renderIndustryTopStocks(topStocks) {
   `;
 }
 
-
-function formatShortAmountYi(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const yi = numberValue / 100000000;
-  return yi.toLocaleString("zh-TW", { maximumFractionDigits: yi >= 100 ? 0 : 1 });
-}
-
-function getMoneyFlowClass(value) {
-  const numberValue = toNumber(value) || 0;
-  if (numberValue > 0) return "price-up";
-  if (numberValue < 0) return "price-down";
-  return "";
-}
-
-function getMarketFlowStrengthClass(strength, netAmount) {
-  const text = String(strength || "");
-  const netValue = toNumber(netAmount) || 0;
-  if (text.includes("流出") || netValue < 0) return "score-low";
-  if (text.includes("強勢") || netValue >= 5000000000) return "score-high";
-  if (text.includes("流入") || netValue > 0) return "score-mid";
-  return "score-low";
-}
-
-function getTrendRows(flowData = {}) {
-  const rows = Array.isArray(flowData.trend) ? flowData.trend : [];
-  return rows
-    .filter((row) => row && row.trade_date)
-    .slice()
-    .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
-}
-
-function renderMiniFlowLineChart(rows, key, options = {}) {
-  const chartRows = rows.filter((row) => toNumber(row[key]) !== null);
-
-  if (chartRows.length < 2) {
-    return `<div class="flow-empty-chart">趨勢資料不足</div>`;
-  }
-
-  const values = chartRows.map((row) => toNumber(row[key]) || 0);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const width = 520;
-  const height = 150;
-  const paddingX = 24;
-  const paddingY = 18;
-  const points = values.map((value, index) => {
-    const x = paddingX + (index / Math.max(values.length - 1, 1)) * (width - paddingX * 2);
-    const y = height - paddingY - ((value - min) / span) * (height - paddingY * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const zeroY = min < 0 && max > 0
-    ? height - paddingY - ((0 - min) / span) * (height - paddingY * 2)
-    : null;
-  const firstDate = formatDate(chartRows[0]?.trade_date);
-  const lastDate = formatDate(chartRows[chartRows.length - 1]?.trade_date);
-  const latestValue = chartRows[chartRows.length - 1]?.[key];
-
-  return `
-    <div class="flow-chart-card">
-      <div class="flow-chart-header">
-        <div>
-          <h4>${escapeHtml(options.title || "趨勢圖")}</h4>
-          <p>${escapeHtml(firstDate)} ～ ${escapeHtml(lastDate)}</p>
-        </div>
-        <strong class="${getMoneyFlowClass(latestValue)}">${escapeHtml(options.formatter ? options.formatter(latestValue) : formatNumber(latestValue))}</strong>
-      </div>
-      <svg class="flow-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title || "趨勢圖")}">
-        ${zeroY === null ? "" : `<line x1="${paddingX}" y1="${zeroY.toFixed(1)}" x2="${width - paddingX}" y2="${zeroY.toFixed(1)}" class="flow-zero-line" />`}
-        <polyline points="${points}" class="flow-line" />
-      </svg>
-    </div>
-  `;
-}
-
-function renderMarketAmountBars(rows) {
-  const chartRows = rows.filter((row) => toNumber(row.total_trade_amount) !== null).slice(-12);
-
-  if (chartRows.length === 0) {
-    return `<div class="flow-empty-chart">成交金額資料不足</div>`;
-  }
-
-  const max = Math.max(...chartRows.map((row) => toNumber(row.total_trade_amount) || 0), 1);
-
-  return `
-    <div class="flow-bar-card">
-      <div class="flow-chart-header">
-        <div>
-          <h4>成交金額近 12 筆</h4>
-          <p>單位：億元</p>
-        </div>
-      </div>
-      <div class="flow-bars">
-        ${chartRows.map((row) => {
-          const amount = toNumber(row.total_trade_amount) || 0;
-          const height = Math.max((amount / max) * 100, 4);
-          return `
-            <div class="flow-bar-item" title="${escapeHtml(formatDate(row.trade_date))} ${escapeHtml(formatAmountYi(amount))}">
-              <span class="flow-bar" style="height:${height.toFixed(1)}%"></span>
-              <small>${escapeHtml(String(row.trade_date || "").slice(5))}</small>
-            </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderMarketFlowMarketRows(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return `<div class="result-note">目前沒有市場別資金資料。</div>`;
-  }
-
-  return `
-    <div class="flow-market-grid">
-      ${rows.map((row) => {
-        const netAmount = pick(row, ["total_net_amount"], 0);
-        const strength = pick(row, ["flow_strength"], "資金中性");
-        const strengthClass = getMarketFlowStrengthClass(strength, netAmount);
-        return `
-          <article class="flow-market-card">
-            <div class="flow-market-top">
-              <h4>${escapeHtml(pick(row, ["market_type"], "市場"))}</h4>
-              <span class="summary-pill ${strengthClass}">${escapeHtml(strength)}</span>
-            </div>
-            <div class="flow-market-main ${getMoneyFlowClass(netAmount)}">${formatAmountYi(netAmount)}</div>
-            <div class="flow-market-sub">成交金額 ${formatAmountYi(pick(row, ["total_trade_amount"], 0))}</div>
-            <div class="flow-market-sub">外資 ${formatAmountYi(pick(row, ["foreign_net_amount"], 0))}｜投信 ${formatAmountYi(pick(row, ["investment_trust_net_amount"], 0))}</div>
-          </article>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function renderMarketFlowIndustryRows(rows = []) {
-  const industryRows = Array.isArray(rows) ? rows.slice(0, 10) : [];
-
-  if (industryRows.length === 0) {
-    return `<div class="result-note">目前沒有產業資金資料，可先執行每日匯入與籌碼分數計算。</div>`;
-  }
-
-  return `
-    <div class="flow-industry-list">
-      ${industryRows.map((row, index) => {
-        const totalLots = pick(row, ["total_net_lots"], 0);
-        const strengthClass = getIndustryFlowStrengthClass(pick(row, ["flow_direction"], ""), totalLots);
-        return `
-          <div class="flow-industry-row">
-            <span class="rank-badge">${index + 1}</span>
-            <div class="flow-industry-main">
-              <strong>${escapeHtml(pick(row, ["industry"], "未分類"))}</strong>
-              <small>${escapeHtml(pick(row, ["market_types"], "全部"))}｜${formatNumber(pick(row, ["stock_count"], 0))} 檔｜買超 ${formatNumber(pick(row, ["net_buy_stock_count"], 0))} 檔</small>
-            </div>
-            <div class="flow-industry-value ${getChangeClass(totalLots)}">
-              ${formatLotsValue(totalLots)} 張
-            </div>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function renderMarketFlowDashboard(flowData = {}) {
-  const trendRows = getTrendRows(flowData);
-  const latest = flowData.latest_total || trendRows[trendRows.length - 1] || {};
-  const latestMarkets = Array.isArray(flowData.latest_markets) ? flowData.latest_markets : [];
-  const latestDate = pick(flowData, ["latest_date"], pick(latest, ["trade_date"], "-"));
-  const netAmount = pick(latest, ["total_net_amount"], 0);
-  const amountChangePercent = pick(latest, ["market_amount_change_percent"], null);
-  const strength = pick(latest, ["flow_strength"], "資金中性");
-  const strengthClass = getMarketFlowStrengthClass(strength, netAmount);
-
-  return `
-    <article class="stock-card market-flow-dashboard">
-      <div class="stock-top">
-        <div class="stock-main">
-          <span class="rank-badge">V1.2-9</span>
-          <div class="stock-name">
-            <h3>${escapeHtml(pick(flowData, ["market"], "全部"))}資金流向</h3>
-            <span class="badge">資料日 ${formatDate(latestDate)}</span>
-            <span class="badge">近 ${formatNumber(pick(flowData, ["days"], trendRows.length || 20))} 筆</span>
-          </div>
-        </div>
-        <div class="score-box ${strengthClass}">
-          <span class="score-value">${formatShortAmountYi(netAmount)}</span>
-          <span class="score-label">法人淨額億</span>
-        </div>
-      </div>
-
-      <div class="quick-summary">
-        <span class="summary-pill ${strengthClass}">${escapeHtml(strength)}</span>
-        <span class="summary-text">三大法人淨額 <strong class="${getMoneyFlowClass(netAmount)}">${formatAmountYi(netAmount)}</strong>，成交金額 <strong>${formatAmountYi(pick(latest, ["total_trade_amount"], 0))}</strong>，較前日 ${formatPercent(amountChangePercent)}</span>
-      </div>
-
-      <div class="info-grid market-flow-kpi-grid">
-        ${createInfoItem("成交金額", formatAmountYi(pick(latest, ["total_trade_amount"], 0)))}
-        ${createInfoItem("成交金額變化", formatPercent(amountChangePercent), getChangeClass(amountChangePercent))}
-        ${createInfoItem("外資淨額", formatAmountYi(pick(latest, ["foreign_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["foreign_net_amount"], 0)))}
-        ${createInfoItem("投信淨額", formatAmountYi(pick(latest, ["investment_trust_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["investment_trust_net_amount"], 0)))}
-        ${createInfoItem("自營商淨額", formatAmountYi(pick(latest, ["dealer_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["dealer_net_amount"], 0)))}
-        ${createInfoItem("法人淨額占成交", formatPercent(pick(latest, ["institutional_net_ratio_percent"], 0)), getMoneyFlowClass(netAmount))}
-      </div>
-
-      <section class="flow-section">
-        <h4>上市 / 上櫃資金狀態</h4>
-        ${renderMarketFlowMarketRows(latestMarkets)}
-      </section>
-
-      <section class="flow-chart-grid">
-        ${renderMiniFlowLineChart(trendRows, "total_net_amount", { title: "三大法人淨買賣金額", formatter: formatAmountYi })}
-        ${renderMiniFlowLineChart(trendRows, "foreign_net_amount", { title: "外資淨買賣金額", formatter: formatAmountYi })}
-        ${renderMarketAmountBars(trendRows)}
-      </section>
-
-      <section class="flow-section">
-        <h4>熱門產業資金流向</h4>
-        ${renderMarketFlowIndustryRows(flowData.industry_top)}
-      </section>
-
-      <div class="result-note">
-        <strong>判讀提醒：</strong>這裡整合市場總成交金額與法人買賣金額；若法人淨額為正且成交金額同步放大，代表資金動能較明顯。此功能使用 V1.2 官方資料表，不等於即時報價。
-      </div>
-    </article>
-  `;
-}
-
 function renderIndustryFlowCard(row, index) {
   const industry = pick(row, ["industry"], "未分類");
   const tradeDate = pick(row, ["trade_date", "date"], "-");
@@ -2106,106 +1673,6 @@ function getMajorHolderStrengthClass(score, ratioChange) {
   return "score-low";
 }
 
-function getMajorHolderTrendClass(direction, ratioChange) {
-  const changeValue = toNumber(ratioChange);
-  const text = String(direction || "").toLowerCase();
-
-  if (text === "up" || (changeValue !== null && changeValue >= 1)) return "score-high";
-  if (text === "down" || (changeValue !== null && changeValue <= -1)) return "score-low";
-  if (text === "mixed") return "score-mid";
-  return "score-mid";
-}
-
-function renderMajorHolderConcentrationMeter(score) {
-  const value = Math.max(0, Math.min(toNumber(score) ?? 0, 100));
-  const strengthClass = value >= 70 ? "score-high" : value >= 45 ? "score-mid" : "score-low";
-
-  return `
-    <div class="major-concentration-meter ${strengthClass}">
-      <div class="major-meter-head">
-        <span>籌碼集中度</span>
-        <strong>${formatNumber(value)}</strong>
-      </div>
-      <div class="major-meter-track">
-        <span style="width:${value}%"></span>
-      </div>
-    </div>
-  `;
-}
-
-function renderMajorHolderMiniTrendChart(rows) {
-  const chartRows = Array.isArray(rows)
-    ? rows.filter((row) => toNumber(pick(row, ["large_holder_ratio"], null)) !== null).slice().reverse().slice(-12)
-    : [];
-
-  if (chartRows.length < 2) {
-    return `<div class="chart-empty">大戶趨勢資料不足。</div>`;
-  }
-
-  const width = 640;
-  const height = 170;
-  const paddingX = 34;
-  const paddingY = 24;
-  const values = chartRows.map((row) => toNumber(pick(row, ["large_holder_ratio"], 0)) || 0);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = chartRows.map((row, index) => {
-    const x = paddingX + (index / Math.max(chartRows.length - 1, 1)) * (width - paddingX * 2);
-    const value = toNumber(pick(row, ["large_holder_ratio"], 0)) || 0;
-    const y = height - paddingY - ((value - min) / range) * (height - paddingY * 2);
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(" ");
-
-  return `
-    <div class="major-trend-chart-wrap">
-      <svg class="major-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="大戶比重趨勢圖">
-        <line class="chart-grid-line" x1="${paddingX}" y1="${paddingY}" x2="${width - paddingX}" y2="${paddingY}" />
-        <line class="chart-grid-line" x1="${paddingX}" y1="${height - paddingY}" x2="${width - paddingX}" y2="${height - paddingY}" />
-        <polyline class="major-trend-line" points="${points}" fill="none" />
-        ${chartRows.map((row, index) => {
-          const [x, y] = points.split(" ")[index].split(",");
-          return `<circle class="major-trend-dot" cx="${x}" cy="${y}" r="4"><title>${formatDate(pick(row, ["data_date"]))}：${formatPercent(pick(row, ["large_holder_ratio"]))}</title></circle>`;
-        }).join("")}
-        <text class="chart-axis-text" x="${paddingX}" y="${height - 6}">${formatDate(pick(chartRows[0], ["data_date"]))}</text>
-        <text class="chart-axis-text" x="${width - paddingX}" y="${height - 6}" text-anchor="end">${formatDate(pick(chartRows[chartRows.length - 1], ["data_date"]))}</text>
-      </svg>
-    </div>
-  `;
-}
-
-function renderMajorHolderTrendSummary(trend, latest) {
-  const effectiveTrend = trend || {};
-  const ratio4w = pick(effectiveTrend, ["large_holder_ratio_change_4w"], pick(latest, ["large_holder_ratio_change"], "-"));
-  const ratio12w = pick(effectiveTrend, ["large_holder_ratio_change_12w"], "-");
-  const small4w = pick(effectiveTrend, ["small_holder_ratio_change_4w"], "-");
-  const share4w = pick(effectiveTrend, ["large_holder_share_change_lots_4w"], "-");
-  const trendStatus = pick(effectiveTrend, ["major_holder_trend_status"], pick(latest, ["major_holder_status"], "籌碼持平觀察"));
-  const trendClass = getMajorHolderTrendClass(pick(effectiveTrend, ["trend_direction"]), ratio4w);
-  const concentrationScore = pick(effectiveTrend, ["concentration_score"], pick(latest, ["concentration_score"], "-"));
-
-  return `
-    <section class="detail-section major-trend-summary-section">
-      <h3>主力趨勢總覽</h3>
-      <div class="major-trend-summary-card">
-        <div>
-          <span class="summary-pill ${trendClass}">${escapeHtml(trendStatus)}</span>
-          <p>4 週大戶比重 ${formatSignedPercent(ratio4w)}，12 週大戶比重 ${formatSignedPercent(ratio12w)}；散戶 4 週變化 ${formatSignedPercent(small4w)}。</p>
-        </div>
-        ${renderMajorHolderConcentrationMeter(concentrationScore)}
-      </div>
-      <div class="info-grid major-holder-grid">
-        ${createInfoItem("4週大戶比重", formatSignedPercent(ratio4w), getChangeClass(ratio4w))}
-        ${createInfoItem("12週大戶比重", formatSignedPercent(ratio12w), getChangeClass(ratio12w))}
-        ${createInfoItem("4週大戶張數", `${formatSignedLots(share4w)} 張`, getChangeClass(share4w))}
-        ${createInfoItem("4週散戶比重", formatSignedPercent(small4w), getChangeClass(-1 * (toNumber(small4w) ?? 0)))}
-        ${createInfoItem("連續增加", `${formatNumber(pick(effectiveTrend, ["trend_weeks_up"], 0))} 週`)}
-        ${createInfoItem("連續減少", `${formatNumber(pick(effectiveTrend, ["trend_weeks_down"], 0))} 週`)}
-      </div>
-    </section>
-  `;
-}
-
 function renderMajorHolderTrend(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return `<div class="major-holder-history empty">尚無大戶歷史資料。</div>`;
@@ -2232,7 +1699,7 @@ function renderMajorHolderTrend(rows) {
   `;
 }
 
-function renderMajorHolderDetailSection(rows, trend = {}) {
+function renderMajorHolderDetailSection(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return `
       <section class="detail-section">
@@ -2245,28 +1712,19 @@ function renderMajorHolderDetailSection(rows, trend = {}) {
   const latest = rows[0];
   const score = pick(latest, ["major_holder_score", "big_holder_score"], "-");
   const ratioChange = pick(latest, ["large_holder_ratio_change"], "-");
-  const concentrationScore = pick(trend, ["concentration_score"], pick(latest, ["concentration_score"], "-"));
 
   return [
-    renderMajorHolderTrendSummary(trend, latest),
     renderDetailSection("主力 / 大戶籌碼", [
-      createStatusItem("本週狀態", pick(latest, ["major_holder_status", "big_holder_status"])),
+      createStatusItem("狀態", pick(latest, ["major_holder_status", "big_holder_status"])),
       createInfoItem("大戶分數", formatNumber(score), getMajorHolderStrengthClass(score, ratioChange)),
-      createInfoItem("集中度分數", formatNumber(concentrationScore), getScoreClass(concentrationScore)),
       createInfoItem("大戶比重", formatPercent(pick(latest, ["large_holder_ratio"])), getChangeClass(ratioChange)),
-      createInfoItem("本週比重變化", formatSignedPercent(ratioChange), getChangeClass(ratioChange)),
+      createInfoItem("比重變化", formatSignedPercent(ratioChange), getChangeClass(ratioChange)),
       createInfoItem("大戶人數", formatNumber(pick(latest, ["large_holder_count"]))),
       createInfoItem("大戶張數", `${formatNumber(pick(latest, ["large_holder_share_count_lots"]))} 張`),
       createInfoItem("散戶比重", formatPercent(pick(latest, ["small_holder_ratio"])), getChangeClass(pick(latest, ["small_holder_ratio_change"]))),
       createInfoItem("千張大戶", formatPercent(pick(latest, ["thousand_lot_ratio"]))),
       createInfoItem("資料日", formatDate(pick(latest, ["data_date"]))),
     ]),
-    `
-      <section class="detail-section">
-        <h3>大戶比重趨勢圖</h3>
-        ${renderMajorHolderMiniTrendChart(rows)}
-      </section>
-    `,
     `
       <section class="detail-section">
         <h3>大戶週變化</h3>
@@ -2287,32 +1745,24 @@ function renderMajorHolderCard(row, index) {
   const status = pick(row, ["major_holder_status", "big_holder_status"], "大戶資料累積中");
   const largeRatio = pick(row, ["large_holder_ratio"], "-");
   const largeRatioChange = pick(row, ["large_holder_ratio_change"], "-");
-  const largeRatioChange4w = pick(row, ["large_holder_ratio_change_4w"], largeRatioChange);
-  const largeRatioChange12w = pick(row, ["large_holder_ratio_change_12w"], "-");
   const largeShareLots = pick(row, ["large_holder_share_count_lots"], "-");
   const largeShareChangeLots = pick(row, ["large_holder_share_change_lots"], "-");
-  const largeShareChangeLots4w = pick(row, ["large_holder_share_change_lots_4w"], largeShareChangeLots);
   const smallRatio = pick(row, ["small_holder_ratio"], "-");
   const smallRatioChange = pick(row, ["small_holder_ratio_change"], "-");
-  const smallRatioChange4w = pick(row, ["small_holder_ratio_change_4w"], smallRatioChange);
   const thousandRatio = pick(row, ["thousand_lot_ratio"], "-");
   const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const chipScore = pick(row, ["chip_score", "total_score", "score"], "-");
-  const concentrationScore = pick(row, ["concentration_score"], majorScore);
-  const trendStatus = pick(row, ["major_holder_trend_status"], status);
-  const strengthClass = getMajorHolderTrendClass(pick(row, ["trend_direction"]), largeRatioChange4w);
+  const strengthClass = getMajorHolderStrengthClass(majorScore, largeRatioChange);
 
   const items = [
-    createInfoItem("集中度分數", formatNumber(concentrationScore), getScoreClass(concentrationScore)),
-    createInfoItem("4週大戶比重", formatSignedPercent(largeRatioChange4w), getChangeClass(largeRatioChange4w)),
-    createInfoItem("12週大戶比重", formatSignedPercent(largeRatioChange12w), getChangeClass(largeRatioChange12w)),
-    createInfoItem("大戶比重", formatPercent(largeRatio), getChangeClass(largeRatioChange4w)),
+    createInfoItem("大戶比重", formatPercent(largeRatio), getChangeClass(largeRatioChange)),
+    createInfoItem("比重變化", formatSignedPercent(largeRatioChange), getChangeClass(largeRatioChange)),
     createInfoItem("大戶張數", `${formatNumber(largeShareLots)} 張`),
-    createInfoItem("4週張數變化", `${formatSignedLots(largeShareChangeLots4w)} 張`, getChangeClass(largeShareChangeLots4w)),
-    createInfoItem("散戶比重", formatPercent(smallRatio), getChangeClass(smallRatioChange4w)),
+    createInfoItem("張數變化", `${formatSignedLots(largeShareChangeLots)} 張`, getChangeClass(largeShareChangeLots)),
+    createInfoItem("大戶人數", formatNumber(pick(row, ["large_holder_count"]))),
+    createInfoItem("散戶比重", formatPercent(smallRatio), getChangeClass(smallRatioChange)),
     createInfoItem("千張大戶", formatPercent(thousandRatio)),
-    createInfoItem("連續增加", `${formatNumber(pick(row, ["trend_weeks_up"], 0))} 週`),
     createInfoItem("籌碼分數", formatNumber(chipScore), getScoreClass(chipScore)),
   ].join("");
 
@@ -2329,14 +1779,14 @@ function renderMajorHolderCard(row, index) {
           </div>
         </div>
         <div class="score-box ${strengthClass}">
-          <span class="score-value">${formatNumber(concentrationScore)}</span>
-          <span class="score-label">集中度</span>
+          <span class="score-value">${formatNumber(majorScore)}</span>
+          <span class="score-label">大戶分數</span>
         </div>
       </div>
 
       <div class="quick-summary">
-        <span class="summary-pill ${strengthClass}">${escapeHtml(trendStatus)}</span>
-        <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange4w)}">${formatPercent(largeRatio)}</strong>，4週變化 <strong class="${getChangeClass(largeRatioChange4w)}">${formatSignedPercent(largeRatioChange4w)}</strong></span>
+        <span class="summary-pill ${strengthClass}">${escapeHtml(status)}</span>
+        <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange)}">${formatPercent(largeRatio)}</strong>，本週變化 <strong class="${getChangeClass(largeRatioChange)}">${formatSignedPercent(largeRatioChange)}</strong></span>
       </div>
 
       <div class="quick-summary secondary-summary price-summary">
@@ -2425,265 +1875,11 @@ function renderStockCard(row, index) {
   `;
 }
 
-function normalizeTextValue(value) {
-  const text = String(value ?? "").trim();
-  return text && text !== "-" ? text : "";
-}
-
-function firstNonEmptyValue(...values) {
-  for (const value of values) {
-    const text = normalizeTextValue(value);
-    if (text) return text;
-  }
-  return "";
-}
-
-function getTodayDateText() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatCalendarEventType(value) {
-  const text = normalizeTextValue(value);
-  if (!text) return "其他事件";
-
-  const lower = text.toLowerCase();
-  if (text.includes("除權") && text.includes("息")) return "除權息";
-  if (text.includes("除息") || lower.includes("ex-dividend")) return "除息";
-  if (text.includes("除權") || lower.includes("ex-right")) return "除權";
-  if (text.includes("發放") || text.includes("股利") || lower.includes("payment")) return "股利發放";
-  if (text.includes("股東會") || lower.includes("shareholder")) return "股東會";
-  if (text.includes("法說") || lower.includes("conference")) return "法說會";
-  if (text.includes("停止過戶") || text.includes("閉鎖") || lower.includes("book")) return "停止過戶";
-  return text;
-}
-
-function getCalendarImportanceClass(value) {
-  const text = String(value ?? "normal").toLowerCase();
-  if (text === "high") return "high";
-  if (text === "low") return "low";
-  return "normal";
-}
-
-function getCalendarEventTimingClass(eventDate) {
-  const dateText = formatDate(eventDate);
-  if (!dateText || dateText === "-") return "normal";
-  return dateText >= getTodayDateText() ? "upcoming" : "past";
-}
-
-function getCalendarEventTimingText(eventDate) {
-  return getCalendarEventTimingClass(eventDate) === "upcoming" ? "即將到來" : "近期已發生";
-}
-
-function renderEtfProfileDetailSection(profile, summaryData) {
-  const securityType = firstNonEmptyValue(
-    pick(profile, ["security_type"], ""),
-    pick(summaryData, ["security_type"], ""),
-  ).toUpperCase();
-  const hasProfile = Boolean(profile && Object.keys(profile).length > 0 && normalizeTextValue(profile.stock_code));
-  const isEtf = securityType === "ETF" || hasProfile;
-
-  if (!isEtf) return "";
-
-  if (!hasProfile && securityType === "ETF") {
-    return `
-      <section class="detail-section etf-profile-section">
-        <h3>ETF 基本資料</h3>
-        <div class="status-box">目前尚未建立完整 ETF 主檔資料。</div>
-      </section>
-    `;
-  }
-
-  const fundType = firstNonEmptyValue(pick(profile, ["fund_type"], ""), pick(summaryData, ["fund_type"], "")) || "-";
-  const underlyingIndex = firstNonEmptyValue(pick(profile, ["underlying_index"], ""), pick(summaryData, ["underlying_index"], "")) || "-";
-  const issuer = firstNonEmptyValue(pick(profile, ["issuer"], ""), pick(summaryData, ["issuer"], "")) || "-";
-  const listingDate = firstNonEmptyValue(pick(profile, ["listing_date"], ""), pick(summaryData, ["listing_date"], "")) || "-";
-  const source = firstNonEmptyValue(pick(profile, ["source"], ""), pick(summaryData, ["etf_profile_source"], "")) || "-";
-
-  return renderDetailSection("ETF 基本資料", [
-    createInfoItem("ETF 類型", escapeHtml(fundType)),
-    createInfoItem("追蹤指數", escapeHtml(underlyingIndex)),
-    createInfoItem("基金公司", escapeHtml(issuer)),
-    createInfoItem("上市日期", formatDate(listingDate)),
-    createInfoItem("資料來源", escapeHtml(source)),
-  ]);
-}
-
-function renderCalendarEventCard(event) {
-  const eventDate = formatDate(pick(event, ["event_date"]));
-  const eventType = formatCalendarEventType(pick(event, ["event_type"]));
-  const title = firstNonEmptyValue(pick(event, ["title"], ""), eventType) || "行事曆事件";
-  const description = firstNonEmptyValue(pick(event, ["description"], ""));
-  const source = firstNonEmptyValue(pick(event, ["source"], ""));
-  const sourceUrl = firstNonEmptyValue(pick(event, ["source_url"], ""));
-  const timingClass = getCalendarEventTimingClass(eventDate);
-  const importanceClass = getCalendarImportanceClass(pick(event, ["importance"], "normal"));
-  const sourceHtml = source
-    ? sourceUrl
-      ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source)}</a>`
-      : escapeHtml(source)
-    : "-";
-
-  return `
-    <article class="calendar-event-card ${timingClass} ${importanceClass}">
-      <div class="calendar-date-box">
-        <strong>${escapeHtml(eventDate)}</strong>
-        <span>${escapeHtml(getCalendarEventTimingText(eventDate))}</span>
-      </div>
-      <div class="calendar-event-main">
-        <div class="calendar-event-title-row">
-          <span class="calendar-type-chip ${importanceClass}">${escapeHtml(eventType)}</span>
-          <h4>${escapeHtml(title)}</h4>
-        </div>
-        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
-        <div class="calendar-event-meta">資料來源：${sourceHtml}</div>
-      </div>
-    </article>
-  `;
-}
-
-function renderCalendarDetailSection(events) {
-  if (!Array.isArray(events) || events.length === 0) {
-    return `
-      <section class="detail-section calendar-section">
-        <h3>個股 / ETF 行事曆</h3>
-        <div class="status-box">目前尚無近期行事曆事件。</div>
-      </section>
-    `;
-  }
-
-  return `
-    <section class="detail-section calendar-section">
-      <h3>個股 / ETF 行事曆</h3>
-      <div class="calendar-event-list">
-        ${events.map(renderCalendarEventCard).join("")}
-      </div>
-    </section>
-  `;
-}
-
 function renderDetailSection(title, rows) {
   return `
     <section class="detail-section">
       <h3>${escapeHtml(title)}</h3>
       <div class="info-grid">${rows.join("")}</div>
-    </section>
-  `;
-}
-
-function hasDisplayValue(value) {
-  return value !== null && value !== undefined && value !== "" && value !== "-";
-}
-
-function formatSnapshotTime(value) {
-  if (!value || value === "-") return "-";
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(text)) return escapeHtml(text.slice(0, 19));
-  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return escapeHtml(text.replace("T", " ").slice(0, 19));
-  return escapeHtml(text);
-}
-
-function formatQuoteType(row = {}) {
-  if (row.is_realtime === true || row.is_realtime === 1 || row.is_realtime === "1") {
-    return `<span class="status-chip good">即時 / 近即時快照</span>`;
-  }
-
-  const quoteType = String(row.quote_type || "").toLowerCase();
-  if (quoteType.includes("snapshot")) {
-    return `<span class="status-chip neutral">行情快照</span>`;
-  }
-
-  return `<span class="status-chip warn">最新收盤備援</span>`;
-}
-
-function normalizeOrderBookLevels(orderBookData = {}) {
-  if (Array.isArray(orderBookData.levels)) return orderBookData.levels;
-
-  return [1, 2, 3, 4, 5].map((level) => ({
-    level,
-    buy_price: orderBookData[`buy_price_${level}`],
-    buy_volume: orderBookData[`buy_volume_${level}`],
-    sell_price: orderBookData[`sell_price_${level}`],
-    sell_volume: orderBookData[`sell_volume_${level}`],
-  }));
-}
-
-function hasOrderBookLevelData(levels) {
-  return levels.some((level) => (
-    hasDisplayValue(level.buy_price) ||
-    hasDisplayValue(level.buy_volume) ||
-    hasDisplayValue(level.sell_price) ||
-    hasDisplayValue(level.sell_volume)
-  ));
-}
-
-function renderOrderBookTable(orderBookData = {}) {
-  const levels = normalizeOrderBookLevels(orderBookData);
-
-  if (!hasOrderBookLevelData(levels)) {
-    return `
-      <div class="status-box muted">
-        目前尚未接入授權五檔委買委賣資料源；此區塊已先完成，等資料表有快照後會自動顯示。
-      </div>
-    `;
-  }
-
-  return `
-    <div class="order-book-table-wrap">
-      <table class="order-book-table">
-        <thead>
-          <tr>
-            <th>檔位</th>
-            <th>委買價</th>
-            <th>委買張</th>
-            <th>委賣價</th>
-            <th>委賣張</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${levels.map((level) => `
-            <tr>
-              <td>${escapeHtml(level.level || "-")}</td>
-              <td class="price-up">${formatPrice(level.buy_price)}</td>
-              <td>${formatNumber(level.buy_volume)}</td>
-              <td class="price-down">${formatPrice(level.sell_price)}</td>
-              <td>${formatNumber(level.sell_volume)}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function renderMicrostructureDetailSection(quoteData = {}, orderBookData = {}) {
-  const quote = quoteData || {};
-  const orderBook = orderBookData || {};
-  const snapshotAt = pick(quote, ["snapshot_at", "updated_at", "trade_date"], pick(orderBook, ["snapshot_at", "updated_at", "quote_date"], "-"));
-  const insideLots = pick(quote, ["inside_volume_lots"], pick(orderBook, ["inside_volume_lots"], "-"));
-  const outsideLots = pick(quote, ["outside_volume_lots"], pick(orderBook, ["outside_volume_lots"], "-"));
-  const buyTotalLots = pick(orderBook, ["buy_total_lots"], "-");
-  const sellTotalLots = pick(orderBook, ["sell_total_lots"], "-");
-  const quoteNotice = pick(quote, ["notice"], pick(orderBook, ["notice"], ""));
-
-  return `
-    <section class="detail-section microstructure-section">
-      <h3>內外盤 / 五檔報價</h3>
-      <div class="info-grid">
-        ${createInfoItem("資料型態", formatQuoteType(quote))}
-        ${createInfoItem("快照時間", formatSnapshotTime(snapshotAt))}
-        ${createInfoItem("最新價", formatPrice(pick(quote, ["last_price", "close_price"])), getPriceDirectionClass(pick(quote, ["price_change"]), pick(quote, ["last_price", "close_price"]))) }
-        ${createInfoItem("漲跌", `${formatPrice(pick(quote, ["price_change"]))} / ${formatPercent(pick(quote, ["price_change_percent"]))}`, getChangeClass(pick(quote, ["price_change"]))) }
-        ${createInfoItem("內盤張數", hasDisplayValue(insideLots) ? formatNumber(insideLots) : "尚無資料")}
-        ${createInfoItem("外盤張數", hasDisplayValue(outsideLots) ? formatNumber(outsideLots) : "尚無資料")}
-        ${createInfoItem("五檔委買合計", hasDisplayValue(buyTotalLots) ? formatNumber(buyTotalLots) : "尚無資料")}
-        ${createInfoItem("五檔委賣合計", hasDisplayValue(sellTotalLots) ? formatNumber(sellTotalLots) : "尚無資料")}
-      </div>
-      ${renderOrderBookTable(orderBook)}
-      ${quoteNotice ? `<div class="result-note microstructure-note"><strong>資料說明：</strong>${escapeHtml(quoteNotice)}</div>` : ""}
     </section>
   `;
 }
@@ -2938,14 +2134,6 @@ async function loadList() {
 
   try {
     const rows = await fetchJson(buildListPath());
-
-    if (state.page === "marketFlow" || state.page === "marketIndex" || state.page === "institutionalOverview") {
-      state.latestRows = [];
-      stockList.innerHTML = renderMarketFlowDashboard(rows || {});
-      showTemporaryStatus("資金流向分析已更新。", "success");
-      return;
-    }
-
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -2991,16 +2179,12 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, prices, trades, scores, holders, calendar, etfProfile, quote, orderBook] = await Promise.allSettled([
+    const [summary, prices, trades, scores, holders] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
-      fetchJson(`/major-holders/${stockCode}/analysis?limit=24`),
-      fetchJson(`/calendar-events/${stockCode}?limit=30`),
-      fetchJson(`/etf-profiles/${stockCode}`),
-      fetchJson(`/quote/${stockCode}`),
-      fetchJson(`/order-book/${stockCode}`),
+      fetchJson(`/major-holders/${stockCode}?limit=12`),
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
@@ -3008,17 +2192,7 @@ async function openDetail(stockCode) {
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
     const scoreRows = scores.status === "fulfilled" && Array.isArray(scores.value) ? scores.value : [];
-    const holderAnalysisData = holders.status === "fulfilled" ? holders.value : null;
-    const holderRows = Array.isArray(holderAnalysisData)
-      ? holderAnalysisData
-      : Array.isArray(holderAnalysisData?.history)
-        ? holderAnalysisData.history
-        : [];
-    const holderTrend = holderAnalysisData && !Array.isArray(holderAnalysisData) ? holderAnalysisData.trend || {} : {};
-    const calendarRows = calendar.status === "fulfilled" && Array.isArray(calendar.value) ? calendar.value : [];
-    const etfProfileData = etfProfile.status === "fulfilled" ? getFirstArrayItem(etfProfile.value) : {};
-    const quoteData = quote.status === "fulfilled" ? getFirstArrayItem(quote.value) : {};
-    const orderBookData = orderBook.status === "fulfilled" ? getFirstArrayItem(orderBook.value) : {};
+    const holderRows = holders.status === "fulfilled" && Array.isArray(holders.value) ? holders.value : [];
 
     const latestPrice = priceRows[0] || summaryData || {};
     const latestTrade = tradeRows[0] || summaryData || {};
@@ -3027,8 +2201,6 @@ async function openDetail(stockCode) {
     const stockName = pick(summaryData, ["stock_name", "name"], pick(latestScore, ["stock_name", "name"], "股票"));
     const market = pick(summaryData, ["market_type", "market"], pick(latestScore, ["market_type", "market"]));
     const industry = pick(summaryData, ["industry"], "-");
-    const securityType = pick(summaryData, ["security_type"], "STOCK");
-    const securityTypeLabel = String(securityType).toUpperCase() === "ETF" ? "ETF" : "個股";
     const totalScore = pick(latestScore, ["total_score", "chip_score", "score"], pick(summaryData, ["total_score", "chip_score", "score"], "-"));
     const closePrice = pick(latestPrice, ["close_price", "closing_price", "close"], pick(summaryData, ["close_price", "closing_price", "close"], "-"));
     const change = pick(latestPrice, ["price_change", "change", "change_price"], pick(summaryData, ["price_change", "change", "change_price"], "-"));
@@ -3047,7 +2219,6 @@ async function openDetail(stockCode) {
             <div class="detail-meta-row">
               <span class="stock-code">${escapeHtml(stockCode)}</span>
               <span class="badge">${escapeHtml(market)}</span>
-              <span class="badge">${escapeHtml(securityTypeLabel)}</span>
               <span class="badge">${escapeHtml(industry)}</span>
             </div>
           </div>
@@ -3057,15 +2228,12 @@ async function openDetail(stockCode) {
           </div>
         </section>
       `,
-      renderEtfProfileDetailSection(etfProfileData, summaryData),
-      renderCalendarDetailSection(calendarRows),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
         createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
-      renderMicrostructureDetailSection(quoteData, orderBookData),
       renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
       renderTechnicalCharts(enrichedPriceRows),
       renderDetailSection("三大法人", [
@@ -3074,7 +2242,7 @@ async function openDetail(stockCode) {
         createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
-      renderMajorHolderDetailSection(holderRows, holderTrend),
+      renderMajorHolderDetailSection(holderRows),
       renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),
@@ -3123,18 +2291,6 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
-  const systemRefreshButton = event.target.closest("[data-system-refresh]");
-  if (systemRefreshButton) {
-    loadSystemStatus();
-    return;
-  }
-
-  const resetApiUrlButton = event.target.closest("[data-reset-api-url]");
-  if (resetApiUrlButton) {
-    window.resetStockRadarApiUrl();
-    return;
-  }
-
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
