@@ -2499,3 +2499,170 @@ body.chart-zoom-open {
     width: 100%;
   }
 }
+
+/* V1.3-2-2 策略明細與分數說明 */
+.strategy-definition-panel {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.strategy-definition-card {
+  border: 1px solid rgba(134, 155, 185, 0.22);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.strategy-definition-card.primary {
+  border-color: rgba(100, 215, 243, 0.32);
+  background: rgba(100, 215, 243, 0.08);
+}
+
+.strategy-definition-card.warning {
+  border-color: rgba(255, 224, 112, 0.28);
+  background: rgba(255, 224, 112, 0.07);
+}
+
+.definition-label,
+.strategy-subtitle {
+  display: block;
+  margin-bottom: 8px;
+  color: #ffe36f;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.strategy-definition-card p,
+.strategy-definition-card small,
+.strategy-definition-card li,
+.strategy-reason-card p,
+.strategy-reason-card li,
+.strategy-empty-tips li {
+  color: #c9d7ea;
+  line-height: 1.65;
+}
+
+.strategy-definition-card ul,
+.strategy-reason-card ul,
+.strategy-empty-tips ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.strategy-definition-card p {
+  margin: 0 0 8px;
+}
+
+.strategy-definition-card small {
+  display: block;
+}
+
+.strategy-breakdown-box,
+.strategy-detail-box {
+  margin-top: 14px;
+}
+
+.breakdown-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.breakdown-row {
+  border: 1px solid rgba(134, 155, 185, 0.22);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.breakdown-row.strong {
+  border-color: rgba(48, 211, 158, 0.36);
+  background: rgba(48, 211, 158, 0.08);
+}
+
+.breakdown-row.medium {
+  border-color: rgba(255, 224, 112, 0.34);
+  background: rgba(255, 224, 112, 0.07);
+}
+
+.breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #e9f3ff;
+  font-weight: 800;
+}
+
+.breakdown-head strong {
+  color: #ffe36f;
+  white-space: nowrap;
+}
+
+.breakdown-bar {
+  height: 8px;
+  border-radius: 999px;
+  margin: 9px 0;
+  background: rgba(134, 155, 185, 0.18);
+  overflow: hidden;
+}
+
+.breakdown-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #64d7f3, #ffe36f);
+}
+
+.breakdown-row p {
+  margin: 0;
+  color: #9fb2ca;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.strategy-detail-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.strategy-reason-card {
+  border: 1px solid rgba(100, 215, 243, 0.24);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(100, 215, 243, 0.07);
+}
+
+.strategy-reason-card.risk {
+  border-color: rgba(255, 119, 159, 0.28);
+  background: rgba(255, 119, 159, 0.065);
+}
+
+.strategy-reason-card p {
+  margin: 0 0 8px;
+}
+
+.strategy-empty-tips {
+  margin-top: 16px;
+  border: 1px solid rgba(100, 215, 243, 0.22);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(100, 215, 243, 0.07);
+  text-align: left;
+}
+
+.strategy-empty-tips strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #ffe36f;
+}
+
+@media (max-width: 900px) {
+  .strategy-definition-panel,
+  .breakdown-list,
+  .strategy-detail-box {
+    grid-template-columns: 1fr;
+  }
+}

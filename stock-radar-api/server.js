@@ -234,6 +234,23 @@ const STRATEGY_DEFINITIONS = [
     short_name: "法人轉強",
     description: "外資或投信轉為買超，搭配籌碼分數與法人分數篩選。",
     focus: "法人",
+    criteria: [
+      "外資或投信最近一個交易日為買超",
+      "籌碼分數達 70 分以上，或法人分數合計達 20 分以上",
+      "依法人分數、籌碼分數與法人買超金額排序",
+    ],
+    score_formula: "策略分數 = 外資分數 + 投信分數 + 籌碼分數",
+    sort_reason: "分數越高代表法人買盤與整體籌碼條件越集中；同分時優先看法人買超較大的股票。",
+    risk_tips: [
+      "法人買超可能只是短線調節，不一定代表股價會立即上漲。",
+      "若股價已接近高點，追價風險會提高。",
+      "仍需搭配成交量、股價位置與大盤環境判斷。",
+    ],
+    empty_tips: [
+      "降低市場篩選條件，改看全部市場。",
+      "等下一個交易日法人資料更新後再查看。",
+      "改看資金流入股或短線強勢股。",
+    ],
   },
   {
     key: "major_holder_accumulate",
@@ -241,6 +258,23 @@ const STRATEGY_DEFINITIONS = [
     short_name: "主力增持",
     description: "400 張以上大戶比重增加，且散戶比重下降或籌碼集中。",
     focus: "主力",
+    criteria: [
+      "使用 TDCC 集保週資料，觀察 400 張以上大戶持股比例",
+      "本週大戶比重高於前一週",
+      "優先排序大戶比重增加較明顯、籌碼分數較佳的股票",
+    ],
+    score_formula: "策略分數 = 大戶比重變化加權 + 散戶下降加分 + 籌碼集中度加分",
+    sort_reason: "大戶比重增加越多、散戶比重下降越明顯，排名越前面。",
+    risk_tips: [
+      "TDCC 是每週資料，會落後每日行情。",
+      "大戶增加不代表主力一定拉抬，也可能是長線換手。",
+      "若成交量不足，後續股價反應可能較慢。",
+    ],
+    empty_tips: [
+      "TDCC 週資料可能尚未更新。",
+      "改看全部市場或延後一週再觀察。",
+      "先用短線強勢股搭配確認是否有量價配合。",
+    ],
   },
   {
     key: "volume_price_breakout",
@@ -248,6 +282,23 @@ const STRATEGY_DEFINITIONS = [
     short_name: "量價轉強",
     description: "成交量放大且股價位置偏強，適合短線觀察。",
     focus: "量價",
+    criteria: [
+      "成交量分數達標，或狀態文字顯示量增 / 放大",
+      "股價分數偏強、接近高點，或當日收盤上漲",
+      "依量能、股價位置與籌碼分數排序",
+    ],
+    score_formula: "策略分數 = 成交量分數 + 股價位置分數 + 籌碼分數",
+    sort_reason: "量能越明顯、股價位置越強、籌碼分數越高，排序越前面。",
+    risk_tips: [
+      "量增可能是出貨量，也可能是突破量，需要看股價是否同步轉強。",
+      "短線漲幅已大時，隔日震盪可能增加。",
+      "不適合只看單日成交量就直接判斷。",
+    ],
+    empty_tips: [
+      "當天市場量能可能不足。",
+      "可改看短線強勢股或法人轉強股。",
+      "等收盤行情與籌碼分數更新後再查看。",
+    ],
   },
   {
     key: "capital_inflow",
@@ -255,6 +306,23 @@ const STRATEGY_DEFINITIONS = [
     short_name: "資金流入",
     description: "三大法人合計買超較明顯，搭配成交金額與籌碼分數排序。",
     focus: "資金",
+    criteria: [
+      "三大法人合計為買超",
+      "買超張數越大，排序越前面",
+      "搭配成交量、成交金額與籌碼分數輔助判斷",
+    ],
+    score_formula: "策略分數 = 三大法人買超張數 + 籌碼分數",
+    sort_reason: "資金流入越明顯、成交金額越高的股票，排名越前面。",
+    risk_tips: [
+      "法人買超張數大的股票，未必代表買超占成交量比例高。",
+      "大型權值股容易因張數大而排前，需要搭配比例與產業題材。",
+      "若連續多日上漲，短線容易遇到獲利了結。",
+    ],
+    empty_tips: [
+      "當天法人整體偏賣超時可能沒有結果。",
+      "可改看法人轉強股，條件較偏分數而非絕對張數。",
+      "也可以切到上櫃觀察中小型資金流向。",
+    ],
   },
   {
     key: "etf_calendar_watch",
@@ -262,6 +330,23 @@ const STRATEGY_DEFINITIONS = [
     short_name: "ETF 行事曆",
     description: "ETF 即將發生除息、收益分配或重要行事曆事件。",
     focus: "ETF",
+    criteria: [
+      "只篩 ETF 主檔中的商品",
+      "事件日期在未來 30 天內",
+      "事件類型包含除息、收益分配、股利或高重要性事件",
+    ],
+    score_formula: "策略分數 = 事件重要性分數 - 距離天數扣分",
+    sort_reason: "事件日期越近、重要性越高，排序越前面。",
+    risk_tips: [
+      "ETF 除息不等於獲利，除息後淨值與價格會調整。",
+      "高股息 ETF 仍需留意成分股、填息機率與整體市場風險。",
+      "事件資料若來源尚未公告，可能暫時不完整。",
+    ],
+    empty_tips: [
+      "未來 30 天內可能沒有符合條件的 ETF 事件。",
+      "可改看個股行事曆或稍後重新匯入官方行事曆。",
+      "確認 ETF 主檔與行事曆資料是否已更新。",
+    ],
   },
   {
     key: "short_term_strong",
@@ -269,12 +354,220 @@ const STRATEGY_DEFINITIONS = [
     short_name: "短線強勢",
     description: "籌碼分數高、股價偏強、量能不弱的短線觀察清單。",
     focus: "短線",
+    criteria: [
+      "籌碼分數達 80 分以上",
+      "股價當日不弱，或股價位置分數偏高",
+      "依籌碼分數、量能分數與股價位置分數排序",
+    ],
+    score_formula: "策略分數 = 籌碼分數 + 成交量分數 + 股價位置分數",
+    sort_reason: "籌碼越強、量價越配合、股價位置越偏強，排名越前面。",
+    risk_tips: [
+      "短線強勢股通常波動較大，不適合盲目追高。",
+      "若隔日量縮或跌破關鍵價位，強勢訊號可能失效。",
+      "建議搭配停損、停利與大盤趨勢控管。",
+    ],
+    empty_tips: [
+      "市場轉弱時，短線強勢股數量會明顯減少。",
+      "可降低篩選市場限制或改看主力增持股。",
+      "等每日籌碼分數重新計算後再查看。",
+    ],
   },
 ];
 
 function getStrategyDefinition(key) {
   const strategyKey = String(key || "legal_strength").trim();
   return STRATEGY_DEFINITIONS.find((item) => item.key === strategyKey) || STRATEGY_DEFINITIONS[0];
+}
+
+
+function toStrategyNumber(value, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function formatStrategyPercent(value) {
+  const numberValue = toStrategyNumber(value, null);
+  if (numberValue === null) return "-";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatStrategyLots(value) {
+  const numberValue = toStrategyNumber(value, null);
+  if (numberValue === null) return "-";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
+}
+
+function buildScorePart(label, value, max, description) {
+  const numberValue = toStrategyNumber(value, 0);
+  const numberMax = Math.max(toStrategyNumber(max, 100), 1);
+  const percent = Math.min(Math.max((numberValue / numberMax) * 100, 0), 100);
+  let tone = "normal";
+
+  if (percent >= 75) tone = "strong";
+  else if (percent >= 45) tone = "medium";
+  else tone = "weak";
+
+  return {
+    label,
+    value: Number(numberValue.toFixed(2)),
+    max: numberMax,
+    percent: Number(percent.toFixed(2)),
+    tone,
+    description,
+  };
+}
+
+function getStrategyScoreBreakdown(row, strategyKey) {
+  if (strategyKey === "legal_strength") {
+    return [
+      buildScorePart("外資分數", row.foreign_score, 15, "外資買賣超與連續性帶來的分數。"),
+      buildScorePart("投信分數", row.investment_trust_score, 15, "投信買賣超與連續性帶來的分數。"),
+      buildScorePart("籌碼分數", row.chip_score, 100, "整體籌碼、成交量與股價位置的綜合分數。"),
+    ];
+  }
+
+  if (strategyKey === "major_holder_accumulate") {
+    return [
+      buildScorePart("大戶增加", Math.max(toStrategyNumber(row.large_holder_ratio_change, 0) * 20, 0), 30, "400 張以上大戶持股比例增加幅度。"),
+      buildScorePart("散戶下降", Math.max(Math.abs(Math.min(toStrategyNumber(row.small_holder_ratio_change, 0), 0)) * 12, 0), 20, "散戶比例下降越明顯，籌碼集中度越佳。"),
+      buildScorePart("大戶分數", row.big_holder_score || row.major_holder_score || row.strategy_score, 20, "籌碼分數系統中的大戶籌碼分項。"),
+    ];
+  }
+
+  if (strategyKey === "volume_price_breakout") {
+    return [
+      buildScorePart("成交量分數", row.volume_score, 20, "量能放大與成交量狀態。"),
+      buildScorePart("股價位置分數", row.price_score, 15, "股價相對近期區間的位置。"),
+      buildScorePart("籌碼分數", row.chip_score, 100, "整體籌碼條件。"),
+    ];
+  }
+
+  if (strategyKey === "capital_inflow") {
+    return [
+      buildScorePart("法人買超", Math.max(toStrategyNumber(row.total_net_lots, 0) / 100, 0), 100, "三大法人合計買超張數換算的資金力道。"),
+      buildScorePart("籌碼分數", row.chip_score, 100, "整體籌碼條件。"),
+      buildScorePart("成交金額", Math.max(toStrategyNumber(row.transaction_amount, 0) / 100000000, 0), 100, "成交金額越高，資金進出參考性越高。"),
+    ];
+  }
+
+  if (strategyKey === "etf_calendar_watch") {
+    const daysLeft = toStrategyNumber(row.days_left, 30);
+    const importanceScore = String(row.importance || "").toLowerCase() === "high" ? 100 : 70;
+    return [
+      buildScorePart("事件重要性", importanceScore, 100, "高重要性事件優先觀察。"),
+      buildScorePart("日期接近度", Math.max(30 - daysLeft, 0), 30, "事件越接近，分數越高。"),
+      buildScorePart("觀察分數", row.strategy_score, 100, "綜合事件重要性與距離天數。"),
+    ];
+  }
+
+  return [
+    buildScorePart("籌碼分數", row.chip_score, 100, "整體籌碼條件。"),
+    buildScorePart("成交量分數", row.volume_score, 20, "短線量能配合程度。"),
+    buildScorePart("股價位置分數", row.price_score, 15, "股價位置偏強程度。"),
+  ];
+}
+
+function getStrategyReasons(row, strategyKey) {
+  const reasons = [];
+
+  if (strategyKey === "legal_strength") {
+    if (toStrategyNumber(row.foreign_net_lots, 0) > 0) reasons.push(`外資買超 ${formatStrategyLots(row.foreign_net_lots)}。`);
+    if (toStrategyNumber(row.investment_trust_net_lots, 0) > 0) reasons.push(`投信買超 ${formatStrategyLots(row.investment_trust_net_lots)}。`);
+    if (toStrategyNumber(row.chip_score, 0) >= 70) reasons.push(`籌碼分數 ${row.chip_score} 分，達策略基本門檻。`);
+  }
+
+  if (strategyKey === "major_holder_accumulate") {
+    reasons.push(`大戶比重增加 ${formatStrategyPercent(row.large_holder_ratio_change)}。`);
+    if (toStrategyNumber(row.small_holder_ratio_change, 0) < 0) reasons.push(`散戶比重下降 ${formatStrategyPercent(Math.abs(toStrategyNumber(row.small_holder_ratio_change, 0)))}。`);
+    if (row.big_holder_status) reasons.push(`大戶狀態：${row.big_holder_status}。`);
+  }
+
+  if (strategyKey === "volume_price_breakout") {
+    if (row.volume_status) reasons.push(`成交量狀態：${row.volume_status}。`);
+    if (row.price_position) reasons.push(`股價位置：${row.price_position}。`);
+    if (toStrategyNumber(row.price_change, 0) > 0) reasons.push(`當日收盤上漲 ${row.price_change}。`);
+  }
+
+  if (strategyKey === "capital_inflow") {
+    reasons.push(`三大法人合計買超 ${formatStrategyLots(row.total_net_lots)}。`);
+    if (toStrategyNumber(row.foreign_net_lots, 0) > 0) reasons.push(`其中外資買超 ${formatStrategyLots(row.foreign_net_lots)}。`);
+    if (toStrategyNumber(row.investment_trust_net_lots, 0) > 0) reasons.push(`其中投信買超 ${formatStrategyLots(row.investment_trust_net_lots)}。`);
+  }
+
+  if (strategyKey === "etf_calendar_watch") {
+    reasons.push(`${row.days_left ?? "-"} 天後有 ${row.event_type || "行事曆"} 事件。`);
+    if (row.title) reasons.push(`事件：${row.title}。`);
+    if (row.importance) reasons.push(`重要性：${row.importance}。`);
+  }
+
+  if (strategyKey === "short_term_strong") {
+    reasons.push(`籌碼分數 ${row.chip_score ?? "-"} 分。`);
+    if (row.volume_status) reasons.push(`成交量狀態：${row.volume_status}。`);
+    if (row.price_position) reasons.push(`股價位置：${row.price_position}。`);
+  }
+
+  if (reasons.length === 0 && row.trigger_summary) {
+    reasons.push(String(row.trigger_summary));
+  }
+
+  return reasons.slice(0, 5);
+}
+
+function getStrategyRiskFlags(row, strategyKey, definition) {
+  const riskFlags = [];
+  const priceChange = toStrategyNumber(row.price_change, null);
+  const chipScore = toStrategyNumber(row.chip_score, null);
+
+  if (priceChange !== null && priceChange < 0 && strategyKey !== "etf_calendar_watch") {
+    riskFlags.push("股價當日仍收跌，需確認是否只是資金短線進出。");
+  }
+
+  if (chipScore !== null && chipScore < 60 && !["capital_inflow", "etf_calendar_watch"].includes(strategyKey)) {
+    riskFlags.push("籌碼分數未達 60 分，訊號強度較弱。");
+  }
+
+  if (strategyKey === "etf_calendar_watch") {
+    riskFlags.push("ETF 除息會有價格與淨值調整，不等於直接獲利。");
+  }
+
+  if (riskFlags.length === 0 && Array.isArray(definition.risk_tips)) {
+    riskFlags.push(definition.risk_tips[0]);
+  }
+
+  return riskFlags.slice(0, 3);
+}
+
+function enrichStrategyRow(row, strategy, rank) {
+  const strategyKey = strategy.key;
+  const scoreBreakdown = getStrategyScoreBreakdown(row, strategyKey);
+  const reasons = getStrategyReasons(row, strategyKey);
+  const riskFlags = getStrategyRiskFlags(row, strategyKey, strategy);
+  const strategyScore = toStrategyNumber(row.strategy_score ?? row.chip_score ?? row.major_holder_score, 0);
+  let interpretation = "符合策略條件，可加入觀察清單。";
+
+  if (strategyScore >= 120 || toStrategyNumber(row.chip_score, 0) >= 85) {
+    interpretation = "訊號偏強，適合優先觀察，但仍需搭配價格位置與風險控管。";
+  } else if (strategyScore >= 80 || toStrategyNumber(row.chip_score, 0) >= 70) {
+    interpretation = "條件達標，可列入一般觀察，等待後續量價與籌碼確認。";
+  }
+
+  return {
+    rank,
+    ...row,
+    strategy_definition: {
+      key: strategy.key,
+      name: strategy.name,
+      criteria: strategy.criteria,
+      score_formula: strategy.score_formula,
+      sort_reason: strategy.sort_reason,
+      risk_tips: strategy.risk_tips,
+    },
+    score_breakdown: scoreBreakdown,
+    match_reasons: reasons,
+    risk_flags: riskFlags,
+    strategy_interpretation: interpretation,
+    sort_reason: strategy.sort_reason,
+  };
 }
 
 async function getLatestTradeDateFrom(tableName, dateColumn, market = null, queryDate = null) {
@@ -2407,7 +2700,34 @@ async function getWatchlistRows(userId, stockCode = null) {
 // ==============================
 
 // ==============================
+// V1.3-2-2 策略說明與分數拆解
+// GET /strategies/definitions?strategy=legal_strength
+// ==============================
+app.get("/strategies/definitions", async (req, res) => {
+  try {
+    const requestedStrategy = String(req.query.strategy || "").trim();
+    const data = requestedStrategy
+      ? [getStrategyDefinition(requestedStrategy)]
+      : STRATEGY_DEFINITIONS;
+
+    res.json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("查詢策略說明失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢策略說明失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
 // V1.3-2-1 選股策略清單
+// V1.3-2-2 增加策略說明、分數拆解、選出原因、風險提示
 // GET /strategies?strategy=legal_strength&market=上市&limit=30&date=YYYY-MM-DD
 // ==============================
 app.get("/strategies", async (req, res) => {
@@ -2795,16 +3115,14 @@ app.get("/strategies", async (req, res) => {
       }
     }
 
-    const data = rows.map((row, index) => ({
-      rank: index + 1,
-      ...row,
-    }));
+    const data = rows.map((row, index) => enrichStrategyRow(row, strategy, index + 1));
 
     res.json({
       success: true,
       strategy: strategy.key,
       strategy_name: strategy.name,
       strategy_description: strategy.description,
+      strategy_definition: strategy,
       trade_date: targetDate,
       reference_date: referenceDate || targetDate,
       market: market || "全部",

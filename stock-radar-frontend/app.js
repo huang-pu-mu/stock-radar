@@ -69,12 +69,72 @@ const alertsTabBadge = document.getElementById("alertsTabBadge");
 
 
 const DEFAULT_STRATEGY_OPTIONS = [
-  { key: "legal_strength", name: "法人轉強股", short_name: "法人轉強", description: "外資或投信轉買，搭配籌碼分數排序。" },
-  { key: "major_holder_accumulate", name: "主力增持股", short_name: "主力增持", description: "大戶比重增加、籌碼更集中。" },
-  { key: "volume_price_breakout", name: "量價轉強股", short_name: "量價轉強", description: "成交量放大且股價位置偏強。" },
-  { key: "capital_inflow", name: "資金流入股", short_name: "資金流入", description: "三大法人合計買超較明顯。" },
-  { key: "etf_calendar_watch", name: "ETF 除息觀察", short_name: "ETF 除息", description: "ETF 即將發生除息或重要事件。" },
-  { key: "short_term_strong", name: "短線強勢股", short_name: "短線強勢", description: "籌碼分數高，量價與股價位置偏強。" },
+  {
+    key: "legal_strength",
+    name: "法人轉強股",
+    short_name: "法人轉強",
+    description: "外資或投信轉買，搭配籌碼分數排序。",
+    criteria: ["外資或投信最近一個交易日為買超", "籌碼分數達 70 分以上，或法人分數合計達 20 分以上"],
+    score_formula: "策略分數 = 外資分數 + 投信分數 + 籌碼分數",
+    sort_reason: "分數越高代表法人買盤與整體籌碼條件越集中。",
+    risk_tips: ["法人買超可能只是短線調節，不一定代表股價會立即上漲。", "若股價已接近高點，追價風險會提高。"],
+    empty_tips: ["降低市場篩選條件，改看全部市場。", "改看資金流入股或短線強勢股。"],
+  },
+  {
+    key: "major_holder_accumulate",
+    name: "主力增持股",
+    short_name: "主力增持",
+    description: "大戶比重增加、籌碼更集中。",
+    criteria: ["使用 TDCC 集保週資料", "本週 400 張以上大戶比重高於前一週"],
+    score_formula: "策略分數 = 大戶比重變化加權 + 散戶下降加分 + 籌碼集中度加分",
+    sort_reason: "大戶比重增加越多、散戶比重下降越明顯，排名越前面。",
+    risk_tips: ["TDCC 是每週資料，會落後每日行情。", "大戶增加不代表主力一定拉抬。"],
+    empty_tips: ["TDCC 週資料可能尚未更新。", "改看全部市場或延後一週再觀察。"],
+  },
+  {
+    key: "volume_price_breakout",
+    name: "量價轉強股",
+    short_name: "量價轉強",
+    description: "成交量放大且股價位置偏強。",
+    criteria: ["成交量分數達標，或狀態文字顯示量增 / 放大", "股價分數偏強、接近高點，或當日收盤上漲"],
+    score_formula: "策略分數 = 成交量分數 + 股價位置分數 + 籌碼分數",
+    sort_reason: "量能越明顯、股價位置越強、籌碼分數越高，排序越前面。",
+    risk_tips: ["量增可能是出貨量，也可能是突破量。", "短線漲幅已大時，隔日震盪可能增加。"],
+    empty_tips: ["當天市場量能可能不足。", "可改看短線強勢股或法人轉強股。"],
+  },
+  {
+    key: "capital_inflow",
+    name: "資金流入股",
+    short_name: "資金流入",
+    description: "三大法人合計買超較明顯。",
+    criteria: ["三大法人合計為買超", "買超張數越大，排序越前面"],
+    score_formula: "策略分數 = 三大法人買超張數 + 籌碼分數",
+    sort_reason: "資金流入越明顯、成交金額越高的股票，排名越前面。",
+    risk_tips: ["法人買超張數大，不一定代表買超占成交量比例高。", "大型權值股容易因張數大而排前。"],
+    empty_tips: ["當天法人整體偏賣超時可能沒有結果。", "可改看法人轉強股。"],
+  },
+  {
+    key: "etf_calendar_watch",
+    name: "ETF 除息觀察",
+    short_name: "ETF 除息",
+    description: "ETF 即將發生除息或重要事件。",
+    criteria: ["只篩 ETF 主檔中的商品", "事件日期在未來 30 天內"],
+    score_formula: "策略分數 = 事件重要性分數 - 距離天數扣分",
+    sort_reason: "事件日期越近、重要性越高，排序越前面。",
+    risk_tips: ["ETF 除息不等於獲利，除息後淨值與價格會調整。", "仍需留意填息機率與市場風險。"],
+    empty_tips: ["未來 30 天內可能沒有符合條件的 ETF 事件。", "確認 ETF 主檔與行事曆資料是否已更新。"],
+  },
+  {
+    key: "short_term_strong",
+    name: "短線強勢股",
+    short_name: "短線強勢",
+    description: "籌碼分數高，量價與股價位置偏強。",
+    criteria: ["籌碼分數達 80 分以上", "股價當日不弱，或股價位置分數偏高"],
+    score_formula: "策略分數 = 籌碼分數 + 成交量分數 + 股價位置分數",
+    sort_reason: "籌碼越強、量價越配合、股價位置越偏強，排名越前面。",
+    risk_tips: ["短線強勢股通常波動較大，不適合盲目追高。", "若隔日量縮或跌破關鍵價位，強勢訊號可能失效。"],
+    empty_tips: ["市場轉弱時，短線強勢股數量會明顯減少。", "可降低篩選市場限制或改看主力增持股。"],
+  },
 ];
 
 let deferredInstallPrompt = null;
@@ -140,6 +200,102 @@ function getStrategyOptions() {
 
 function getStrategyOption(key = state.strategyKey) {
   return getStrategyOptions().find((item) => item.key === key) || DEFAULT_STRATEGY_OPTIONS[0];
+}
+
+function normalizeTextList(value) {
+  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined && String(item).trim() !== "");
+  if (value === null || value === undefined || value === "") return [];
+  return [String(value)];
+}
+
+function renderTextListItems(items, itemClass = "") {
+  const normalized = normalizeTextList(items);
+  if (normalized.length === 0) return `<li>尚無資料。</li>`;
+  return normalized.map((item) => `<li class="${itemClass}">${escapeHtml(item)}</li>`).join("");
+}
+
+function renderStrategyDefinitionPanel() {
+  const activeStrategy = getStrategyOption();
+  const criteria = normalizeTextList(activeStrategy.criteria);
+  const riskTips = normalizeTextList(activeStrategy.risk_tips);
+  const formula = activeStrategy.score_formula || "依目前策略條件綜合排序。";
+  const sortReason = activeStrategy.sort_reason || "符合條件越多、分數越高，排序越前面。";
+
+  return `
+    <div class="strategy-definition-panel">
+      <div class="strategy-definition-card primary">
+        <span class="definition-label">判斷條件</span>
+        <ul>${renderTextListItems(criteria)}</ul>
+      </div>
+      <div class="strategy-definition-card">
+        <span class="definition-label">分數怎麼算</span>
+        <p>${escapeHtml(formula)}</p>
+        <small>${escapeHtml(sortReason)}</small>
+      </div>
+      <div class="strategy-definition-card warning">
+        <span class="definition-label">風險提醒</span>
+        <ul>${renderTextListItems(riskTips)}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function renderScoreBreakdownItems(row) {
+  const parts = Array.isArray(row.score_breakdown) ? row.score_breakdown : [];
+  if (parts.length === 0) return "";
+
+  return `
+    <div class="strategy-breakdown-box">
+      <div class="strategy-subtitle">策略分數拆解</div>
+      <div class="breakdown-list">
+        ${parts.map((part) => {
+          const percent = Math.min(Math.max(toNumber(part.percent) ?? 0, 0), 100);
+          const valueText = `${formatNumber(part.value)} / ${formatNumber(part.max)}`;
+          return `
+            <div class="breakdown-row ${escapeHtml(part.tone || "normal")}">
+              <div class="breakdown-head">
+                <span>${escapeHtml(part.label || "分數")}</span>
+                <strong>${valueText}</strong>
+              </div>
+              <div class="breakdown-bar" aria-hidden="true"><span style="width:${percent}%"></span></div>
+              <p>${escapeHtml(part.description || "")}</p>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderStrategyReasonBox(row) {
+  const reasons = normalizeTextList(row.match_reasons);
+  const risks = normalizeTextList(row.risk_flags);
+  const interpretation = row.strategy_interpretation || "符合策略條件，可加入觀察清單。";
+
+  return `
+    <div class="strategy-detail-box">
+      <div class="strategy-reason-card">
+        <div class="strategy-subtitle">為什麼被選出來</div>
+        <ul>${renderTextListItems(reasons)}</ul>
+      </div>
+      <div class="strategy-reason-card risk">
+        <div class="strategy-subtitle">注意事項</div>
+        <p>${escapeHtml(interpretation)}</p>
+        <ul>${renderTextListItems(risks)}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function renderStrategyEmptyTips() {
+  const activeStrategy = getStrategyOption();
+  const tips = normalizeTextList(activeStrategy.empty_tips);
+  return `
+    <div class="strategy-empty-tips">
+      <strong>可以怎麼做：</strong>
+      <ul>${renderTextListItems(tips)}</ul>
+    </div>
+  `;
 }
 
 function formatLotsFromShares(value) {
@@ -1345,6 +1501,7 @@ function renderStrategyButtons() {
           </button>
         `).join("")}
       </div>
+      ${renderStrategyDefinitionPanel()}
     </section>
   `;
 }
@@ -1441,6 +1598,9 @@ function renderStrategyCard(row, index) {
         ${metricItems}
       </div>
 
+      ${renderScoreBreakdownItems(row)}
+      ${renderStrategyReasonBox(row)}
+
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
         ${getCardActionButtons(code, isEtfEvent ? "看 ETF" : "看明細", index)}
@@ -1459,6 +1619,7 @@ function renderStrategiesPage() {
         <div class="intro-icon">📊</div>
         <h3>目前沒有符合策略的股票</h3>
         <p>可以切換策略或市場，也可以等下一次每日資料更新後再查看。</p>
+        ${renderStrategyEmptyTips()}
       </article>
     `;
     return;
@@ -1468,6 +1629,7 @@ function renderStrategiesPage() {
     ${renderStrategyButtons()}
     <div class="strategy-result-note">
       目前顯示 <strong>${escapeHtml(getStrategyOption().name)}</strong>，共 <strong>${formatNumber(rows.length)}</strong> 筆。清單用途是快速篩選觀察股，不代表一定會上漲。
+      <br><span>${escapeHtml(getStrategyOption().sort_reason || "分數越高、條件越完整，排序越前面。")}</span>
     </div>
     ${rows.map(renderStrategyCard).join("")}
   `;
@@ -1491,6 +1653,7 @@ async function loadStrategies() {
       reference_date: result.reference_date,
       market: result.market,
       strategy_name: result.strategy_name,
+      strategy_definition: result.strategy_definition,
     };
     state.strategyOptions = Array.isArray(result.strategies) ? result.strategies : DEFAULT_STRATEGY_OPTIONS;
     renderStrategiesPage();
