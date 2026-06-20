@@ -58,6 +58,9 @@ const state = {
   strategyBacktestRuns: [],
   strategyBacktestSummary: null,
   strategyBacktestRankings: null,
+  v13Status: null,
+  v13StatusLoading: false,
+  v13StatusError: "",
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -905,8 +908,8 @@ function updatePageText() {
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "使用 Google 帳號登入後，之後自選股就能依照不同使用者分開保存。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>任何 Google 帳號都可以登入；登入後，自己的自選股會和其他使用者分開保存。</span>`;
+    pageDesc.textContent = "管理登入、自選股，並檢查 V1.3 系統狀態、策略回測與提醒資料。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
 
@@ -3245,6 +3248,209 @@ async function handleAlertRuleSubmit(form) {
   }
 }
 
+
+function getV13StatusMeta(status) {
+  const key = String(status || "warn").toLowerCase();
+  if (key === "pass") return { label: "正常", className: "pass", icon: "✅" };
+  if (key === "fail") return { label: "異常", className: "fail", icon: "⛔" };
+  return { label: "需確認", className: "warn", icon: "⚠️" };
+}
+
+function findV13Check(key) {
+  const checks = Array.isArray(state.v13Status?.checks) ? state.v13Status.checks : [];
+  return checks.find((item) => item && item.key === key) || null;
+}
+
+function formatV13Count(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return escapeHtml(value ?? "-");
+  return formatNumber(numberValue);
+}
+
+function getV13FeatureSnapshot(key) {
+  const snapshot = state.v13Status?.feature_snapshot || {};
+  return snapshot[key] || null;
+}
+
+function renderV13CheckCard(check) {
+  if (!check) return "";
+  const meta = getV13StatusMeta(check.status);
+  return `
+    <div class="v13-check-card ${meta.className}">
+      <div class="v13-check-top">
+        <span class="v13-check-icon">${meta.icon}</span>
+        <strong>${escapeHtml(check.label || check.key || "檢查項目")}</strong>
+        <span class="v13-status-pill ${meta.className}">${meta.label}</span>
+      </div>
+      <p>${escapeHtml(check.message || "-")}</p>
+    </div>
+  `;
+}
+
+function renderV13FeatureCards() {
+  const alerts = getV13FeatureSnapshot("watchlist_alerts") || {};
+  const tracks = getV13FeatureSnapshot("strategy_watchlists") || {};
+  const backtests = getV13FeatureSnapshot("strategy_backtests") || findV13Check("strategy_backtests")?.latest_run || {};
+
+  return `
+    <div class="v13-feature-grid">
+      <div class="v13-feature-card">
+        <span>自選股提醒</span>
+        <strong>${formatV13Count(alerts.total_count)} 筆</strong>
+        <small>未讀 ${formatV13Count(alerts.unread_count)} 筆，股票 ${formatV13Count(alerts.stock_count)} 檔</small>
+      </div>
+      <div class="v13-feature-card">
+        <span>策略追蹤</span>
+        <strong>${formatV13Count(tracks.active_count)} 筆啟用</strong>
+        <small>追蹤 ${formatV13Count(tracks.stock_count)} 檔，策略 ${formatV13Count(tracks.strategy_count)} 種</small>
+      </div>
+      <div class="v13-feature-card">
+        <span>策略回測</span>
+        <strong>Run ${escapeHtml(backtests.id ?? backtests.run_id ?? "-")}</strong>
+        <small>訊號 ${formatV13Count(backtests.total_signals ?? backtests.signal_count)} 筆，5日平均 ${formatReturnPercent(backtests.avg_return_5d ?? backtests.avg_return_5d_percent)}</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderV13BacktestStats() {
+  const stats = Array.isArray(state.v13Status?.latest_backtest_strategy_stats)
+    ? state.v13Status.latest_backtest_strategy_stats
+    : [];
+
+  if (!stats.length) {
+    return `
+      <div class="v13-empty-note">
+        尚未讀到各策略回測統計；如果剛完成回測，請按「重新檢查 V1.3」。
+      </div>
+    `;
+  }
+
+  return `
+    <div class="v13-backtest-list">
+      ${stats.slice(0, 6).map((item) => `
+        <div class="v13-backtest-row">
+          <span>${escapeHtml(item.strategy_name || item.strategy_key || "策略")}</span>
+          <strong class="${getReturnClass(item.avg_return_5d ?? item.avg_5d)}">${formatReturnPercent(item.avg_return_5d ?? item.avg_5d)}</strong>
+          <small>5日勝率 ${formatPercent(item.win_rate_5d)}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderV13StatusCard() {
+  if (!state.v13Status && !state.v13StatusLoading && !state.v13StatusError) {
+    window.setTimeout(() => loadV13Status(), 0);
+  }
+
+  if (state.v13StatusLoading && !state.v13Status) {
+    return `
+      <article class="account-card v13-status-card">
+        <div class="v13-status-header">
+          <div>
+            <p class="eyebrow">V1.3 系統狀態</p>
+            <h3>正在檢查 V1.3 功能</h3>
+            <p>正在讀取 /health 與 /v13/status。</p>
+          </div>
+          <span class="v13-status-pill warn">檢查中</span>
+        </div>
+        <div class="v13-loading-bar"></div>
+      </article>
+    `;
+  }
+
+  if (state.v13StatusError) {
+    return `
+      <article class="account-card v13-status-card error-card">
+        <div class="v13-status-header">
+          <div>
+            <p class="eyebrow">V1.3 系統狀態</p>
+            <h3>狀態檢查失敗</h3>
+            <p>${escapeHtml(state.v13StatusError)}</p>
+          </div>
+          <span class="v13-status-pill fail">異常</span>
+        </div>
+        <div class="account-actions">
+          <button class="detail-btn" type="button" data-refresh-v13-status="true">重新檢查 V1.3</button>
+        </div>
+      </article>
+    `;
+  }
+
+  const status = state.v13Status;
+  if (!status) return "";
+
+  const meta = getV13StatusMeta(status.overall_status);
+  const checks = [
+    findV13Check("database"),
+    findV13Check("core_market_data"),
+    findV13Check("alerts"),
+    findV13Check("strategy_tracking"),
+    findV13Check("strategy_backtests"),
+  ].filter(Boolean);
+
+  return `
+    <article class="account-card v13-status-card ${meta.className}">
+      <div class="v13-status-header">
+        <div>
+          <p class="eyebrow">V1.3 系統狀態</p>
+          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V1.3 狀態檢查完成")}</h3>
+          <p>檢查時間：${escapeHtml(status.checked_at || "-")}</p>
+        </div>
+        <span class="v13-status-pill ${meta.className}">${meta.label}</span>
+      </div>
+
+      <div class="account-info-grid v13-version-grid">
+        ${createInfoItem("API 版本", escapeHtml(status.version || "-"))}
+        ${createInfoItem("PWA 預期版本", escapeHtml(status.pwa_expected_version || "-"))}
+        ${createInfoItem("資料庫", escapeHtml(status.database?.database_name || "-"))}
+        ${createInfoItem("最新行情", formatDate(status.latest_data?.daily_prices))}
+      </div>
+
+      <div class="v13-check-grid">
+        ${checks.map(renderV13CheckCard).join("")}
+      </div>
+
+      ${renderV13FeatureCards()}
+
+      <div class="v13-subsection">
+        <div class="v13-subsection-title">
+          <strong>策略回測統計</strong>
+          <span>取最新完成回測任務</span>
+        </div>
+        ${renderV13BacktestStats()}
+      </div>
+
+      <div class="account-actions v13-actions">
+        <button class="detail-btn" type="button" data-refresh-v13-status="true">重新檢查 V1.3</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="strategyBacktests">看策略回測</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="alerts">提醒中心</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="strategyTracks">策略追蹤</button>
+      </div>
+    </article>
+  `;
+}
+
+async function loadV13Status({ force = false } = {}) {
+  if (state.v13StatusLoading) return;
+  if (state.v13Status && !force) return;
+
+  state.v13StatusLoading = true;
+  state.v13StatusError = "";
+  if (state.page === "account") renderAccountPage();
+
+  try {
+    const result = await fetchJson("/v13/status", { method: "GET", raw: true });
+    state.v13Status = result;
+  } catch (error) {
+    state.v13StatusError = error.message || "V1.3 狀態檢查失敗。";
+  } finally {
+    state.v13StatusLoading = false;
+    if (state.page === "account") renderAccountPage();
+  }
+}
+
 function renderAccountPage() {
   hideStatus();
 
@@ -3278,6 +3484,7 @@ function renderAccountPage() {
           <button class="detail-btn" type="button" data-logout="true">登出</button>
         </div>
       </article>
+      ${renderV13StatusCard()}
     `;
     return;
   }
@@ -3293,6 +3500,7 @@ function renderAccountPage() {
         <strong>管理提醒：</strong>API 端只需要設定 <code>GOOGLE_CLIENT_ID</code> 與 <code>JWT_SECRET</code>。
       </div>
     </article>
+    ${renderV13StatusCard()}
   `;
 
   renderGoogleButton();
@@ -4983,6 +5191,12 @@ stockList.addEventListener("click", (event) => {
   const goAccountButton = event.target.closest("[data-go-account]");
   if (goAccountButton) {
     switchPage("account");
+    return;
+  }
+
+  const v13RefreshButton = event.target.closest("[data-refresh-v13-status]");
+  if (v13RefreshButton) {
+    loadV13Status({ force: true });
     return;
   }
 

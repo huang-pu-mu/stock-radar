@@ -3291,3 +3291,237 @@ body.chart-zoom-open {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* V1.3-4-2 我的頁 V1.3 狀態卡片 */
+.v13-status-card {
+  margin-top: 16px;
+  border-color: rgba(86, 214, 255, 0.2);
+}
+
+.v13-status-card.pass {
+  border-color: rgba(84, 217, 156, 0.28);
+}
+
+.v13-status-card.warn {
+  border-color: rgba(248, 214, 109, 0.32);
+}
+
+.v13-status-card.fail {
+  border-color: rgba(255, 111, 134, 0.32);
+}
+
+.v13-status-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.v13-status-header h3 {
+  margin-bottom: 7px;
+  line-height: 1.35;
+}
+
+.v13-status-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.1);
+  font-size: 13px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.v13-status-pill.pass,
+.v13-check-card.pass .v13-status-pill {
+  color: var(--success);
+  border-color: rgba(84, 217, 156, 0.28);
+  background: rgba(84, 217, 156, 0.1);
+}
+
+.v13-status-pill.warn,
+.v13-check-card.warn .v13-status-pill {
+  color: var(--warning);
+  border-color: rgba(248, 214, 109, 0.32);
+  background: rgba(248, 214, 109, 0.1);
+}
+
+.v13-status-pill.fail,
+.v13-check-card.fail .v13-status-pill {
+  color: var(--danger);
+  border-color: rgba(255, 111, 134, 0.32);
+  background: rgba(255, 111, 134, 0.1);
+}
+
+.v13-version-grid {
+  margin-top: 16px;
+}
+
+.v13-check-grid,
+.v13-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.v13-check-card,
+.v13-feature-card,
+.v13-empty-note {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.v13-check-card.pass {
+  background: rgba(84, 217, 156, 0.06);
+}
+
+.v13-check-card.warn {
+  background: rgba(248, 214, 109, 0.06);
+}
+
+.v13-check-card.fail {
+  background: rgba(255, 111, 134, 0.06);
+}
+
+.v13-check-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.v13-check-top strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.v13-check-icon {
+  font-size: 17px;
+}
+
+.v13-check-card p,
+.v13-feature-card small,
+.v13-empty-note {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.v13-feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.v13-feature-card span {
+  color: var(--muted-2);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.v13-feature-card strong {
+  color: var(--text);
+  font-size: 20px;
+}
+
+.v13-subsection {
+  margin-top: 16px;
+}
+
+.v13-subsection-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.v13-subsection-title strong {
+  color: var(--text);
+}
+
+.v13-subsection-title span {
+  color: var(--muted-2);
+  font-size: 13px;
+}
+
+.v13-backtest-list {
+  display: grid;
+  gap: 8px;
+}
+
+.v13-backtest-row {
+  display: grid;
+  grid-template-columns: 1.2fr auto auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.v13-backtest-row span {
+  color: var(--text);
+  font-weight: 850;
+}
+
+.v13-backtest-row small {
+  color: var(--muted);
+}
+
+.v13-actions,
+.account-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.v13-loading-bar {
+  position: relative;
+  overflow: hidden;
+  height: 10px;
+  margin-top: 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.v13-loading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  animation: v13StatusLoading 1.15s infinite ease-in-out;
+}
+
+@keyframes v13StatusLoading {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(250%); }
+}
+
+@media (max-width: 760px) {
+  .v13-status-header,
+  .v13-subsection-title {
+    flex-direction: column;
+  }
+
+  .v13-check-grid,
+  .v13-feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .v13-backtest-row {
+    grid-template-columns: 1fr;
+  }
+}
