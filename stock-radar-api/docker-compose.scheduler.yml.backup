@@ -1,0 +1,16 @@
+services:
+  stock-radar-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: stock-radar-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Taipei
+      NODE_ENV: production
+    volumes:
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

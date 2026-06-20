@@ -1,0 +1,5 @@
+# Stock Radar V1.2-3 NAS Docker 排程
+# 時區由 docker-compose.scheduler.yml 設定為 Asia/Taipei
+# 每天 18:30 執行資料更新
+30 18 * * * /bin/sh /app/docker/run-scheduled-daily.sh >> /app/logs/cron.log 2>&1
+

@@ -292,7 +292,16 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1",
+    version: "stock-radar-api-v1.2.4",
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "API health check OK",
+    version: "stock-radar-api-v1.2.4",
+    time: new Date().toISOString(),
   });
 });
 
@@ -2699,6 +2708,25 @@ app.delete("/watchlist/:stockCode", requireAuth, async (req, res) => {
       error: error.message,
     });
   }
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
+    path: req.originalUrl,
+    method: req.method,
+    version: "stock-radar-api-v1.2.4",
+  });
+});
+
+app.use((error, req, res, next) => {
+  console.error("API 未處理錯誤：", error);
+  res.status(500).json({
+    success: false,
+    message: "API 發生未處理錯誤",
+    error: error.message,
+  });
 });
 
 app.listen(PORT, () => {

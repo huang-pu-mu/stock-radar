@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache tzdata bash
+
+ENV TZ=Asia/Taipei
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+
+COPY . .
+
+COPY docker/scheduler-crontab /etc/crontabs/root
+RUN chmod +x /app/docker/run-scheduled-daily.sh
+
+CMD ["crond", "-f", "-l", "8"]

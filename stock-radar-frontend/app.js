@@ -225,26 +225,44 @@ async function fetchJson(path, options = {}) {
     headers.set("Authorization", `Bearer ${state.authToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const requestUrl = `${API_BASE_URL}${path}`;
+  const response = await fetch(requestUrl, {
     ...fetchOptions,
     headers,
   });
+
+  const rawText = await response.text();
   let result = null;
 
   try {
-    result = await response.json();
+    result = rawText ? JSON.parse(rawText) : null;
   } catch (error) {
-    throw new Error("API 回傳不是 JSON，請確認後端是否正常啟動。特殊錯誤：" + error.message);
+    const preview = rawText
+      .replace(/\s+/g, " ")
+      .slice(0, 120);
+    const looksLikeHtml = /^\s*</.test(rawText);
+    const hint = looksLikeHtml
+      ? "目前打到的網址回傳 HTML，通常代表 API 網址指到前端站、API 路由尚未部署，或 Vercel 部署失敗。"
+      : "目前回傳內容不是合法 JSON。";
+
+    throw new Error(
+      `${hint} HTTP ${response.status}，URL：${requestUrl}，回傳開頭：${preview || "空白回應"}`
+    );
   }
 
-  if (!response.ok || result.success === false) {
-    throw new Error(result.message || result.error || "API 查詢失敗");
+  if (!response.ok || result?.success === false) {
+    throw new Error(result?.message || result?.error || `API 查詢失敗：HTTP ${response.status}`);
   }
 
   if (Array.isArray(result)) return result;
-  if (result.data) return result.data;
+  if (result?.data !== undefined) return result.data;
   return result;
 }
+
+window.resetStockRadarApiUrl = function resetStockRadarApiUrl() {
+  window.localStorage.removeItem("STOCK_RADAR_API_BASE_URL");
+  window.location.reload();
+};
 function buildListPath() {
   const params = new URLSearchParams();
 

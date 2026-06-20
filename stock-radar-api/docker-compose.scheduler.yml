@@ -1,0 +1,22 @@
+services:
+  stock-radar-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: stock-radar-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Taipei
+      NODE_ENV: production
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      LAN:
+        ipv4_address: 192.168.1.34
+
+networks:
+  LAN:
+    external: true
+    name: LAN
