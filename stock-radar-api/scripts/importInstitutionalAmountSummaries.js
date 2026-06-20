@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pool from "../db.js";
 
 function getTaiwanToday() {
@@ -566,52 +568,63 @@ async function importMarketInstitutionalAmount(conn, config) {
   };
 }
 
+export async function importInstitutionalAmountSummariesForDate(conn, inputDate = null) {
+  const latestDbDate = inputDate ? null : await getLatestTradeDateFromDb(conn);
+  const { twseDate, tpexDate, sqlDate } = normalizeDateText(inputDate || latestDbDate);
+
+  const configs = [
+    {
+      marketType: "上市",
+      sqlDate,
+      candidates: buildTwseCandidates(twseDate),
+      sourceName: "TWSE BFI82U 三大法人買賣金額統計表",
+    },
+    {
+      marketType: "上櫃",
+      sqlDate,
+      candidates: buildTpexCandidates(tpexDate),
+      sourceName: "TPEx 三大法人買賣金額統計表",
+    },
+  ];
+
+  const results = [];
+  const errors = [];
+
+  for (const config of configs) {
+    try {
+      const result = await importMarketInstitutionalAmount(conn, config);
+      results.push(result);
+    } catch (error) {
+      errors.push(`${config.marketType}：${error.message}`);
+    }
+  }
+
+  if (results.length === 0) {
+    throw new Error(errors.join("；"));
+  }
+
+  return { sqlDate, results, errors };
+}
+
+function isMainModule() {
+  return Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
 async function main() {
   const conn = await pool.getConnection();
 
   try {
-    const latestDbDate = process.argv[2] ? null : await getLatestTradeDateFromDb(conn);
-    const { twseDate, tpexDate, sqlDate } = normalizeDateText(
-      process.argv[2] || latestDbDate,
-    );
+    const inputDate = process.argv[2] || null;
+    const { sqlDate, results, errors } = await importInstitutionalAmountSummariesForDate(conn, inputDate);
 
     console.log("開始匯入三大法人官方買賣金額");
     console.log(`交易日期：${sqlDate}`);
 
-    const configs = [
-      {
-        marketType: "上市",
-        sqlDate,
-        candidates: buildTwseCandidates(twseDate),
-        sourceName: "TWSE BFI82U 三大法人買賣金額統計表",
-      },
-      {
-        marketType: "上櫃",
-        sqlDate,
-        candidates: buildTpexCandidates(tpexDate),
-        sourceName: "TPEx 三大法人買賣金額統計表",
-      },
-    ];
-
-    const results = [];
-    const errors = [];
-
-    for (const config of configs) {
-      try {
-        const result = await importMarketInstitutionalAmount(conn, config);
-        results.push(result);
-        console.log(
-          `完成：${result.market_type}，原始 ${result.row_count} 列，可解析 ${result.parsed_row_count} 列，買賣超 ${result.total_net_amount}`,
-        );
-        console.log(`來源：${result.source_url}`);
-      } catch (error) {
-        errors.push(`${config.marketType}：${error.message}`);
-        console.warn(`略過：${config.marketType}，${error.message}`);
-      }
-    }
-
-    if (results.length === 0) {
-      throw new Error(errors.join("；"));
+    for (const result of results) {
+      console.log(
+        `完成：${result.market_type}，原始 ${result.row_count} 列，可解析 ${result.parsed_row_count} 列，買賣超 ${result.total_net_amount}`,
+      );
+      console.log(`來源：${result.source_url}`);
     }
 
     console.log(`完成：匯入 / 更新 ${results.length} 筆市場法人金額總覽`);
@@ -629,4 +642,6 @@ async function main() {
   }
 }
 
-main();
+if (isMainModule()) {
+  main();
+}

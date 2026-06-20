@@ -14,6 +14,8 @@ const requiredFiles = [
   "stock-radar-api/scripts/importInstitutionalAmountSummaries.js",
   "stock-radar-api/scripts/importMonthlyRevenues.js",
   "stock-radar-api/scripts/importMarketDailySummaries.js",
+  "stock-radar-api/scripts/backfillMarketDailySummaries.js",
+  "stock-radar-api/scripts/backfillInstitutionalAmountSummaries.js",
   "stock-radar-api/scripts/syncEtfProfilesFromStocks.js",
 ];
 
@@ -25,6 +27,8 @@ const requiredScripts = [
   "official:events",
   "official:etf",
   "official:institutional-amounts",
+  "official:market:history",
+  "official:institutional-amounts:history",
   "official:daily",
 ];
 

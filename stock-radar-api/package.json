@@ -29,7 +29,9 @@
     "docker:scheduler:up": "docker compose -f docker-compose.scheduler.yml up -d",
     "docker:scheduler:down": "docker compose -f docker-compose.scheduler.yml down",
     "docker:scheduler:logs": "docker logs -f stock-radar-scheduler",
-    "docker:scheduler:test": "docker exec stock-radar-scheduler /bin/sh /app/docker/run-scheduled-daily.sh"
+    "docker:scheduler:test": "docker exec stock-radar-scheduler /bin/sh /app/docker/run-scheduled-daily.sh",
+    "official:market:history": "node scripts/backfillMarketDailySummaries.js",
+    "official:institutional-amounts:history": "node scripts/backfillInstitutionalAmountSummaries.js"
   },
   "keywords": [
     "stock",
