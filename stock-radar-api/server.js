@@ -292,7 +292,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.8",
+    version: "stock-radar-api-v1.2.9",
   });
 });
 
@@ -300,7 +300,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.8",
+    version: "stock-radar-api-v1.2.9",
     time: new Date().toISOString(),
   });
 });
@@ -1050,6 +1050,349 @@ app.get("/microstructure/status", async (req, res) => {
   }
 });
 
+
+
+// ==============================
+// 資金流向分析強化
+// GET /market/flow?market=上市&days=20
+// GET /market/flow/summary?market=上市&days=20&industryLimit=10
+// ==============================
+function getFlowStrength(totalNetAmount, netRatioPercent = 0) {
+  const netValue = toPlainNumber(totalNetAmount);
+  const ratioValue = toPlainNumber(netRatioPercent);
+
+  if (netValue >= 5000000000 || ratioValue >= 1.5) return "強勢流入";
+  if (netValue >= 1000000000 || ratioValue >= 0.5) return "溫和流入";
+  if (netValue <= -5000000000 || ratioValue <= -1.5) return "明顯流出";
+  if (netValue <= -1000000000 || ratioValue <= -0.5) return "偏弱流出";
+  return "資金中性";
+}
+
+function getFlowDirection(totalNetAmount) {
+  const netValue = toPlainNumber(totalNetAmount);
+  if (netValue > 0) return "法人資金淨流入";
+  if (netValue < 0) return "法人資金淨流出";
+  return "法人資金中性";
+}
+
+function numberPercent(numerator, denominator, digits = 2) {
+  const top = toPlainNumber(numerator);
+  const bottom = toPlainNumber(denominator);
+  if (!bottom) return 0;
+  return Number(((top / bottom) * 100).toFixed(digits));
+}
+
+function enrichMarketFlowRows(rows) {
+  const sortedRows = [...rows].sort((a, b) => {
+    const marketCompare = String(a.market_type || "").localeCompare(String(b.market_type || ""), "zh-Hant");
+    if (marketCompare !== 0) return marketCompare;
+    return String(a.trade_date || "").localeCompare(String(b.trade_date || ""));
+  });
+
+  const previousByMarket = new Map();
+
+  const enrichedAscending = sortedRows.map((row) => {
+    const previous = previousByMarket.get(row.market_type) || null;
+    const tradeAmount = toPlainNumber(row.total_trade_amount);
+    const previousTradeAmount = previous ? toPlainNumber(previous.total_trade_amount) : null;
+    const tradeAmountChange = previous ? tradeAmount - previousTradeAmount : null;
+    const totalNetAmount = toPlainNumber(row.total_net_amount);
+    const previousTotalNetAmount = previous ? toPlainNumber(previous.total_net_amount) : null;
+    const totalNetAmountChange = previous ? totalNetAmount - previousTotalNetAmount : null;
+    const netRatioPercent = numberPercent(totalNetAmount, tradeAmount, 3);
+
+    const enriched = {
+      ...row,
+      institutional_net_ratio_percent: netRatioPercent,
+      market_amount_change: tradeAmountChange === null ? null : String(Math.round(tradeAmountChange)),
+      market_amount_change_percent: tradeAmountChange === null || !previousTradeAmount
+        ? null
+        : Number(((tradeAmountChange / previousTradeAmount) * 100).toFixed(2)),
+      total_net_amount_change: totalNetAmountChange === null ? null : String(Math.round(totalNetAmountChange)),
+      previous_total_trade_amount: previous ? previous.total_trade_amount : null,
+      previous_total_net_amount: previous ? previous.total_net_amount : null,
+      flow_direction: getFlowDirection(totalNetAmount),
+      flow_strength: getFlowStrength(totalNetAmount, netRatioPercent),
+    };
+
+    previousByMarket.set(row.market_type, row);
+    return enriched;
+  });
+
+  return enrichedAscending.sort((a, b) => {
+    const dateCompare = String(b.trade_date || "").localeCompare(String(a.trade_date || ""));
+    if (dateCompare !== 0) return dateCompare;
+    return String(a.market_type || "").localeCompare(String(b.market_type || ""), "zh-Hant");
+  });
+}
+
+function aggregateMarketFlowRows(rows) {
+  const byDate = new Map();
+
+  for (const row of rows) {
+    const date = row.trade_date;
+    if (!date) continue;
+
+    if (!byDate.has(date)) {
+      byDate.set(date, {
+        trade_date: date,
+        market_type: "全部",
+        market_count: 0,
+        trade_volume: 0,
+        total_trade_amount: 0,
+        transaction_count: 0,
+        foreign_net_amount: 0,
+        investment_trust_net_amount: 0,
+        dealer_net_amount: 0,
+        total_buy_amount: 0,
+        total_sell_amount: 0,
+        total_net_amount: 0,
+        market_index: null,
+        index_change: null,
+      });
+    }
+
+    const target = byDate.get(date);
+    target.market_count += 1;
+    target.trade_volume += toPlainNumber(row.trade_volume);
+    target.total_trade_amount += toPlainNumber(row.total_trade_amount);
+    target.transaction_count += toPlainNumber(row.transaction_count);
+    target.foreign_net_amount += toPlainNumber(row.foreign_net_amount);
+    target.investment_trust_net_amount += toPlainNumber(row.investment_trust_net_amount);
+    target.dealer_net_amount += toPlainNumber(row.dealer_net_amount);
+    target.total_buy_amount += toPlainNumber(row.total_buy_amount);
+    target.total_sell_amount += toPlainNumber(row.total_sell_amount);
+    target.total_net_amount += toPlainNumber(row.total_net_amount);
+
+    if (target.market_index === null && row.market_index !== null && row.market_index !== undefined) {
+      target.market_index = row.market_index;
+      target.index_change = row.index_change;
+    }
+  }
+
+  const ascending = [...byDate.values()].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+  let previous = null;
+
+  return ascending.map((row) => {
+    const tradeAmountChange = previous ? row.total_trade_amount - previous.total_trade_amount : null;
+    const totalNetAmountChange = previous ? row.total_net_amount - previous.total_net_amount : null;
+    const netRatioPercent = numberPercent(row.total_net_amount, row.total_trade_amount, 3);
+    const result = {
+      ...row,
+      trade_volume: String(Math.round(row.trade_volume)),
+      total_trade_amount: String(Math.round(row.total_trade_amount)),
+      transaction_count: String(Math.round(row.transaction_count)),
+      foreign_net_amount: String(Math.round(row.foreign_net_amount)),
+      investment_trust_net_amount: String(Math.round(row.investment_trust_net_amount)),
+      dealer_net_amount: String(Math.round(row.dealer_net_amount)),
+      total_buy_amount: String(Math.round(row.total_buy_amount)),
+      total_sell_amount: String(Math.round(row.total_sell_amount)),
+      total_net_amount: String(Math.round(row.total_net_amount)),
+      institutional_net_ratio_percent: netRatioPercent,
+      market_amount_change: tradeAmountChange === null ? null : String(Math.round(tradeAmountChange)),
+      market_amount_change_percent: tradeAmountChange === null || !previous?.total_trade_amount
+        ? null
+        : Number(((tradeAmountChange / previous.total_trade_amount) * 100).toFixed(2)),
+      total_net_amount_change: totalNetAmountChange === null ? null : String(Math.round(totalNetAmountChange)),
+      flow_direction: getFlowDirection(row.total_net_amount),
+      flow_strength: getFlowStrength(row.total_net_amount, netRatioPercent),
+    };
+
+    previous = row;
+    return result;
+  });
+}
+
+async function getMarketFlowRows({ market = null, days = 20, extraDays = 8 } = {}) {
+  const safeDays = Math.min(Math.max(Number(days) || 20, 1), 120);
+  const limit = market ? safeDays + extraDays : safeDays * 2 + extraDays * 2;
+  const params = [];
+  let whereSql = "";
+
+  if (market) {
+    whereSql = "WHERE m.market_type = ?";
+    params.push(market);
+  }
+
+  params.push(limit);
+
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(m.trade_date, '%Y-%m-%d') AS trade_date,
+      m.market_type,
+      m.daily_index_point AS market_index,
+      m.daily_change_point AS index_change,
+      CAST(m.trade_volume AS CHAR) AS trade_volume,
+      CAST(m.total_trade_amount AS CHAR) AS total_trade_amount,
+      CAST(m.transaction_count AS CHAR) AS transaction_count,
+      CAST(COALESCE(a.foreign_net_amount, 0) AS CHAR) AS foreign_net_amount,
+      CAST(COALESCE(a.investment_trust_net_amount, 0) AS CHAR) AS investment_trust_net_amount,
+      CAST(COALESCE(a.dealer_net_amount, 0) AS CHAR) AS dealer_net_amount,
+      CAST(COALESCE(a.total_buy_amount, 0) AS CHAR) AS total_buy_amount,
+      CAST(COALESCE(a.total_sell_amount, 0) AS CHAR) AS total_sell_amount,
+      CAST(COALESCE(a.total_net_amount, 0) AS CHAR) AS total_net_amount,
+      m.source AS market_source,
+      a.source AS institutional_source,
+      DATE_FORMAT(GREATEST(m.updated_at, COALESCE(a.updated_at, m.updated_at)), '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM market_daily_summaries m
+    LEFT JOIN institutional_amount_summaries a
+      ON a.trade_date = m.trade_date
+     AND a.market_type = m.market_type
+    ${whereSql}
+    ORDER BY m.trade_date DESC, m.market_type ASC
+    LIMIT ?
+    `,
+    params,
+  );
+
+  const enrichedRows = enrichMarketFlowRows(rows);
+
+  if (market) {
+    return enrichedRows.slice(0, safeDays);
+  }
+
+  const dateSet = new Set();
+  const limited = [];
+
+  for (const row of enrichedRows) {
+    if (!dateSet.has(row.trade_date) && dateSet.size >= safeDays) continue;
+    dateSet.add(row.trade_date);
+    limited.push(row);
+  }
+
+  return limited;
+}
+
+async function getIndustryFlowSummaryRows({ market = null, tradeDate = null, limit = 10 } = {}) {
+  if (!tradeDate) return [];
+
+  const marketCondition = market ? "AND s.market_type = ?" : "";
+  const params = market ? [tradeDate, market, limit] : [tradeDate, limit];
+
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+      COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
+      GROUP_CONCAT(DISTINCT s.market_type ORDER BY s.market_type SEPARATOR '、') AS market_types,
+      COUNT(DISTINCT i.stock_code) AS stock_count,
+      SUM(CASE WHEN COALESCE(i.total_net, 0) > 0 THEN 1 ELSE 0 END) AS net_buy_stock_count,
+      SUM(CASE WHEN COALESCE(p.price_change, 0) > 0 THEN 1 ELSE 0 END) AS up_stock_count,
+      SUM(CASE WHEN COALESCE(p.price_change, 0) < 0 THEN 1 ELSE 0 END) AS down_stock_count,
+      CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
+      CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
+      CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
+      CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
+      CAST(SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) AS CHAR) AS foreign_trust_net_lots,
+      CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS total_transaction_amount,
+      ROUND(AVG(c.chip_score), 2) AS avg_chip_score
+    FROM institutional_trades i
+    LEFT JOIN stocks s
+      ON i.stock_code = s.stock_code
+    LEFT JOIN daily_prices p
+      ON i.stock_code = p.stock_code
+     AND i.trade_date = p.trade_date
+    LEFT JOIN chip_scores c
+      ON i.stock_code = c.stock_code
+     AND i.trade_date = c.trade_date
+    WHERE i.trade_date = ?
+      ${marketCondition}
+      AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
+    GROUP BY i.trade_date, COALESCE(NULLIF(s.industry, ''), '未分類')
+    ORDER BY
+      SUM(COALESCE(i.total_net, 0)) DESC,
+      SUM(COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0)) DESC,
+      SUM(COALESCE(p.transaction_amount, 0)) DESC,
+      industry ASC
+    LIMIT ?
+    `,
+    params,
+  );
+
+  return rows.map((row, index) => {
+    const stockCount = Number(row.stock_count || 0);
+    const netBuyStockCount = Number(row.net_buy_stock_count || 0);
+    const netBuyRatio = stockCount > 0 ? Number(((netBuyStockCount / stockCount) * 100).toFixed(1)) : 0;
+    const totalNet = toBigIntValue(row.total_net_lots);
+    const foreignTrustNet = toBigIntValue(row.foreign_trust_net_lots);
+
+    return {
+      rank: index + 1,
+      ...row,
+      stock_count: stockCount,
+      net_buy_stock_count: netBuyStockCount,
+      up_stock_count: Number(row.up_stock_count || 0),
+      down_stock_count: Number(row.down_stock_count || 0),
+      net_buy_ratio: netBuyRatio,
+      flow_direction: getFlowDirection(totalNet.toString()),
+      flow_strength: totalNet >= 5000n || foreignTrustNet >= 2000n
+        ? "強勢流入"
+        : totalNet > 0n
+          ? "溫和流入"
+          : totalNet < 0n
+            ? "資金淨流出"
+            : "資金中性",
+    };
+  });
+}
+
+app.get("/market/flow", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const days = parseLimit(req.query.days, 20, 120);
+    const rows = await getMarketFlowRows({ market, days });
+
+    res.json({
+      success: true,
+      market: market || "全部",
+      days,
+      count: rows.length,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢市場資金流向失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢市場資金流向失敗，請確認 market_daily_summaries 與 institutional_amount_summaries 已建立並匯入資料。",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/market/flow/summary", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const days = parseLimit(req.query.days, 20, 120);
+    const industryLimit = parseLimit(req.query.industryLimit, 10, 30);
+    const rows = await getMarketFlowRows({ market, days });
+    const latestDate = rows[0]?.trade_date || null;
+    const latestMarkets = latestDate ? rows.filter((row) => row.trade_date === latestDate) : [];
+    const aggregateTrend = aggregateMarketFlowRows(rows).slice(-days);
+    const latestTotal = aggregateTrend[aggregateTrend.length - 1] || null;
+    const industryTop = await getIndustryFlowSummaryRows({ market, tradeDate: latestDate, limit: industryLimit });
+
+    res.json({
+      success: true,
+      data: convertBigIntToString({
+        market: market || "全部",
+        days,
+        latest_date: latestDate,
+        latest_total: latestTotal,
+        latest_markets: latestMarkets,
+        trend: aggregateTrend,
+        industry_top: industryTop,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢資金流向總覽失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢資金流向總覽失敗，請確認 V1.2 官方市場總覽與法人金額資料已匯入。",
+      error: error.message,
+    });
+  }
+});
 
 app.get("/institutional-trades/:stockCode", async (req, res) => {
   try {
@@ -3294,7 +3637,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.8",
+    version: "stock-radar-api-v1.2.9",
   });
 });
 

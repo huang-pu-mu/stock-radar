@@ -282,6 +282,19 @@ function buildListPath() {
     return `/radar/institutional-sync-buying?${params.toString()}`;
   }
 
+  if (state.page === "marketFlow" || state.page === "institutionalOverview") {
+    params.set("days", "20");
+    params.set("industryLimit", "10");
+    if (state.market) params.set("market", state.market);
+    return `/market/flow/summary?${params.toString()}`;
+  }
+
+  if (state.page === "marketIndex") {
+    params.set("days", "30");
+    if (state.market) params.set("market", state.market);
+    return `/market/flow/summary?${params.toString()}`;
+  }
+
   if (state.page === "industryFlow") {
     params.set("limit", "50");
     if (state.market) params.set("market", state.market);
@@ -330,6 +343,27 @@ function updatePageText() {
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後再看分數、法人買賣超與成交量。</span>`;
     window.setTimeout(() => stockSearchInput.focus(), 80);
     renderRecentSearches();
+    return;
+  }
+
+  if (state.page === "marketIndex") {
+    pageTitle.textContent = "大盤走勢";
+    pageDesc.textContent = `${marketText}市場成交金額、指數漲跌與量能趨勢。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>成交金額放大代表市場熱度上升；再搭配法人金額，看資金是流入還是流出。</span>`;
+    return;
+  }
+
+  if (state.page === "marketFlow") {
+    pageTitle.textContent = "資金流向分析";
+    pageDesc.textContent = `${marketText}整合市場成交金額、法人買賣金額、產業資金流向。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看三大法人淨買賣金額，再看成交金額是否放大，最後看產業資金集中在哪裡。</span>`;
+    return;
+  }
+
+  if (state.page === "institutionalOverview") {
+    pageTitle.textContent = "法人總覽";
+    pageDesc.textContent = `${marketText}三大法人買賣金額趨勢，觀察外資、投信、自營商方向。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>法人總金額為正代表淨流入；外資與投信同向時，資金方向更明確。</span>`;
     return;
   }
 
@@ -1597,6 +1631,235 @@ function renderIndustryTopStocks(topStocks) {
   `;
 }
 
+
+function formatShortAmountYi(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const yi = numberValue / 100000000;
+  return yi.toLocaleString("zh-TW", { maximumFractionDigits: yi >= 100 ? 0 : 1 });
+}
+
+function getMoneyFlowClass(value) {
+  const numberValue = toNumber(value) || 0;
+  if (numberValue > 0) return "price-up";
+  if (numberValue < 0) return "price-down";
+  return "";
+}
+
+function getMarketFlowStrengthClass(strength, netAmount) {
+  const text = String(strength || "");
+  const netValue = toNumber(netAmount) || 0;
+  if (text.includes("流出") || netValue < 0) return "score-low";
+  if (text.includes("強勢") || netValue >= 5000000000) return "score-high";
+  if (text.includes("流入") || netValue > 0) return "score-mid";
+  return "score-low";
+}
+
+function getTrendRows(flowData = {}) {
+  const rows = Array.isArray(flowData.trend) ? flowData.trend : [];
+  return rows
+    .filter((row) => row && row.trade_date)
+    .slice()
+    .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+}
+
+function renderMiniFlowLineChart(rows, key, options = {}) {
+  const chartRows = rows.filter((row) => toNumber(row[key]) !== null);
+
+  if (chartRows.length < 2) {
+    return `<div class="flow-empty-chart">趨勢資料不足</div>`;
+  }
+
+  const values = chartRows.map((row) => toNumber(row[key]) || 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const width = 520;
+  const height = 150;
+  const paddingX = 24;
+  const paddingY = 18;
+  const points = values.map((value, index) => {
+    const x = paddingX + (index / Math.max(values.length - 1, 1)) * (width - paddingX * 2);
+    const y = height - paddingY - ((value - min) / span) * (height - paddingY * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const zeroY = min < 0 && max > 0
+    ? height - paddingY - ((0 - min) / span) * (height - paddingY * 2)
+    : null;
+  const firstDate = formatDate(chartRows[0]?.trade_date);
+  const lastDate = formatDate(chartRows[chartRows.length - 1]?.trade_date);
+  const latestValue = chartRows[chartRows.length - 1]?.[key];
+
+  return `
+    <div class="flow-chart-card">
+      <div class="flow-chart-header">
+        <div>
+          <h4>${escapeHtml(options.title || "趨勢圖")}</h4>
+          <p>${escapeHtml(firstDate)} ～ ${escapeHtml(lastDate)}</p>
+        </div>
+        <strong class="${getMoneyFlowClass(latestValue)}">${escapeHtml(options.formatter ? options.formatter(latestValue) : formatNumber(latestValue))}</strong>
+      </div>
+      <svg class="flow-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title || "趨勢圖")}">
+        ${zeroY === null ? "" : `<line x1="${paddingX}" y1="${zeroY.toFixed(1)}" x2="${width - paddingX}" y2="${zeroY.toFixed(1)}" class="flow-zero-line" />`}
+        <polyline points="${points}" class="flow-line" />
+      </svg>
+    </div>
+  `;
+}
+
+function renderMarketAmountBars(rows) {
+  const chartRows = rows.filter((row) => toNumber(row.total_trade_amount) !== null).slice(-12);
+
+  if (chartRows.length === 0) {
+    return `<div class="flow-empty-chart">成交金額資料不足</div>`;
+  }
+
+  const max = Math.max(...chartRows.map((row) => toNumber(row.total_trade_amount) || 0), 1);
+
+  return `
+    <div class="flow-bar-card">
+      <div class="flow-chart-header">
+        <div>
+          <h4>成交金額近 12 筆</h4>
+          <p>單位：億元</p>
+        </div>
+      </div>
+      <div class="flow-bars">
+        ${chartRows.map((row) => {
+          const amount = toNumber(row.total_trade_amount) || 0;
+          const height = Math.max((amount / max) * 100, 4);
+          return `
+            <div class="flow-bar-item" title="${escapeHtml(formatDate(row.trade_date))} ${escapeHtml(formatAmountYi(amount))}">
+              <span class="flow-bar" style="height:${height.toFixed(1)}%"></span>
+              <small>${escapeHtml(String(row.trade_date || "").slice(5))}</small>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderMarketFlowMarketRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `<div class="result-note">目前沒有市場別資金資料。</div>`;
+  }
+
+  return `
+    <div class="flow-market-grid">
+      ${rows.map((row) => {
+        const netAmount = pick(row, ["total_net_amount"], 0);
+        const strength = pick(row, ["flow_strength"], "資金中性");
+        const strengthClass = getMarketFlowStrengthClass(strength, netAmount);
+        return `
+          <article class="flow-market-card">
+            <div class="flow-market-top">
+              <h4>${escapeHtml(pick(row, ["market_type"], "市場"))}</h4>
+              <span class="summary-pill ${strengthClass}">${escapeHtml(strength)}</span>
+            </div>
+            <div class="flow-market-main ${getMoneyFlowClass(netAmount)}">${formatAmountYi(netAmount)}</div>
+            <div class="flow-market-sub">成交金額 ${formatAmountYi(pick(row, ["total_trade_amount"], 0))}</div>
+            <div class="flow-market-sub">外資 ${formatAmountYi(pick(row, ["foreign_net_amount"], 0))}｜投信 ${formatAmountYi(pick(row, ["investment_trust_net_amount"], 0))}</div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderMarketFlowIndustryRows(rows = []) {
+  const industryRows = Array.isArray(rows) ? rows.slice(0, 10) : [];
+
+  if (industryRows.length === 0) {
+    return `<div class="result-note">目前沒有產業資金資料，可先執行每日匯入與籌碼分數計算。</div>`;
+  }
+
+  return `
+    <div class="flow-industry-list">
+      ${industryRows.map((row, index) => {
+        const totalLots = pick(row, ["total_net_lots"], 0);
+        const strengthClass = getIndustryFlowStrengthClass(pick(row, ["flow_direction"], ""), totalLots);
+        return `
+          <div class="flow-industry-row">
+            <span class="rank-badge">${index + 1}</span>
+            <div class="flow-industry-main">
+              <strong>${escapeHtml(pick(row, ["industry"], "未分類"))}</strong>
+              <small>${escapeHtml(pick(row, ["market_types"], "全部"))}｜${formatNumber(pick(row, ["stock_count"], 0))} 檔｜買超 ${formatNumber(pick(row, ["net_buy_stock_count"], 0))} 檔</small>
+            </div>
+            <div class="flow-industry-value ${getChangeClass(totalLots)}">
+              ${formatLotsValue(totalLots)} 張
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderMarketFlowDashboard(flowData = {}) {
+  const trendRows = getTrendRows(flowData);
+  const latest = flowData.latest_total || trendRows[trendRows.length - 1] || {};
+  const latestMarkets = Array.isArray(flowData.latest_markets) ? flowData.latest_markets : [];
+  const latestDate = pick(flowData, ["latest_date"], pick(latest, ["trade_date"], "-"));
+  const netAmount = pick(latest, ["total_net_amount"], 0);
+  const amountChangePercent = pick(latest, ["market_amount_change_percent"], null);
+  const strength = pick(latest, ["flow_strength"], "資金中性");
+  const strengthClass = getMarketFlowStrengthClass(strength, netAmount);
+
+  return `
+    <article class="stock-card market-flow-dashboard">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">V1.2-9</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(pick(flowData, ["market"], "全部"))}資金流向</h3>
+            <span class="badge">資料日 ${formatDate(latestDate)}</span>
+            <span class="badge">近 ${formatNumber(pick(flowData, ["days"], trendRows.length || 20))} 筆</span>
+          </div>
+        </div>
+        <div class="score-box ${strengthClass}">
+          <span class="score-value">${formatShortAmountYi(netAmount)}</span>
+          <span class="score-label">法人淨額億</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${strengthClass}">${escapeHtml(strength)}</span>
+        <span class="summary-text">三大法人淨額 <strong class="${getMoneyFlowClass(netAmount)}">${formatAmountYi(netAmount)}</strong>，成交金額 <strong>${formatAmountYi(pick(latest, ["total_trade_amount"], 0))}</strong>，較前日 ${formatPercent(amountChangePercent)}</span>
+      </div>
+
+      <div class="info-grid market-flow-kpi-grid">
+        ${createInfoItem("成交金額", formatAmountYi(pick(latest, ["total_trade_amount"], 0)))}
+        ${createInfoItem("成交金額變化", formatPercent(amountChangePercent), getChangeClass(amountChangePercent))}
+        ${createInfoItem("外資淨額", formatAmountYi(pick(latest, ["foreign_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["foreign_net_amount"], 0)))}
+        ${createInfoItem("投信淨額", formatAmountYi(pick(latest, ["investment_trust_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["investment_trust_net_amount"], 0)))}
+        ${createInfoItem("自營商淨額", formatAmountYi(pick(latest, ["dealer_net_amount"], 0)), getMoneyFlowClass(pick(latest, ["dealer_net_amount"], 0)))}
+        ${createInfoItem("法人淨額占成交", formatPercent(pick(latest, ["institutional_net_ratio_percent"], 0)), getMoneyFlowClass(netAmount))}
+      </div>
+
+      <section class="flow-section">
+        <h4>上市 / 上櫃資金狀態</h4>
+        ${renderMarketFlowMarketRows(latestMarkets)}
+      </section>
+
+      <section class="flow-chart-grid">
+        ${renderMiniFlowLineChart(trendRows, "total_net_amount", { title: "三大法人淨買賣金額", formatter: formatAmountYi })}
+        ${renderMiniFlowLineChart(trendRows, "foreign_net_amount", { title: "外資淨買賣金額", formatter: formatAmountYi })}
+        ${renderMarketAmountBars(trendRows)}
+      </section>
+
+      <section class="flow-section">
+        <h4>熱門產業資金流向</h4>
+        ${renderMarketFlowIndustryRows(flowData.industry_top)}
+      </section>
+
+      <div class="result-note">
+        <strong>判讀提醒：</strong>這裡整合市場總成交金額與法人買賣金額；若法人淨額為正且成交金額同步放大，代表資金動能較明顯。此功能使用 V1.2 官方資料表，不等於即時報價。
+      </div>
+    </article>
+  `;
+}
+
 function renderIndustryFlowCard(row, index) {
   const industry = pick(row, ["industry"], "未分類");
   const tradeDate = pick(row, ["trade_date", "date"], "-");
@@ -2406,6 +2669,14 @@ async function loadList() {
 
   try {
     const rows = await fetchJson(buildListPath());
+
+    if (state.page === "marketFlow" || state.page === "marketIndex" || state.page === "institutionalOverview") {
+      state.latestRows = [];
+      stockList.innerHTML = renderMarketFlowDashboard(rows || {});
+      showTemporaryStatus("資金流向分析已更新。", "success");
+      return;
+    }
+
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
