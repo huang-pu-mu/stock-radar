@@ -2366,3 +2366,136 @@ body.chart-zoom-open {
     align-items: flex-start;
   }
 }
+
+/* V1.3-2-1 策略選股 */
+.strategy-dashboard-card {
+  background: rgba(7, 17, 31, 0.72);
+  border: 1px solid rgba(134, 155, 185, 0.22);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+}
+
+.strategy-dashboard-header {
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.strategy-dashboard-header h3 {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+
+.strategy-dashboard-header p {
+  margin: 0;
+  color: var(--muted-text, #9fb2ca);
+}
+
+.strategy-meta-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 220px;
+}
+
+.strategy-meta-box span {
+  border: 1px solid rgba(134, 155, 185, 0.24);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #d8e7ff;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.88rem;
+}
+
+.strategy-chip-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.strategy-chip {
+  width: 100%;
+  border: 1px solid rgba(134, 155, 185, 0.28);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e9f3ff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.strategy-chip strong,
+.strategy-chip span {
+  display: block;
+}
+
+.strategy-chip strong {
+  font-size: 1rem;
+  margin-bottom: 6px;
+}
+
+.strategy-chip span {
+  color: var(--muted-text, #9fb2ca);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.strategy-chip.active {
+  color: #06111f;
+  border-color: rgba(255, 232, 112, 0.72);
+  background: linear-gradient(135deg, #64d7f3, #ffe36f);
+}
+
+.strategy-chip.active span {
+  color: rgba(6, 17, 31, 0.74);
+}
+
+.strategy-result-note {
+  border: 1px solid rgba(100, 215, 243, 0.28);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(100, 215, 243, 0.08);
+  color: #d8e7ff;
+}
+
+.strategy-card::before {
+  background: linear-gradient(180deg, #64d7f3, #ffe36f);
+}
+
+.strategy-card .summary-text {
+  line-height: 1.7;
+}
+
+.strategy-info-grid {
+  margin-top: 14px;
+}
+
+.strategies-empty-card .intro-icon {
+  filter: drop-shadow(0 8px 18px rgba(100, 215, 243, 0.28));
+}
+
+@media (max-width: 900px) {
+  .strategy-chip-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .strategy-meta-box {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .strategy-chip-row {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-dashboard-card {
+    padding: 16px;
+  }
+
+  .strategy-meta-box span {
+    width: 100%;
+  }
+}

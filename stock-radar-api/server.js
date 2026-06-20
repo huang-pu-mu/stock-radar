@@ -227,6 +227,95 @@ function isValidDateText(value) {
 }
 
 
+const STRATEGY_DEFINITIONS = [
+  {
+    key: "legal_strength",
+    name: "法人轉強股",
+    short_name: "法人轉強",
+    description: "外資或投信轉為買超，搭配籌碼分數與法人分數篩選。",
+    focus: "法人",
+  },
+  {
+    key: "major_holder_accumulate",
+    name: "主力增持股",
+    short_name: "主力增持",
+    description: "400 張以上大戶比重增加，且散戶比重下降或籌碼集中。",
+    focus: "主力",
+  },
+  {
+    key: "volume_price_breakout",
+    name: "量價轉強股",
+    short_name: "量價轉強",
+    description: "成交量放大且股價位置偏強，適合短線觀察。",
+    focus: "量價",
+  },
+  {
+    key: "capital_inflow",
+    name: "資金流入股",
+    short_name: "資金流入",
+    description: "三大法人合計買超較明顯，搭配成交金額與籌碼分數排序。",
+    focus: "資金",
+  },
+  {
+    key: "etf_calendar_watch",
+    name: "ETF 除息觀察",
+    short_name: "ETF 行事曆",
+    description: "ETF 即將發生除息、收益分配或重要行事曆事件。",
+    focus: "ETF",
+  },
+  {
+    key: "short_term_strong",
+    name: "短線強勢股",
+    short_name: "短線強勢",
+    description: "籌碼分數高、股價偏強、量能不弱的短線觀察清單。",
+    focus: "短線",
+  },
+];
+
+function getStrategyDefinition(key) {
+  const strategyKey = String(key || "legal_strength").trim();
+  return STRATEGY_DEFINITIONS.find((item) => item.key === strategyKey) || STRATEGY_DEFINITIONS[0];
+}
+
+async function getLatestTradeDateFrom(tableName, dateColumn, market = null, queryDate = null) {
+  const allowedTables = new Set(["chip_scores", "institutional_trades", "daily_prices", "major_holder_stats"]);
+  const allowedColumns = new Set(["trade_date", "data_date"]);
+
+  if (!allowedTables.has(tableName) || !allowedColumns.has(dateColumn)) {
+    throw new Error("策略日期來源設定錯誤");
+  }
+
+  const alias = tableName === "major_holder_stats" ? "m" : "t";
+  const params = [];
+  const conditions = [];
+  let joinSql = "";
+
+  if (queryDate) {
+    conditions.push(`${alias}.${dateColumn} <= ?`);
+    params.push(queryDate);
+  }
+
+  if (market) {
+    joinSql = `LEFT JOIN stocks s ON s.stock_code = ${alias}.stock_code`;
+    conditions.push("s.market_type = ?");
+    params.push(market);
+  }
+
+  const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = await query(
+    `
+    SELECT DATE_FORMAT(MAX(${alias}.${dateColumn}), '%Y-%m-%d') AS latest_date
+    FROM ${tableName} ${alias}
+    ${joinSql}
+    ${whereSql}
+    `,
+    params,
+  );
+
+  return rows[0]?.latest_date || null;
+}
+
+
 function toPlainNumber(value) {
   if (value === null || value === undefined || value === "") return 0;
   const numberValue = Number(String(value).replaceAll(",", ""));
@@ -2316,6 +2405,425 @@ async function getWatchlistRows(userId, stockCode = null) {
 // 自選股：取得目前登入者的自選股
 // GET /watchlist
 // ==============================
+
+// ==============================
+// V1.3-2-1 選股策略清單
+// GET /strategies?strategy=legal_strength&market=上市&limit=30&date=YYYY-MM-DD
+// ==============================
+app.get("/strategies", async (req, res) => {
+  try {
+    const strategy = getStrategyDefinition(req.query.strategy);
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    let targetDate = null;
+    let referenceDate = null;
+    let rows = [];
+    const params = [];
+    let marketCondition = "";
+
+    if (strategy.key === "legal_strength") {
+      targetDate = await getLatestTradeDateFrom("chip_scores", "trade_date", market, queryDate);
+
+      if (targetDate) {
+        params.push(targetDate);
+        if (market) {
+          marketCondition = "AND s.market_type = ?";
+          params.push(market);
+        }
+        params.push(limit);
+
+        rows = await query(
+          `
+          SELECT
+            DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+            c.stock_code,
+            s.stock_name,
+            s.market_type,
+            s.industry,
+            'legal_strength' AS strategy_key,
+            '法人轉強股' AS strategy_name,
+            c.chip_score,
+            c.foreign_score,
+            c.investment_trust_score,
+            c.foreign_status,
+            c.investment_trust_status,
+            c.volume_status,
+            c.price_position,
+            p.close_price,
+            p.price_change,
+            CAST(p.volume AS CHAR) AS volume,
+            CAST(i.foreign_net AS CHAR) AS foreign_net,
+            CAST(i.investment_trust_net AS CHAR) AS investment_trust_net,
+            CAST(i.total_net AS CHAR) AS total_net,
+            CAST(ROUND(COALESCE(i.foreign_net, 0) / 1000, 0) AS CHAR) AS foreign_net_lots,
+            CAST(ROUND(COALESCE(i.investment_trust_net, 0) / 1000, 0) AS CHAR) AS investment_trust_net_lots,
+            CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
+            (c.foreign_score + c.investment_trust_score + c.chip_score) AS strategy_score,
+            CONCAT('法人分數 ', c.foreign_score + c.investment_trust_score, '，籌碼分數 ', c.chip_score) AS trigger_summary
+          FROM chip_scores c
+          LEFT JOIN stocks s
+            ON s.stock_code = c.stock_code
+          LEFT JOIN institutional_trades i
+            ON i.stock_code = c.stock_code
+           AND i.trade_date = c.trade_date
+          LEFT JOIN daily_prices p
+            ON p.stock_code = c.stock_code
+           AND p.trade_date = c.trade_date
+          WHERE c.trade_date = ?
+            ${marketCondition}
+            AND s.is_active = 1
+            AND (COALESCE(i.foreign_net, 0) > 0 OR COALESCE(i.investment_trust_net, 0) > 0)
+            AND (c.chip_score >= 70 OR (c.foreign_score + c.investment_trust_score) >= 20)
+          ORDER BY strategy_score DESC, COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0) DESC, c.stock_code ASC
+          LIMIT ?
+          `,
+          params,
+        );
+      }
+    }
+
+    if (strategy.key === "major_holder_accumulate") {
+      targetDate = await getLatestTradeDateFrom("major_holder_stats", "data_date", market, queryDate);
+      referenceDate = await getLatestTradeDateFrom("daily_prices", "trade_date", market, queryDate);
+
+      if (targetDate) {
+        const latestTradeDate = referenceDate || targetDate;
+        params.push(latestTradeDate, latestTradeDate, targetDate);
+        if (market) {
+          marketCondition = "AND s.market_type = ?";
+          params.push(market);
+        }
+
+        const rawRows = await query(
+          `
+          SELECT
+            DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
+            DATE_FORMAT(dp.trade_date, '%Y-%m-%d') AS trade_date,
+            m.stock_code,
+            s.stock_name,
+            s.market_type,
+            s.industry,
+            'major_holder_accumulate' AS strategy_key,
+            '主力增持股' AS strategy_name,
+            m.large_holder_count,
+            CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
+            m.large_holder_ratio,
+            m.small_holder_ratio,
+            m.thousand_lot_ratio,
+            CASE WHEN prev.id IS NULL THEN 0 ELSE 1 END AS has_previous,
+            CAST((m.large_holder_count - COALESCE(prev.large_holder_count, m.large_holder_count)) AS CHAR) AS large_holder_count_change,
+            CAST((m.large_holder_share_count - COALESCE(prev.large_holder_share_count, m.large_holder_share_count)) AS CHAR) AS large_holder_share_change,
+            ROUND(m.large_holder_ratio - COALESCE(prev.large_holder_ratio, m.large_holder_ratio), 4) AS large_holder_ratio_change,
+            ROUND(m.small_holder_ratio - COALESCE(prev.small_holder_ratio, m.small_holder_ratio), 4) AS small_holder_ratio_change,
+            ROUND(m.thousand_lot_ratio - COALESCE(prev.thousand_lot_ratio, m.thousand_lot_ratio), 4) AS thousand_lot_ratio_change,
+            dp.close_price,
+            dp.price_change,
+            CAST(dp.volume AS CHAR) AS volume,
+            cs.chip_score,
+            cs.big_holder_score,
+            cs.big_holder_status
+          FROM major_holder_stats m
+          LEFT JOIN stocks s
+            ON s.stock_code = m.stock_code
+          LEFT JOIN major_holder_stats prev
+            ON prev.stock_code = m.stock_code
+           AND prev.data_date = (
+              SELECT MAX(p2.data_date)
+              FROM major_holder_stats p2
+              WHERE p2.stock_code = m.stock_code
+                AND p2.data_date < m.data_date
+           )
+          LEFT JOIN daily_prices dp
+            ON dp.stock_code = m.stock_code
+           AND dp.trade_date = ?
+          LEFT JOIN chip_scores cs
+            ON cs.stock_code = m.stock_code
+           AND cs.trade_date = ?
+          WHERE m.data_date = ?
+            ${marketCondition}
+            AND s.is_active = 1
+            AND prev.id IS NOT NULL
+            AND (m.large_holder_ratio - COALESCE(prev.large_holder_ratio, m.large_holder_ratio)) > 0
+          `,
+          params,
+        );
+
+        rows = rawRows
+          .map((row) => {
+            const enriched = enrichMajorHolderRow(row);
+            return {
+              ...enriched,
+              strategy_key: strategy.key,
+              strategy_name: strategy.name,
+              strategy_score: enriched.major_holder_score,
+              trigger_summary: `大戶比重增加 ${toPlainNumber(enriched.large_holder_ratio_change).toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`,
+            };
+          })
+          .sort((a, b) => {
+            if (b.strategy_score !== a.strategy_score) return b.strategy_score - a.strategy_score;
+            return toPlainNumber(b.large_holder_ratio_change) - toPlainNumber(a.large_holder_ratio_change);
+          })
+          .slice(0, limit);
+      }
+    }
+
+    if (strategy.key === "volume_price_breakout") {
+      targetDate = await getLatestTradeDateFrom("chip_scores", "trade_date", market, queryDate);
+
+      if (targetDate) {
+        params.push(targetDate);
+        if (market) {
+          marketCondition = "AND s.market_type = ?";
+          params.push(market);
+        }
+        params.push(limit);
+
+        rows = await query(
+          `
+          SELECT
+            DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+            c.stock_code,
+            s.stock_name,
+            s.market_type,
+            s.industry,
+            'volume_price_breakout' AS strategy_key,
+            '量價轉強股' AS strategy_name,
+            c.chip_score,
+            c.volume_score,
+            c.price_score,
+            c.volume_status,
+            c.price_position,
+            c.foreign_status,
+            c.investment_trust_status,
+            p.close_price,
+            p.price_change,
+            p.price_change_percent,
+            CAST(p.volume AS CHAR) AS volume,
+            CAST(p.transaction_amount AS CHAR) AS transaction_amount,
+            (c.volume_score + c.price_score + c.chip_score) AS strategy_score,
+            CONCAT(c.volume_status, '，', c.price_position) AS trigger_summary
+          FROM chip_scores c
+          LEFT JOIN stocks s
+            ON s.stock_code = c.stock_code
+          LEFT JOIN daily_prices p
+            ON p.stock_code = c.stock_code
+           AND p.trade_date = c.trade_date
+          WHERE c.trade_date = ?
+            ${marketCondition}
+            AND s.is_active = 1
+            AND (c.volume_score >= 12 OR c.volume_status LIKE '%量增%' OR c.volume_status LIKE '%放大%')
+            AND (c.price_score >= 8 OR c.price_position LIKE '%高點%' OR COALESCE(p.price_change, 0) > 0)
+          ORDER BY strategy_score DESC, COALESCE(p.volume, 0) DESC, c.stock_code ASC
+          LIMIT ?
+          `,
+          params,
+        );
+      }
+    }
+
+    if (strategy.key === "capital_inflow") {
+      targetDate = await getLatestTradeDateFrom("institutional_trades", "trade_date", market, queryDate);
+
+      if (targetDate) {
+        params.push(targetDate);
+        if (market) {
+          marketCondition = "AND s.market_type = ?";
+          params.push(market);
+        }
+        params.push(limit);
+
+        rows = await query(
+          `
+          SELECT
+            DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+            i.stock_code,
+            s.stock_name,
+            s.market_type,
+            s.industry,
+            'capital_inflow' AS strategy_key,
+            '資金流入股' AS strategy_name,
+            CAST(i.foreign_net AS CHAR) AS foreign_net,
+            CAST(i.investment_trust_net AS CHAR) AS investment_trust_net,
+            CAST(i.dealer_net AS CHAR) AS dealer_net,
+            CAST(i.total_net AS CHAR) AS total_net,
+            CAST(ROUND(i.foreign_net / 1000, 0) AS CHAR) AS foreign_net_lots,
+            CAST(ROUND(i.investment_trust_net / 1000, 0) AS CHAR) AS investment_trust_net_lots,
+            CAST(ROUND(i.dealer_net / 1000, 0) AS CHAR) AS dealer_net_lots,
+            CAST(ROUND(i.total_net / 1000, 0) AS CHAR) AS total_net_lots,
+            p.close_price,
+            p.price_change,
+            CAST(p.volume AS CHAR) AS volume,
+            CAST(p.transaction_amount AS CHAR) AS transaction_amount,
+            c.chip_score,
+            c.foreign_status,
+            c.investment_trust_status,
+            c.volume_status,
+            (COALESCE(i.total_net, 0) / 1000 + COALESCE(c.chip_score, 0)) AS strategy_score,
+            CONCAT('三大法人合計買超 ', ROUND(i.total_net / 1000, 0), ' 張') AS trigger_summary
+          FROM institutional_trades i
+          LEFT JOIN stocks s
+            ON s.stock_code = i.stock_code
+          LEFT JOIN daily_prices p
+            ON p.stock_code = i.stock_code
+           AND p.trade_date = i.trade_date
+          LEFT JOIN chip_scores c
+            ON c.stock_code = i.stock_code
+           AND c.trade_date = i.trade_date
+          WHERE i.trade_date = ?
+            ${marketCondition}
+            AND s.is_active = 1
+            AND COALESCE(i.total_net, 0) > 0
+          ORDER BY COALESCE(i.total_net, 0) DESC, COALESCE(p.transaction_amount, 0) DESC, i.stock_code ASC
+          LIMIT ?
+          `,
+          params,
+        );
+      }
+    }
+
+    if (strategy.key === "etf_calendar_watch") {
+      if (queryDate) {
+        targetDate = queryDate;
+      } else {
+        const dateRows = await query(`SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today`);
+        targetDate = dateRows[0]?.today || null;
+      }
+
+      if (targetDate) {
+        params.push(targetDate, targetDate);
+        if (market) {
+          marketCondition = "AND ep.market_type = ?";
+          params.push(market);
+        }
+        params.push(limit);
+
+        rows = await query(
+          `
+          SELECT
+            DATE_FORMAT(e.event_date, '%Y-%m-%d') AS event_date,
+            e.stock_code,
+            ep.stock_name,
+            ep.market_type,
+            ep.fund_type,
+            ep.issuer,
+            ep.underlying_index,
+            'etf_calendar_watch' AS strategy_key,
+            'ETF 除息觀察' AS strategy_name,
+            e.event_type,
+            e.title,
+            e.importance,
+            DATEDIFF(e.event_date, ?) AS days_left,
+            CASE WHEN e.importance = 'high' THEN 100 ELSE 70 END - LEAST(GREATEST(DATEDIFF(e.event_date, ?), 0), 30) AS strategy_score,
+            CONCAT(DATEDIFF(e.event_date, ?), ' 天後：', e.event_type) AS trigger_summary
+          FROM stock_calendar_events e
+          INNER JOIN etf_profiles ep
+            ON ep.stock_code = e.stock_code
+          WHERE e.is_active = 1
+            AND e.event_date >= ?
+            AND e.event_date <= DATE_ADD(?, INTERVAL 30 DAY)
+            ${marketCondition}
+            AND (e.event_type LIKE '%除息%' OR e.event_type LIKE '%收益%' OR e.event_type LIKE '%股利%' OR e.importance = 'high')
+          ORDER BY e.event_date ASC, strategy_score DESC, e.stock_code ASC
+          LIMIT ?
+          `,
+          [targetDate, targetDate, targetDate, targetDate, targetDate, ...(market ? [market] : []), limit],
+        );
+      }
+    }
+
+    if (strategy.key === "short_term_strong") {
+      targetDate = await getLatestTradeDateFrom("chip_scores", "trade_date", market, queryDate);
+
+      if (targetDate) {
+        params.push(targetDate);
+        if (market) {
+          marketCondition = "AND s.market_type = ?";
+          params.push(market);
+        }
+        params.push(limit);
+
+        rows = await query(
+          `
+          SELECT
+            DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+            c.stock_code,
+            s.stock_name,
+            s.market_type,
+            s.industry,
+            'short_term_strong' AS strategy_key,
+            '短線強勢股' AS strategy_name,
+            c.chip_score,
+            c.foreign_score,
+            c.investment_trust_score,
+            c.volume_score,
+            c.price_score,
+            c.foreign_status,
+            c.investment_trust_status,
+            c.volume_status,
+            c.price_position,
+            p.close_price,
+            p.price_change,
+            p.price_change_percent,
+            CAST(p.volume AS CHAR) AS volume,
+            (c.chip_score + c.volume_score + c.price_score) AS strategy_score,
+            CONCAT('籌碼 ', c.chip_score, ' 分，', c.volume_status, '，', c.price_position) AS trigger_summary
+          FROM chip_scores c
+          LEFT JOIN stocks s
+            ON s.stock_code = c.stock_code
+          LEFT JOIN daily_prices p
+            ON p.stock_code = c.stock_code
+           AND p.trade_date = c.trade_date
+          WHERE c.trade_date = ?
+            ${marketCondition}
+            AND s.is_active = 1
+            AND c.chip_score >= 80
+            AND (COALESCE(p.price_change, 0) >= 0 OR c.price_score >= 10)
+          ORDER BY strategy_score DESC, c.chip_score DESC, c.stock_code ASC
+          LIMIT ?
+          `,
+          params,
+        );
+      }
+    }
+
+    const data = rows.map((row, index) => ({
+      rank: index + 1,
+      ...row,
+    }));
+
+    res.json({
+      success: true,
+      strategy: strategy.key,
+      strategy_name: strategy.name,
+      strategy_description: strategy.description,
+      trade_date: targetDate,
+      reference_date: referenceDate || targetDate,
+      market: market || "全部",
+      limit,
+      count: data.length,
+      strategies: STRATEGY_DEFINITIONS,
+      data: convertBigIntToString(data),
+    });
+  } catch (error) {
+    console.error("查詢選股策略失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢選股策略失敗",
+      error: error.message,
+    });
+  }
+});
+
 app.get("/watchlist", requireAuth, async (req, res) => {
   try {
     const rows = await getWatchlistRows(req.user.id);

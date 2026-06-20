@@ -37,6 +37,9 @@ const state = {
   alertUnreadCount: 0,
   alertRules: [],
   alertLastGenerateResult: null,
+  strategyKey: "legal_strength",
+  strategySummary: null,
+  strategyOptions: [],
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -63,6 +66,16 @@ const closeChartZoomBtn = document.getElementById("closeChartZoomBtn");
 const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
 const alertsTabBadge = document.getElementById("alertsTabBadge");
+
+
+const DEFAULT_STRATEGY_OPTIONS = [
+  { key: "legal_strength", name: "法人轉強股", short_name: "法人轉強", description: "外資或投信轉買，搭配籌碼分數排序。" },
+  { key: "major_holder_accumulate", name: "主力增持股", short_name: "主力增持", description: "大戶比重增加、籌碼更集中。" },
+  { key: "volume_price_breakout", name: "量價轉強股", short_name: "量價轉強", description: "成交量放大且股價位置偏強。" },
+  { key: "capital_inflow", name: "資金流入股", short_name: "資金流入", description: "三大法人合計買超較明顯。" },
+  { key: "etf_calendar_watch", name: "ETF 除息觀察", short_name: "ETF 除息", description: "ETF 即將發生除息或重要事件。" },
+  { key: "short_term_strong", name: "短線強勢股", short_name: "短線強勢", description: "籌碼分數高，量價與股價位置偏強。" },
+];
 
 let deferredInstallPrompt = null;
 let hideStatusTimer = null;
@@ -116,6 +129,30 @@ function formatAmountYi(value) {
   const numberValue = toNumber(value);
   if (numberValue === null) return "-";
   return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
+}
+
+
+function getStrategyOptions() {
+  return Array.isArray(state.strategyOptions) && state.strategyOptions.length > 0
+    ? state.strategyOptions
+    : DEFAULT_STRATEGY_OPTIONS;
+}
+
+function getStrategyOption(key = state.strategyKey) {
+  return getStrategyOptions().find((item) => item.key === key) || DEFAULT_STRATEGY_OPTIONS[0];
+}
+
+function formatLotsFromShares(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return (numberValue / 1000).toLocaleString("zh-TW", { maximumFractionDigits: 0 });
+}
+
+function formatSignedNumber(value, suffix = "") {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}${suffix}`;
 }
 
 function formatPercent(value) {
@@ -296,11 +333,21 @@ function updatePageText() {
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
   const isAlertsPage = state.page === "alerts";
+  const isStrategiesPage = state.page === "strategies";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
   marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+
+
+  if (state.page === "strategies") {
+    const activeStrategy = getStrategyOption(state.strategyKey);
+    pageTitle.textContent = "策略選股";
+    pageDesc.textContent = `${marketText}${activeStrategy.name}，用全市場資料快速篩出符合條件的觀察名單。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先選策略，再用上市 / 上櫃切換市場；這是篩選清單，不是買賣建議。</span>`;
+    return;
+  }
 
   if (state.page === "alerts") {
     pageTitle.textContent = isAlertRulesMode ? "提醒設定" : "提醒中心";
@@ -958,6 +1005,11 @@ function rerenderCurrentContent() {
     return;
   }
 
+  if (state.page === "strategies") {
+    renderStrategiesPage();
+    return;
+  }
+
   if (state.page === "alerts") {
     renderAlertsPage();
     return;
@@ -1256,6 +1308,217 @@ function renderGoogleButton() {
   }
 }
 
+
+
+function getStrategyToneClass(row) {
+  const score = toNumber(pick(row, ["strategy_score", "chip_score", "major_holder_score"], null));
+  if (score !== null && score >= 120) return "score-high";
+  if (score !== null && score >= 80) return "score-mid";
+  const chipScore = toNumber(pick(row, ["chip_score"], null));
+  if (chipScore !== null && chipScore >= 80) return "score-high";
+  if (chipScore !== null && chipScore >= 60) return "score-mid";
+  return "score-low";
+}
+
+function renderStrategyButtons() {
+  const options = getStrategyOptions();
+
+  return `
+    <section class="strategy-dashboard-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.3-2 選股策略</p>
+          <h3>策略清單</h3>
+          <p>目前策略：${escapeHtml(getStrategyOption().name)}。可切換不同角度找觀察名單。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>市場：${escapeHtml(state.market || "全部")}</span>
+          <span>筆數：${formatNumber(state.strategySummary?.count ?? state.latestRows.length ?? 0)}</span>
+          <span>資料日：${formatDate(state.strategySummary?.trade_date || state.strategySummary?.reference_date)}</span>
+        </div>
+      </div>
+      <div class="strategy-chip-row" aria-label="策略切換">
+        ${options.map((item) => `
+          <button class="strategy-chip ${item.key === state.strategyKey ? "active" : ""}" type="button" data-strategy-key="${escapeHtml(item.key)}">
+            <strong>${escapeHtml(item.short_name || item.name)}</strong>
+            <span>${escapeHtml(item.description || "")}</span>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function getStrategyMetricItems(row) {
+  const strategyKey = pick(row, ["strategy_key"], state.strategyKey);
+
+  if (strategyKey === "major_holder_accumulate") {
+    return [
+      createInfoItem("大戶比重", formatPercent(pick(row, ["large_holder_ratio"]))),
+      createInfoItem("比重變化", formatSignedNumber(pick(row, ["large_holder_ratio_change"]), "%"), getChangeClass(pick(row, ["large_holder_ratio_change"]))),
+      createInfoItem("散戶變化", formatSignedNumber(pick(row, ["small_holder_ratio_change"]), "%"), getChangeClass(pick(row, ["small_holder_ratio_change"]))),
+      createInfoItem("大戶分數", formatNumber(pick(row, ["strategy_score", "major_holder_score", "big_holder_score"]))),
+    ];
+  }
+
+  if (strategyKey === "etf_calendar_watch") {
+    return [
+      createInfoItem("事件日期", formatDate(pick(row, ["event_date"]))),
+      createInfoItem("剩餘天數", `${formatNumber(pick(row, ["days_left"]))} 天`),
+      createInfoItem("事件類型", escapeHtml(pick(row, ["event_type"]))),
+      createInfoItem("發行人", escapeHtml(pick(row, ["issuer"]))),
+    ];
+  }
+
+  if (strategyKey === "capital_inflow") {
+    return [
+      createInfoItem("法人合計", `${formatLotsValue(pick(row, ["total_net_lots"]), pick(row, ["total_net"]))} 張`, getChangeClass(pick(row, ["total_net"]))),
+      createInfoItem("外資", `${formatLotsValue(pick(row, ["foreign_net_lots"]), pick(row, ["foreign_net"]))} 張`, getChangeClass(pick(row, ["foreign_net"]))),
+      createInfoItem("投信", `${formatLotsValue(pick(row, ["investment_trust_net_lots"]), pick(row, ["investment_trust_net"]))} 張`, getChangeClass(pick(row, ["investment_trust_net"]))),
+      createInfoItem("籌碼分數", formatNumber(pick(row, ["chip_score"])), getScoreClass(pick(row, ["chip_score"]))),
+    ];
+  }
+
+  return [
+    createInfoItem("策略分數", formatNumber(pick(row, ["strategy_score", "chip_score"]))),
+    createInfoItem("籌碼分數", formatNumber(pick(row, ["chip_score"])), getScoreClass(pick(row, ["chip_score"]))),
+    createInfoItem("成交量", escapeHtml(pick(row, ["volume_status"], formatNumber(pick(row, ["volume"], "-"))))),
+    createInfoItem("股價位置", escapeHtml(pick(row, ["price_position"], "-"))),
+  ];
+}
+
+function renderStrategyCard(row, index) {
+  const code = pick(row, ["stock_code"], "-");
+  const name = pick(row, ["stock_name"], code);
+  const market = pick(row, ["market_type", "market"], "-");
+  const industry = pick(row, ["industry", "fund_type"], "-");
+  const strategyName = pick(row, ["strategy_name"], getStrategyOption().name);
+  const trigger = pick(row, ["trigger_summary", "title"], "符合目前策略條件");
+  const tradeDate = pick(row, ["trade_date", "data_date", "event_date"], state.strategySummary?.trade_date || "-");
+  const score = pick(row, ["strategy_score", "chip_score", "major_holder_score"], "-");
+  const closePrice = pick(row, ["close_price"], "-");
+  const change = pick(row, ["price_change"], "-");
+  const toneClass = getStrategyToneClass(row);
+  const metricItems = getStrategyMetricItems(row).join("");
+  const isEtfEvent = pick(row, ["strategy_key"], state.strategyKey) === "etf_calendar_watch";
+
+  return `
+    <article class="stock-card strategy-card ${escapeHtml(state.strategyKey)}">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">第 ${index + 1} 名</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge">${escapeHtml(industry)}</span>
+          </div>
+        </div>
+        <div class="score-box ${toneClass}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">策略分數</span>
+        </div>
+      </div>
+
+      <div class="quick-summary">
+        <span class="summary-pill ${toneClass}">${escapeHtml(strategyName)}</span>
+        <span class="summary-text">${escapeHtml(trigger)}</span>
+      </div>
+
+      ${!isEtfEvent ? `
+        <div class="quick-summary secondary-summary price-summary">
+          <span class="price-metric">收盤 ${formatDirectionalClosePrice(closePrice, change)}</span>
+          <span class="price-metric">漲跌 <strong class="${getChangeClass(change)}">${formatPrice(change)}</strong></span>
+        </div>
+      ` : `
+        <div class="quick-summary secondary-summary price-summary">
+          <span class="price-metric">${escapeHtml(pick(row, ["title"], "ETF 行事曆事件"))}</span>
+          <span class="price-metric">重要性：${escapeHtml(pick(row, ["importance"], "normal"))}</span>
+        </div>
+      `}
+
+      <div class="info-grid strategy-info-grid">
+        ${metricItems}
+      </div>
+
+      <div class="card-actions">
+        <span class="card-note">資料日：${formatDate(tradeDate)}</span>
+        ${getCardActionButtons(code, isEtfEvent ? "看 ETF" : "看明細", index)}
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategiesPage() {
+  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+
+  if (rows.length === 0) {
+    stockList.innerHTML = `
+      ${renderStrategyButtons()}
+      <article class="search-intro-card strategies-empty-card">
+        <div class="intro-icon">📊</div>
+        <h3>目前沒有符合策略的股票</h3>
+        <p>可以切換策略或市場，也可以等下一次每日資料更新後再查看。</p>
+      </article>
+    `;
+    return;
+  }
+
+  stockList.innerHTML = `
+    ${renderStrategyButtons()}
+    <div class="strategy-result-note">
+      目前顯示 <strong>${escapeHtml(getStrategyOption().name)}</strong>，共 <strong>${formatNumber(rows.length)}</strong> 筆。清單用途是快速篩選觀察股，不代表一定會上漲。
+    </div>
+    ${rows.map(renderStrategyCard).join("")}
+  `;
+}
+
+async function loadStrategies() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const params = new URLSearchParams();
+    params.set("strategy", state.strategyKey);
+    params.set("limit", "30");
+    if (state.market) params.set("market", state.market);
+
+    const result = await fetchJson(`/strategies?${params.toString()}`, { raw: true });
+    state.latestRows = Array.isArray(result.data) ? result.data : [];
+    state.strategySummary = {
+      count: result.count,
+      trade_date: result.trade_date,
+      reference_date: result.reference_date,
+      market: result.market,
+      strategy_name: result.strategy_name,
+    };
+    state.strategyOptions = Array.isArray(result.strategies) ? result.strategies : DEFAULT_STRATEGY_OPTIONS;
+    renderStrategiesPage();
+    showTemporaryStatus(`已更新 ${escapeHtml(result.strategy_name || getStrategyOption().name)}：${state.latestRows.length} 筆。`, "success");
+  } catch (error) {
+    state.latestRows = [];
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>策略選股讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+      </article>
+    `;
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+    showStatus(`策略選股讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleStrategyChange(button) {
+  const key = button.dataset.strategyKey;
+  if (!key || key === state.strategyKey) return;
+  state.strategyKey = key;
+  state.strategySummary = null;
+  loadList();
+}
 
 function getAlertTypeLabel(type) {
   const map = {
@@ -2697,6 +2960,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "strategies") {
+    await loadStrategies();
+    return;
+  }
+
   if (state.page === "watchlist") {
     if (!isAuthenticated()) {
       setLoading(false);
@@ -2875,6 +3143,9 @@ function switchPage(page) {
   if (page === "alerts") {
     state.alertMode = "list";
   }
+  if (page === "strategies") {
+    state.strategySummary = null;
+  }
   loadList();
 }
 
@@ -2905,6 +3176,12 @@ stockList.addEventListener("click", (event) => {
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
+    return;
+  }
+
+  const strategyButton = event.target.closest("[data-strategy-key]");
+  if (strategyButton) {
+    handleStrategyChange(strategyButton);
     return;
   }
 
