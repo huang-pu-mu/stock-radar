@@ -319,6 +319,27 @@ function formatPercent(value) {
   return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 1 })}%`;
 }
 
+function formatReturnPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`;
+}
+
+function getReturnClass(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null || numberValue === 0) return "price-flat";
+  return numberValue > 0 ? "price-up" : "price-down";
+}
+
+function getPerformanceLevelClass(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "pending";
+  if (numberValue >= 3) return "positive";
+  if (numberValue <= -3) return "negative";
+  return "neutral";
+}
+
 function formatPrice(value) {
   const numberValue = toNumber(value);
   if (numberValue === null) return escapeHtml(value ?? "-");
@@ -1648,24 +1669,57 @@ function renderEmptyStrategyTracking() {
 function renderStrategyTrackingSummary() {
   const summary = state.strategyTrackSummary || {};
   const byStrategy = Array.isArray(summary.by_strategy) ? summary.by_strategy : [];
+  const performance = summary.performance || {};
+  const performanceByStrategy = Array.isArray(performance.by_strategy) ? performance.by_strategy : [];
 
   return `
     <section class="strategy-dashboard-card strategy-track-summary-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.3-2-3 策略追蹤</p>
+          <p class="section-kicker">V1.3-2-4 策略追蹤表現</p>
           <h3>策略追蹤清單</h3>
-          <p>記錄你從策略選股加入的股票，方便後續回頭觀察是否真的轉強。</p>
+          <p>記錄你從策略選股加入的股票，並追蹤加入後 1 / 3 / 5 個交易日與目前報酬。</p>
         </div>
         <div class="strategy-meta-box">
           <span>追蹤中：${formatNumber(summary.active_count ?? state.latestRows.length ?? 0)}</span>
           <span>全部：${formatNumber(summary.total_count ?? state.latestRows.length ?? 0)}</span>
+          <span>已評估：${formatNumber(performance.evaluated_count ?? 0)}</span>
+        </div>
+      </div>
+      <div class="strategy-performance-summary-grid">
+        <div class="strategy-performance-stat">
+          <span>平均目前報酬</span>
+          <strong class="${getReturnClass(performance.avg_current_return_percent)}">${formatReturnPercent(performance.avg_current_return_percent)}</strong>
+        </div>
+        <div class="strategy-performance-stat">
+          <span>正報酬比例</span>
+          <strong>${formatPercent(performance.win_rate_percent)}</strong>
+        </div>
+        <div class="strategy-performance-stat">
+          <span>正 / 負 / 待資料</span>
+          <strong>${formatNumber(performance.positive_count ?? 0)} / ${formatNumber(performance.negative_count ?? 0)} / ${formatNumber(performance.pending_count ?? 0)}</strong>
+        </div>
+        <div class="strategy-performance-stat">
+          <span>目前最佳</span>
+          <strong>${performance.best ? `${escapeHtml(performance.best.stock_code)} ${formatReturnPercent(performance.best.current_return_percent)}` : "-"}</strong>
         </div>
       </div>
       ${byStrategy.length ? `
         <div class="strategy-track-chip-row">
           ${byStrategy.map((item) => `
             <span class="summary-pill score-mid">${escapeHtml(item.strategy_name || item.strategy_key)}：${formatNumber(item.count)} 檔</span>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${performanceByStrategy.length ? `
+        <div class="strategy-performance-table">
+          <div class="strategy-performance-table-title">各策略目前表現</div>
+          ${performanceByStrategy.map((item) => `
+            <div class="strategy-performance-row">
+              <span>${escapeHtml(item.strategy_name || item.strategy_key)}</span>
+              <span>平均 <b class="${getReturnClass(item.avg_current_return_percent)}">${formatReturnPercent(item.avg_current_return_percent)}</b></span>
+              <span>正報酬 ${formatPercent(item.win_rate_percent)}</span>
+            </div>
           `).join("")}
         </div>
       ` : ""}
@@ -1686,16 +1740,29 @@ function renderStrategyTrackingCard(row, index) {
   const change = pick(row, ["price_change"], "-");
   const trigger = pick(row, ["trigger_summary"], "從策略選股加入追蹤");
   const createdAt = pick(row, ["created_at"], "-");
+  const currentReturn = pick(row, ["current_return_percent"], null);
+  const performanceStatusText = pick(row, ["performance_status_text"], "觀察中");
+  const returnClass = getReturnClass(currentReturn);
+  const performanceLevel = getPerformanceLevelClass(currentReturn);
   const toneClass = getScoreClass(currentScore);
 
   const items = [
     createInfoItem("來源策略", escapeHtml(strategyName)),
     createInfoItem("加入時分數", formatNumber(sourceScore)),
+    createInfoItem("加入價", formatPrice(pick(row, ["entry_price"], "-"))),
+    createInfoItem("目前收盤", formatDirectionalClosePrice(closePrice, change)),
+    createInfoItem("目前報酬", formatReturnPercent(currentReturn), returnClass),
     createInfoItem("目前籌碼分數", formatNumber(currentScore), getScoreClass(currentScore)),
-    createInfoItem("收盤價", formatDirectionalClosePrice(closePrice, change)),
     createInfoItem("股價位置", escapeHtml(pick(row, ["price_position"], "-"))),
     createInfoItem("成交量狀態", escapeHtml(pick(row, ["volume_status"], "-"))),
   ].join("");
+
+  const performancePoints = [
+    { label: "1日", value: pick(row, ["day1_return_percent"], null), date: pick(row, ["day1_trade_date"], "-") },
+    { label: "3日", value: pick(row, ["day3_return_percent"], null), date: pick(row, ["day3_trade_date"], "-") },
+    { label: "5日", value: pick(row, ["day5_return_percent"], null), date: pick(row, ["day5_trade_date"], "-") },
+    { label: "目前", value: currentReturn, date: pick(row, ["latest_price_date"], "-") },
+  ];
 
   return `
     <article class="stock-card strategy-track-card">
@@ -1716,11 +1783,22 @@ function renderStrategyTrackingCard(row, index) {
       </div>
       <div class="quick-summary">
         <span class="summary-pill score-mid">${escapeHtml(strategyName)}</span>
+        <span class="summary-pill performance-${performanceLevel}">${escapeHtml(performanceStatusText)} ${formatReturnPercent(currentReturn)}</span>
         <span class="summary-text">${escapeHtml(trigger)}</span>
       </div>
       <div class="quick-summary secondary-summary price-summary">
         <span class="price-metric">來源日：${formatDate(sourceDate)}</span>
+        <span class="price-metric">加入價：${formatPrice(pick(row, ["entry_price"], "-"))}</span>
         <span class="price-metric">追蹤時間：${escapeHtml(createdAt)}</span>
+      </div>
+      <div class="strategy-performance-timeline">
+        ${performancePoints.map((point) => `
+          <div class="strategy-performance-point ${getReturnClass(point.value)}">
+            <span>${point.label}</span>
+            <strong>${formatReturnPercent(point.value)}</strong>
+            <small>${formatDate(point.date)}</small>
+          </div>
+        `).join("")}
       </div>
       <div class="info-grid strategy-info-grid">
         ${items}
@@ -1748,7 +1826,7 @@ function renderStrategyTrackingPage() {
   stockList.innerHTML = `
     ${renderStrategyTrackingSummary()}
     <div class="strategy-result-note">
-      這裡只表示「需要繼續觀察」，不是買賣建議。後續可比較加入時分數與目前籌碼分數、收盤價、成交量狀態。
+      這裡只表示「需要繼續觀察」，不是買賣建議。報酬統計以加入追蹤時的來源日收盤價為基準，並以後續交易日收盤價估算。
     </div>
     ${rows.map(renderStrategyTrackingCard).join("")}
   `;

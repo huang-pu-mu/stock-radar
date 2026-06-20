@@ -2716,3 +2716,118 @@ body.chart-zoom-open {
   background: rgba(127, 29, 29, 0.22) !important;
   color: #fecaca !important;
 }
+
+/* V1.3-2-4 策略追蹤後續表現 */
+.strategy-performance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.strategy-performance-stat {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.42);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.strategy-performance-stat span {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.strategy-performance-stat strong {
+  color: #e2e8f0;
+  font-size: 18px;
+}
+
+.strategy-performance-table {
+  margin-top: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.strategy-performance-table-title {
+  padding: 10px 12px;
+  font-weight: 800;
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.strategy-performance-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.strategy-performance-row:last-child {
+  border-bottom: none;
+}
+
+.strategy-performance-timeline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.strategy-performance-point {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 14px;
+  padding: 10px;
+}
+
+.strategy-performance-point span,
+.strategy-performance-point small {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.strategy-performance-point strong {
+  display: block;
+  margin: 3px 0;
+  font-size: 17px;
+}
+
+.summary-pill.performance-positive {
+  background: rgba(16, 185, 129, 0.18);
+  color: #bbf7d0;
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.summary-pill.performance-negative {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.summary-pill.performance-neutral {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.summary-pill.performance-pending {
+  background: rgba(100, 116, 139, 0.18);
+  color: #cbd5e1;
+  border-color: rgba(100, 116, 139, 0.4);
+}
+
+@media (max-width: 900px) {
+  .strategy-performance-summary-grid,
+  .strategy-performance-timeline,
+  .strategy-performance-row {
+    grid-template-columns: 1fr;
+  }
+}

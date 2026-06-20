@@ -443,6 +443,14 @@ async function getStrategyTrackingRows(userId, filters = {}) {
       t.is_active,
       DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at,
+      sp.close_price AS entry_price,
+      DATE_FORMAT(sp.trade_date, '%Y-%m-%d') AS entry_trade_date,
+      d1.close_price AS day1_close_price,
+      DATE_FORMAT(d1.trade_date, '%Y-%m-%d') AS day1_trade_date,
+      d3.close_price AS day3_close_price,
+      DATE_FORMAT(d3.trade_date, '%Y-%m-%d') AS day3_trade_date,
+      d5.close_price AS day5_close_price,
+      DATE_FORMAT(d5.trade_date, '%Y-%m-%d') AS day5_trade_date,
       p.close_price,
       p.price_change,
       p.price_change_percent,
@@ -456,6 +464,44 @@ async function getStrategyTrackingRows(userId, filters = {}) {
     FROM strategy_watchlists t
     LEFT JOIN stocks s
       ON s.stock_code = t.stock_code
+    LEFT JOIN daily_prices sp
+      ON sp.stock_code = t.stock_code
+     AND sp.trade_date = (
+       SELECT MAX(sp2.trade_date)
+       FROM daily_prices sp2
+       WHERE sp2.stock_code = t.stock_code
+         AND sp2.trade_date <= COALESCE(t.source_trade_date, DATE(t.created_at))
+     )
+    LEFT JOIN daily_prices d1
+      ON d1.stock_code = t.stock_code
+     AND d1.trade_date = (
+       SELECT d1x.trade_date
+       FROM daily_prices d1x
+       WHERE d1x.stock_code = t.stock_code
+         AND d1x.trade_date > COALESCE(t.source_trade_date, DATE(t.created_at))
+       ORDER BY d1x.trade_date ASC
+       LIMIT 1
+     )
+    LEFT JOIN daily_prices d3
+      ON d3.stock_code = t.stock_code
+     AND d3.trade_date = (
+       SELECT d3x.trade_date
+       FROM daily_prices d3x
+       WHERE d3x.stock_code = t.stock_code
+         AND d3x.trade_date > COALESCE(t.source_trade_date, DATE(t.created_at))
+       ORDER BY d3x.trade_date ASC
+       LIMIT 2, 1
+     )
+    LEFT JOIN daily_prices d5
+      ON d5.stock_code = t.stock_code
+     AND d5.trade_date = (
+       SELECT d5x.trade_date
+       FROM daily_prices d5x
+       WHERE d5x.stock_code = t.stock_code
+         AND d5x.trade_date > COALESCE(t.source_trade_date, DATE(t.created_at))
+       ORDER BY d5x.trade_date ASC
+       LIMIT 4, 1
+     )
     LEFT JOIN daily_prices p
       ON p.stock_code = t.stock_code
      AND p.trade_date = (
@@ -477,7 +523,159 @@ async function getStrategyTrackingRows(userId, filters = {}) {
     [...params, limit, offset],
   );
 
-  return rows;
+  return rows.map(enrichStrategyTrackingPerformance);
+}
+
+function toPerformanceNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function calculateReturnPercent(basePrice, comparePrice) {
+  const base = toPerformanceNumber(basePrice);
+  const compare = toPerformanceNumber(comparePrice);
+
+  if (base === null || compare === null || base === 0) return null;
+  return Number((((compare - base) / base) * 100).toFixed(4));
+}
+
+function getStrategyPerformanceStatus(returnPercent) {
+  const value = toPerformanceNumber(returnPercent);
+
+  if (value === null) {
+    return { status: "pending", text: "等待資料", level: "pending" };
+  }
+
+  if (value >= 3) {
+    return { status: "success", text: "轉強", level: "positive" };
+  }
+
+  if (value <= -3) {
+    return { status: "risk", text: "轉弱", level: "negative" };
+  }
+
+  return { status: "observing", text: "觀察中", level: "neutral" };
+}
+
+function buildStrategyPerformancePoint(row, dayKey, label) {
+  const closePrice = row?.[`${dayKey}_close_price`];
+  const tradeDate = row?.[`${dayKey}_trade_date`];
+  const returnPercent = calculateReturnPercent(row?.entry_price, closePrice);
+  const status = getStrategyPerformanceStatus(returnPercent);
+
+  return {
+    label,
+    trade_date: tradeDate || null,
+    close_price: closePrice ?? null,
+    return_percent: returnPercent,
+    status: status.status,
+    status_text: status.text,
+    level: status.level,
+  };
+}
+
+function enrichStrategyTrackingPerformance(row) {
+  const currentReturnPercent = calculateReturnPercent(row?.entry_price, row?.close_price);
+  const currentStatus = getStrategyPerformanceStatus(currentReturnPercent);
+  const performance = {
+    entry_trade_date: row?.entry_trade_date || row?.source_trade_date || null,
+    entry_price: row?.entry_price ?? null,
+    day1: buildStrategyPerformancePoint(row, "day1", "追蹤後 1 個交易日"),
+    day3: buildStrategyPerformancePoint(row, "day3", "追蹤後 3 個交易日"),
+    day5: buildStrategyPerformancePoint(row, "day5", "追蹤後 5 個交易日"),
+    latest_trade_date: row?.latest_price_date || null,
+    latest_close_price: row?.close_price ?? null,
+    current_return_percent: currentReturnPercent,
+    status: currentStatus.status,
+    status_text: currentStatus.text,
+    level: currentStatus.level,
+  };
+
+  return {
+    ...row,
+    entry_price: performance.entry_price,
+    entry_trade_date: performance.entry_trade_date,
+    day1_return_percent: performance.day1.return_percent,
+    day3_return_percent: performance.day3.return_percent,
+    day5_return_percent: performance.day5.return_percent,
+    current_return_percent: performance.current_return_percent,
+    performance_status: performance.status,
+    performance_status_text: performance.status_text,
+    performance_level: performance.level,
+    performance,
+  };
+}
+
+function summarizeStrategyTrackingPerformance(rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const numericRows = safeRows.filter((row) => toPerformanceNumber(row.current_return_percent) !== null);
+  const sum = numericRows.reduce((total, row) => total + Number(row.current_return_percent), 0);
+  const positiveRows = numericRows.filter((row) => Number(row.current_return_percent) > 0);
+  const negativeRows = numericRows.filter((row) => Number(row.current_return_percent) < 0);
+  const flatRows = numericRows.filter((row) => Number(row.current_return_percent) === 0);
+  const bestRow = numericRows.length
+    ? [...numericRows].sort((a, b) => Number(b.current_return_percent) - Number(a.current_return_percent))[0]
+    : null;
+  const worstRow = numericRows.length
+    ? [...numericRows].sort((a, b) => Number(a.current_return_percent) - Number(b.current_return_percent))[0]
+    : null;
+
+  const strategyMap = new Map();
+  for (const row of numericRows) {
+    const key = row.strategy_key || "unknown";
+    const current = strategyMap.get(key) || {
+      strategy_key: key,
+      strategy_name: row.strategy_name || key,
+      total_count: 0,
+      positive_count: 0,
+      negative_count: 0,
+      return_sum: 0,
+    };
+    const returnPercent = Number(row.current_return_percent);
+    current.total_count += 1;
+    current.return_sum += returnPercent;
+    if (returnPercent > 0) current.positive_count += 1;
+    if (returnPercent < 0) current.negative_count += 1;
+    strategyMap.set(key, current);
+  }
+
+  const byStrategy = Array.from(strategyMap.values())
+    .map((item) => ({
+      strategy_key: item.strategy_key,
+      strategy_name: item.strategy_name,
+      total_count: item.total_count,
+      positive_count: item.positive_count,
+      negative_count: item.negative_count,
+      avg_current_return_percent: item.total_count ? Number((item.return_sum / item.total_count).toFixed(4)) : null,
+      win_rate_percent: item.total_count ? Number(((item.positive_count / item.total_count) * 100).toFixed(2)) : null,
+    }))
+    .sort((a, b) => Number(b.avg_current_return_percent ?? -999) - Number(a.avg_current_return_percent ?? -999));
+
+  return {
+    evaluated_count: numericRows.length,
+    pending_count: safeRows.length - numericRows.length,
+    positive_count: positiveRows.length,
+    negative_count: negativeRows.length,
+    flat_count: flatRows.length,
+    avg_current_return_percent: numericRows.length ? Number((sum / numericRows.length).toFixed(4)) : null,
+    win_rate_percent: numericRows.length ? Number(((positiveRows.length / numericRows.length) * 100).toFixed(2)) : null,
+    best: bestRow ? {
+      stock_code: bestRow.stock_code,
+      stock_name: bestRow.stock_name,
+      strategy_key: bestRow.strategy_key,
+      strategy_name: bestRow.strategy_name,
+      current_return_percent: bestRow.current_return_percent,
+    } : null,
+    worst: worstRow ? {
+      stock_code: worstRow.stock_code,
+      stock_name: worstRow.stock_name,
+      strategy_key: worstRow.strategy_key,
+      strategy_name: worstRow.strategy_name,
+      current_return_percent: worstRow.current_return_percent,
+    } : null,
+    by_strategy: byStrategy,
+  };
 }
 
 
@@ -3274,6 +3472,8 @@ app.get("/strategy-watchlist", requireAuth, async (req, res) => {
       [req.user.id],
     );
 
+    const performanceSummary = summarizeStrategyTrackingPerformance(rows);
+
     res.json({
       success: true,
       count: rows.length,
@@ -3286,6 +3486,7 @@ app.get("/strategy-watchlist", requireAuth, async (req, res) => {
           strategy_name: row.strategy_name,
           count: Number(row.count || 0),
         })),
+        performance: performanceSummary,
       }),
       data: convertBigIntToString(rows),
     });
@@ -3299,6 +3500,36 @@ app.get("/strategy-watchlist", requireAuth, async (req, res) => {
     });
   }
 });
+
+// ==============================
+// V1.3-2-4：策略追蹤後續表現統計
+// GET /strategy-watchlist/performance?strategy=legal_strength&active=1
+// ==============================
+app.get("/strategy-watchlist/performance", requireAuth, async (req, res) => {
+  try {
+    const rows = await getStrategyTrackingRows(req.user.id, {
+      ...req.query,
+      limit: req.query.limit || 200,
+    });
+    const summary = summarizeStrategyTrackingPerformance(rows);
+
+    res.json({
+      success: true,
+      count: rows.length,
+      summary: convertBigIntToString(summary),
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢策略追蹤表現失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢策略追蹤表現失敗",
+      error: error.message,
+    });
+  }
+});
+
 
 // ==============================
 // V1.3-2-3：新增 / 更新策略追蹤
