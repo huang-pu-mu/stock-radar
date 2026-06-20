@@ -379,6 +379,107 @@ function getStrategyDefinition(key) {
   return STRATEGY_DEFINITIONS.find((item) => item.key === strategyKey) || STRATEGY_DEFINITIONS[0];
 }
 
+function normalizeStrategyKeyValue(value) {
+  const key = String(value || "").trim();
+  return STRATEGY_DEFINITIONS.some((item) => item.key === key) ? key : "";
+}
+
+function normalizeShortText(value, maxLength = 255) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function parseNullableDateValue(value) {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function parseNullableDecimalValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+async function getStrategyTrackingRows(userId, filters = {}) {
+  const conditions = ["t.user_id = ?"];
+  const params = [userId];
+  const strategyKey = normalizeStrategyKeyValue(filters.strategy || filters.strategy_key);
+  const stockCode = normalizeStockCodeValue(filters.stock_code || filters.stockCode);
+  const active = filters.active ?? filters.is_active;
+  const limit = parsePositiveInteger(filters.limit, 100, 1, 200);
+  const offset = parsePositiveInteger(filters.offset, 0, 0, 100000);
+
+  if (strategyKey) {
+    conditions.push("t.strategy_key = ?");
+    params.push(strategyKey);
+  }
+
+  if (stockCode) {
+    conditions.push("t.stock_code = ?");
+    params.push(stockCode);
+  }
+
+  if (active !== undefined && active !== null && active !== "") {
+    conditions.push("t.is_active = ?");
+    params.push(parseBooleanFlag(active, true));
+  }
+
+  const rows = await query(
+    `
+    SELECT
+      t.id,
+      t.user_id,
+      t.stock_code,
+      COALESCE(s.stock_name, t.stock_name, t.stock_code) AS stock_name,
+      COALESCE(s.market_type, t.market_type) AS market_type,
+      COALESCE(s.industry, t.industry) AS industry,
+      t.strategy_key,
+      t.strategy_name,
+      DATE_FORMAT(t.source_trade_date, '%Y-%m-%d') AS source_trade_date,
+      t.source_score,
+      t.source_rank,
+      t.trigger_summary,
+      t.note,
+      t.is_active,
+      DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at,
+      p.close_price,
+      p.price_change,
+      p.price_change_percent,
+      DATE_FORMAT(p.trade_date, '%Y-%m-%d') AS latest_price_date,
+      c.chip_score,
+      c.foreign_status,
+      c.investment_trust_status,
+      c.volume_status,
+      c.price_position,
+      DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS latest_score_date
+    FROM strategy_watchlists t
+    LEFT JOIN stocks s
+      ON s.stock_code = t.stock_code
+    LEFT JOIN daily_prices p
+      ON p.stock_code = t.stock_code
+     AND p.trade_date = (
+       SELECT MAX(p2.trade_date)
+       FROM daily_prices p2
+       WHERE p2.stock_code = t.stock_code
+     )
+    LEFT JOIN chip_scores c
+      ON c.stock_code = t.stock_code
+     AND c.trade_date = (
+       SELECT MAX(c2.trade_date)
+       FROM chip_scores c2
+       WHERE c2.stock_code = t.stock_code
+     )
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY t.is_active DESC, t.created_at DESC, t.id DESC
+    LIMIT ? OFFSET ?
+    `,
+    [...params, limit, offset],
+  );
+
+  return rows;
+}
+
 
 function toStrategyNumber(value, fallback = 0) {
   const numberValue = Number(value);
@@ -3137,6 +3238,217 @@ app.get("/strategies", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢選股策略失敗",
+      error: error.message,
+    });
+  }
+});
+
+
+// ==============================
+// V1.3-2-3：策略追蹤清單
+// GET /strategy-watchlist?strategy=legal_strength&active=1
+// ==============================
+app.get("/strategy-watchlist", requireAuth, async (req, res) => {
+  try {
+    const rows = await getStrategyTrackingRows(req.user.id, req.query);
+    const summaryRows = await query(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
+        SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) AS inactive_count
+      FROM strategy_watchlists
+      WHERE user_id = ?
+      `,
+      [req.user.id],
+    );
+    const strategyRows = await query(
+      `
+      SELECT strategy_key, strategy_name, COUNT(*) AS count
+      FROM strategy_watchlists
+      WHERE user_id = ?
+        AND is_active = 1
+      GROUP BY strategy_key, strategy_name
+      ORDER BY count DESC, strategy_key ASC
+      `,
+      [req.user.id],
+    );
+
+    res.json({
+      success: true,
+      count: rows.length,
+      summary: convertBigIntToString({
+        total_count: Number(summaryRows[0]?.total_count || 0),
+        active_count: Number(summaryRows[0]?.active_count || 0),
+        inactive_count: Number(summaryRows[0]?.inactive_count || 0),
+        by_strategy: strategyRows.map((row) => ({
+          strategy_key: row.strategy_key,
+          strategy_name: row.strategy_name,
+          count: Number(row.count || 0),
+        })),
+      }),
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢策略追蹤清單失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢策略追蹤清單失敗，請確認是否已執行 npm run strategy-watchlists:setup。",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-2-3：新增 / 更新策略追蹤
+// POST /strategy-watchlist
+// ==============================
+app.post("/strategy-watchlist", requireAuth, async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.body?.stock_code);
+    const strategyKey = normalizeStrategyKeyValue(req.body?.strategy_key);
+
+    if (!stockCode || !isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確。",
+      });
+    }
+
+    if (!strategyKey) {
+      return res.status(400).json({
+        success: false,
+        message: "策略代號格式不正確。",
+      });
+    }
+
+    const strategy = getStrategyDefinition(strategyKey);
+    const stockRows = await query(
+      `
+      SELECT stock_code, stock_name, market_type, industry
+      FROM stocks
+      WHERE stock_code = ?
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+    const stock = stockRows[0] || {};
+    const stockName = normalizeShortText(req.body?.stock_name || stock.stock_name || stockCode, 100);
+    const marketType = normalizeShortText(req.body?.market_type || stock.market_type, 20);
+    const industry = normalizeShortText(req.body?.industry || stock.industry, 100);
+    const sourceTradeDate = parseNullableDateValue(req.body?.source_trade_date || req.body?.trade_date || req.body?.event_date);
+    const sourceScore = parseNullableDecimalValue(req.body?.source_score || req.body?.strategy_score || req.body?.chip_score);
+    const sourceRank = parsePositiveInteger(req.body?.source_rank || req.body?.rank, null, 1, 100000);
+    const triggerSummary = normalizeShortText(req.body?.trigger_summary || req.body?.title || req.body?.message, 500);
+    const note = normalizeShortText(req.body?.note, 255);
+
+    await query(
+      `
+      INSERT INTO strategy_watchlists (
+        user_id,
+        stock_code,
+        stock_name,
+        market_type,
+        industry,
+        strategy_key,
+        strategy_name,
+        source_trade_date,
+        source_score,
+        source_rank,
+        trigger_summary,
+        note,
+        is_active
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      ON DUPLICATE KEY UPDATE
+        stock_name = VALUES(stock_name),
+        market_type = VALUES(market_type),
+        industry = VALUES(industry),
+        strategy_name = VALUES(strategy_name),
+        source_trade_date = VALUES(source_trade_date),
+        source_score = VALUES(source_score),
+        source_rank = VALUES(source_rank),
+        trigger_summary = VALUES(trigger_summary),
+        note = COALESCE(VALUES(note), note),
+        is_active = 1,
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        req.user.id,
+        stockCode,
+        stockName,
+        marketType,
+        industry,
+        strategy.key,
+        strategy.name,
+        sourceTradeDate,
+        sourceScore,
+        sourceRank,
+        triggerSummary,
+        note,
+      ],
+    );
+
+    const rows = await getStrategyTrackingRows(req.user.id, {
+      stock_code: stockCode,
+      strategy: strategy.key,
+      active: 1,
+      limit: 1,
+    });
+
+    res.json({
+      success: true,
+      message: "已加入策略追蹤",
+      data: convertBigIntToString(rows[0] || { stock_code: stockCode, strategy_key: strategy.key }),
+    });
+  } catch (error) {
+    console.error("新增策略追蹤失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "新增策略追蹤失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-2-3：移除策略追蹤
+// DELETE /strategy-watchlist/:trackId
+// ==============================
+app.delete("/strategy-watchlist/:trackId", requireAuth, async (req, res) => {
+  try {
+    const trackId = parsePositiveInteger(req.params.trackId, 0, 0, Number.MAX_SAFE_INTEGER);
+
+    if (!trackId) {
+      return res.status(400).json({
+        success: false,
+        message: "策略追蹤 ID 格式不正確。",
+      });
+    }
+
+    const result = await query(
+      `
+      DELETE FROM strategy_watchlists
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [trackId, req.user.id],
+    );
+
+    res.json({
+      success: true,
+      message: "已移除策略追蹤",
+      affected_rows: Number(result?.affectedRows || 0),
+      data: { id: trackId },
+    });
+  } catch (error) {
+    console.error("移除策略追蹤失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "移除策略追蹤失敗",
       error: error.message,
     });
   }

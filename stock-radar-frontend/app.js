@@ -40,6 +40,8 @@ const state = {
   strategyKey: "legal_strength",
   strategySummary: null,
   strategyOptions: [],
+  strategyTrackKeys: new Set(),
+  strategyTrackSummary: null,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -490,12 +492,20 @@ function updatePageText() {
   const isWatchlistPage = state.page === "watchlist";
   const isAlertsPage = state.page === "alerts";
   const isStrategiesPage = state.page === "strategies";
+  const isStrategyTracksPage = state.page === "strategyTracks";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isStrategyTracksPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
 
+
+  if (state.page === "strategyTracks") {
+    pageTitle.textContent = "策略追蹤";
+    pageDesc.textContent = "保存從策略選股加入的股票，方便之後回頭檢查後續表現。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡是觀察清單，不是買進清單；重點是追蹤加入後是否持續轉強。</span>`;
+    return;
+  }
 
   if (state.page === "strategies") {
     const activeStrategy = getStrategyOption(state.strategyKey);
@@ -1161,6 +1171,11 @@ function rerenderCurrentContent() {
     return;
   }
 
+  if (state.page === "strategyTracks") {
+    renderStrategyTrackingPage();
+    return;
+  }
+
   if (state.page === "strategies") {
     renderStrategiesPage();
     return;
@@ -1466,6 +1481,319 @@ function renderGoogleButton() {
 
 
 
+
+function getStrategyTrackKey(stockCode, strategyKey) {
+  const code = normalizeStockCode(stockCode);
+  const key = String(strategyKey || state.strategyKey || "").trim();
+  return code && key ? `${key}::${code}` : "";
+}
+
+async function refreshStrategyTrackKeys(rows = null) {
+  if (!isAuthenticated()) {
+    state.strategyTrackKeys = new Set();
+    return [];
+  }
+
+  const trackRows = rows || await fetchJson("/strategy-watchlist?active=1&limit=200", {
+    method: "GET",
+    auth: true,
+  });
+  const safeRows = Array.isArray(trackRows) ? trackRows : [];
+  state.strategyTrackKeys = new Set(
+    safeRows
+      .map((row) => getStrategyTrackKey(row.stock_code, row.strategy_key))
+      .filter(Boolean)
+  );
+  return safeRows;
+}
+
+function getStrategyTrackButton(row, index = -1) {
+  const code = normalizeStockCode(pick(row, ["stock_code", "code"], ""));
+  const strategyKey = pick(row, ["strategy_key"], state.strategyKey);
+
+  if (!code || code === "-") return "";
+
+  if (!isAuthenticated()) {
+    return `
+      <button class="strategy-track-btn login-required" type="button" data-strategy-track-action="login" data-code="${escapeHtml(code)}">
+        策略追蹤
+      </button>
+    `;
+  }
+
+  const trackKey = getStrategyTrackKey(code, strategyKey);
+  const isTracked = state.strategyTrackKeys.has(trackKey);
+
+  return `
+    <button class="strategy-track-btn ${isTracked ? "tracked" : ""}" type="button" data-strategy-track-action="${isTracked ? "view" : "add"}" data-strategy-row-index="${index}" data-code="${escapeHtml(code)}" data-track-strategy-key="${escapeHtml(strategyKey)}">
+      ${isTracked ? "已追蹤" : "策略追蹤"}
+    </button>
+  `;
+}
+
+function getStrategyTrackPayload(row, index = 0) {
+  return {
+    stock_code: normalizeStockCode(pick(row, ["stock_code", "code"], "")),
+    stock_name: pick(row, ["stock_name", "name"], ""),
+    market_type: pick(row, ["market_type", "market"], ""),
+    industry: pick(row, ["industry", "fund_type"], ""),
+    strategy_key: pick(row, ["strategy_key"], state.strategyKey),
+    strategy_name: pick(row, ["strategy_name"], getStrategyOption().name),
+    source_trade_date: pick(row, ["trade_date", "data_date", "event_date"], state.strategySummary?.trade_date || ""),
+    source_score: pick(row, ["strategy_score", "chip_score", "major_holder_score"], null),
+    source_rank: index + 1,
+    trigger_summary: pick(row, ["trigger_summary", "title"], "符合策略條件"),
+  };
+}
+
+async function handleStrategyTrackAction(button) {
+  const action = button.dataset.strategyTrackAction;
+
+  if (action === "login") {
+    showStatus("請先使用 Google 帳號登入，登入後才能加入策略追蹤。", "error");
+    switchPage("account");
+    return;
+  }
+
+  if (!isAuthenticated()) {
+    showStatus("請先使用 Google 帳號登入。", "error");
+    switchPage("account");
+    return;
+  }
+
+  if (action === "view") {
+    switchPage("strategyTracks");
+    return;
+  }
+
+  const rowIndex = Number(button.dataset.strategyRowIndex || -1);
+  const row = Number.isInteger(rowIndex) && rowIndex >= 0 ? state.latestRows[rowIndex] : null;
+
+  if (!row) {
+    showStatus("找不到要加入策略追蹤的資料，請重新整理後再試。", "error");
+    return;
+  }
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "加入中...";
+
+  try {
+    const payload = getStrategyTrackPayload(row, rowIndex);
+    await fetchJson("/strategy-watchlist", {
+      method: "POST",
+      auth: true,
+      body: payload,
+    });
+    state.strategyTrackKeys.add(getStrategyTrackKey(payload.stock_code, payload.strategy_key));
+    rerenderCurrentContent();
+    showTemporaryStatus(`已加入策略追蹤：${escapeHtml(payload.stock_code)} ${escapeHtml(payload.strategy_name)}`, "success");
+  } catch (error) {
+    showStatus(`加入策略追蹤失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function handleStrategyTrackRemove(button) {
+  if (!isAuthenticated()) return;
+
+  const trackId = button.dataset.strategyTrackRemove;
+  if (!trackId) return;
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "移除中...";
+
+  try {
+    await fetchJson(`/strategy-watchlist/${encodeURIComponent(trackId)}`, {
+      method: "DELETE",
+      auth: true,
+    });
+    await loadStrategyTracking();
+    showTemporaryStatus("已移除策略追蹤。", "success");
+  } catch (error) {
+    showStatus(`移除策略追蹤失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+function renderStrategyTrackingLoginPrompt() {
+  stockList.innerHTML = `
+    <article class="search-intro-card watchlist-login-card">
+      <div class="intro-icon">📌</div>
+      <h3>請先登入 Google 帳號</h3>
+      <p>登入後可以保存從策略選股加入的追蹤名單，之後回來看它的後續表現。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-account="true">前往登入</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderEmptyStrategyTracking() {
+  stockList.innerHTML = `
+    <article class="search-intro-card strategies-empty-card">
+      <div class="intro-icon">📌</div>
+      <h3>目前還沒有策略追蹤</h3>
+      <p>請先到「策略選股」，看到想觀察的股票後按「策略追蹤」。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-page="strategies">去策略選股</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyTrackingSummary() {
+  const summary = state.strategyTrackSummary || {};
+  const byStrategy = Array.isArray(summary.by_strategy) ? summary.by_strategy : [];
+
+  return `
+    <section class="strategy-dashboard-card strategy-track-summary-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.3-2-3 策略追蹤</p>
+          <h3>策略追蹤清單</h3>
+          <p>記錄你從策略選股加入的股票，方便後續回頭觀察是否真的轉強。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>追蹤中：${formatNumber(summary.active_count ?? state.latestRows.length ?? 0)}</span>
+          <span>全部：${formatNumber(summary.total_count ?? state.latestRows.length ?? 0)}</span>
+        </div>
+      </div>
+      ${byStrategy.length ? `
+        <div class="strategy-track-chip-row">
+          ${byStrategy.map((item) => `
+            <span class="summary-pill score-mid">${escapeHtml(item.strategy_name || item.strategy_key)}：${formatNumber(item.count)} 檔</span>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderStrategyTrackingCard(row, index) {
+  const code = pick(row, ["stock_code"], "-");
+  const name = pick(row, ["stock_name"], code);
+  const market = pick(row, ["market_type"], "-");
+  const industry = pick(row, ["industry"], "-");
+  const strategyName = pick(row, ["strategy_name"], "策略追蹤");
+  const sourceDate = pick(row, ["source_trade_date"], "-");
+  const sourceScore = pick(row, ["source_score"], "-");
+  const currentScore = pick(row, ["chip_score"], "-");
+  const closePrice = pick(row, ["close_price"], "-");
+  const change = pick(row, ["price_change"], "-");
+  const trigger = pick(row, ["trigger_summary"], "從策略選股加入追蹤");
+  const createdAt = pick(row, ["created_at"], "-");
+  const toneClass = getScoreClass(currentScore);
+
+  const items = [
+    createInfoItem("來源策略", escapeHtml(strategyName)),
+    createInfoItem("加入時分數", formatNumber(sourceScore)),
+    createInfoItem("目前籌碼分數", formatNumber(currentScore), getScoreClass(currentScore)),
+    createInfoItem("收盤價", formatDirectionalClosePrice(closePrice, change)),
+    createInfoItem("股價位置", escapeHtml(pick(row, ["price_position"], "-"))),
+    createInfoItem("成交量狀態", escapeHtml(pick(row, ["volume_status"], "-"))),
+  ].join("");
+
+  return `
+    <article class="stock-card strategy-track-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">追蹤 ${index + 1}</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(market)}</span>
+            <span class="badge">${escapeHtml(industry)}</span>
+          </div>
+        </div>
+        <div class="score-box ${toneClass}">
+          <span class="score-value">${formatNumber(currentScore)}</span>
+          <span class="score-label">目前分數</span>
+        </div>
+      </div>
+      <div class="quick-summary">
+        <span class="summary-pill score-mid">${escapeHtml(strategyName)}</span>
+        <span class="summary-text">${escapeHtml(trigger)}</span>
+      </div>
+      <div class="quick-summary secondary-summary price-summary">
+        <span class="price-metric">來源日：${formatDate(sourceDate)}</span>
+        <span class="price-metric">追蹤時間：${escapeHtml(createdAt)}</span>
+      </div>
+      <div class="info-grid strategy-info-grid">
+        ${items}
+      </div>
+      <div class="card-actions">
+        <span class="card-note">最新分數日：${formatDate(pick(row, ["latest_score_date", "latest_price_date"], "-"))}</span>
+        <div class="action-buttons">
+          <button class="watch-btn danger-action" type="button" data-strategy-track-remove="${escapeHtml(pick(row, ["id"], ""))}">移除追蹤</button>
+          <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyTrackingPage() {
+  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+
+  if (rows.length === 0) {
+    renderEmptyStrategyTracking();
+    return;
+  }
+
+  stockList.innerHTML = `
+    ${renderStrategyTrackingSummary()}
+    <div class="strategy-result-note">
+      這裡只表示「需要繼續觀察」，不是買賣建議。後續可比較加入時分數與目前籌碼分數、收盤價、成交量狀態。
+    </div>
+    ${rows.map(renderStrategyTrackingCard).join("")}
+  `;
+}
+
+async function loadStrategyTracking() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    renderStrategyTrackingLoginPrompt();
+    return;
+  }
+
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const result = await fetchJson("/strategy-watchlist?active=1&limit=100", {
+      method: "GET",
+      auth: true,
+      raw: true,
+    });
+    state.latestRows = Array.isArray(result.data) ? result.data : [];
+    state.strategyTrackSummary = result.summary || null;
+    state.strategyTrackKeys = new Set(
+      state.latestRows.map((row) => getStrategyTrackKey(row.stock_code, row.strategy_key)).filter(Boolean)
+    );
+    renderStrategyTrackingPage();
+    showTemporaryStatus(`已更新 ${state.latestRows.length} 筆策略追蹤。`, "success");
+  } catch (error) {
+    state.latestRows = [];
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>策略追蹤讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+      </article>
+    `;
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+    showStatus(`策略追蹤讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
 function getStrategyToneClass(row) {
   const score = toNumber(pick(row, ["strategy_score", "chip_score", "major_holder_score"], null));
   if (score !== null && score >= 120) return "score-high";
@@ -1603,7 +1931,11 @@ function renderStrategyCard(row, index) {
 
       <div class="card-actions">
         <span class="card-note">資料日：${formatDate(tradeDate)}</span>
-        ${getCardActionButtons(code, isEtfEvent ? "看 ETF" : "看明細", index)}
+        <div class="action-buttons strategy-actions">
+          ${getStrategyTrackButton(row, index)}
+          ${getWatchlistButton(code)}
+          <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">${escapeHtml(isEtfEvent ? "看 ETF" : "看明細")}</button>
+        </div>
       </div>
     </article>
   `;
@@ -1656,6 +1988,13 @@ async function loadStrategies() {
       strategy_definition: result.strategy_definition,
     };
     state.strategyOptions = Array.isArray(result.strategies) ? result.strategies : DEFAULT_STRATEGY_OPTIONS;
+    if (isAuthenticated()) {
+      try {
+        await refreshStrategyTrackKeys();
+      } catch (trackError) {
+        console.warn("策略追蹤狀態讀取失敗", trackError);
+      }
+    }
     renderStrategiesPage();
     showTemporaryStatus(`已更新 ${escapeHtml(result.strategy_name || getStrategyOption().name)}：${state.latestRows.length} 筆。`, "success");
   } catch (error) {
@@ -2276,6 +2615,7 @@ function renderAccountPage() {
         </div>
         <div class="account-actions">
           <button class="detail-btn secondary-action" type="button" data-go-page="alerts">提醒中心</button>
+          <button class="detail-btn secondary-action" type="button" data-go-page="strategyTracks">策略追蹤</button>
           <button class="detail-btn" type="button" data-logout="true">登出</button>
         </div>
       </article>
@@ -3128,6 +3468,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "strategyTracks") {
+    await loadStrategyTracking();
+    return;
+  }
+
   if (state.page === "watchlist") {
     if (!isAuthenticated()) {
       setLoading(false);
@@ -3309,6 +3654,9 @@ function switchPage(page) {
   if (page === "strategies") {
     state.strategySummary = null;
   }
+  if (page === "strategyTracks") {
+    state.strategyTrackSummary = null;
+  }
   loadList();
 }
 
@@ -3345,6 +3693,18 @@ stockList.addEventListener("click", (event) => {
   const strategyButton = event.target.closest("[data-strategy-key]");
   if (strategyButton) {
     handleStrategyChange(strategyButton);
+    return;
+  }
+
+  const strategyTrackButton = event.target.closest("[data-strategy-track-action]");
+  if (strategyTrackButton) {
+    handleStrategyTrackAction(strategyTrackButton);
+    return;
+  }
+
+  const strategyTrackRemoveButton = event.target.closest("[data-strategy-track-remove]");
+  if (strategyTrackRemoveButton) {
+    handleStrategyTrackRemove(strategyTrackRemoveButton);
     return;
   }
 

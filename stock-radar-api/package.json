@@ -15,7 +15,8 @@
     "major-holders:setup": "node scripts/setupMajorHolderStats.js",
     "major-holders:import": "node scripts/importMajorHolders.js",
     "alerts:setup": "node scripts/setupWatchlistAlerts.js",
-    "alerts:generate": "node scripts/generateWatchlistAlerts.js"
+    "alerts:generate": "node scripts/generateWatchlistAlerts.js",
+    "strategy-watchlists:setup": "node scripts/setupStrategyWatchlists.js"
   },
   "keywords": [
     "stock",

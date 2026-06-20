@@ -2666,3 +2666,53 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+/* V1.3-2-3 策略追蹤 */
+.strategy-track-btn {
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  background: rgba(37, 99, 235, 0.12);
+  color: #dbeafe;
+  border-radius: 999px;
+  padding: 9px 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-track-btn.tracked {
+  border-color: rgba(45, 212, 191, 0.55);
+  background: rgba(20, 184, 166, 0.16);
+  color: #ccfbf1;
+}
+
+.strategy-track-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.strategy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.strategy-track-summary-card {
+  border-color: rgba(45, 212, 191, 0.22);
+}
+
+.strategy-track-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.strategy-track-card {
+  border-color: rgba(45, 212, 191, 0.18);
+}
+
+.danger-action {
+  border-color: rgba(248, 113, 113, 0.45) !important;
+  background: rgba(127, 29, 29, 0.22) !important;
+  color: #fecaca !important;
+}
