@@ -49,6 +49,8 @@ const state = {
   strategyTrackSort: "created_desc",
   strategyBacktestRunId: "",
   strategyBacktestMetric: "5d",
+  strategyBacktestRankingMode: "overview",
+  strategyBacktestRankingLimit: 20,
   strategyBacktestFilterStrategy: "",
   strategyBacktestFilterOutcome: "",
   strategyBacktestSearch: "",
@@ -385,6 +387,13 @@ const STRATEGY_BACKTEST_METRICS = [
   { key: "latest", field: "latest_return_percent", label: "目前報酬", shortLabel: "目前" },
 ];
 
+const STRATEGY_BACKTEST_RANKING_MODES = [
+  { key: "overview", label: "綜合排行" },
+  { key: "best", label: "最佳股票" },
+  { key: "weakest", label: "最弱股票" },
+  { key: "strategy", label: "策略排行" },
+];
+
 const STRATEGY_BACKTEST_OUTCOME_OPTIONS = [
   { key: "", label: "全部結果" },
   { key: "success", label: "只看成功" },
@@ -417,6 +426,15 @@ const STRATEGY_BACKTEST_SORT_OPTIONS = [
 
 function getBacktestMetric(key = state.strategyBacktestMetric) {
   return STRATEGY_BACKTEST_METRICS.find((item) => item.key === key) || STRATEGY_BACKTEST_METRICS[2];
+}
+
+function getBacktestRankingMode(key = state.strategyBacktestRankingMode) {
+  return STRATEGY_BACKTEST_RANKING_MODES.find((item) => item.key === key) || STRATEGY_BACKTEST_RANKING_MODES[0];
+}
+
+function getBacktestSortForMetric(metricKey = state.strategyBacktestMetric, direction = "desc") {
+  if (["1d", "3d", "5d"].includes(metricKey)) return `${metricKey}_${direction}`;
+  return `latest_${direction}`;
 }
 
 function getBacktestOutcomeText(key) {
@@ -1520,15 +1538,6 @@ function rerenderCurrentContent() {
 
   if (["radar", "foreign", "foreignStreak", "trust", "syncBuy"].includes(state.page) && state.latestRows.length > 0) {
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
-    return;
-  }
-
-
-  if (state.page === "strategyBacktests") {
-    const metric = getBacktestMetric();
-    pageTitle.textContent = "策略回測";
-    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
     return;
   }
 
@@ -4225,48 +4234,204 @@ function renderStrategyBacktestSummary() {
   `;
 }
 
+function renderStrategyBacktestRankingModeTabs() {
+  const activeMode = getBacktestRankingMode().key;
+
+  return `
+    <div class="backtest-ranking-mode-tabs">
+      ${STRATEGY_BACKTEST_RANKING_MODES.map((mode) => `
+        <button
+          class="metric-switch-btn ${activeMode === mode.key ? "active" : ""}"
+          type="button"
+          data-strategy-backtest-ranking-mode="${escapeHtml(mode.key)}"
+        >${escapeHtml(mode.label)}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderBacktestRankingStatCards(payload, metric) {
+  const summary = payload.summary || {};
+  const bestStocks = Array.isArray(payload.best_stocks) ? payload.best_stocks : [];
+  const weakestStocks = Array.isArray(payload.weakest_stocks) ? payload.weakest_stocks : [];
+  const bestReturn = bestStocks[0]?.selected_return_percent ?? null;
+  const weakestReturn = weakestStocks[0]?.selected_return_percent ?? null;
+  const bestWeakGap = toNumber(bestReturn) !== null && toNumber(weakestReturn) !== null
+    ? toNumber(bestReturn) - toNumber(weakestReturn)
+    : null;
+
+  return `
+    <div class="strategy-performance-stat-grid backtest-ranking-stat-grid">
+      <article class="performance-stat-card">
+        <span class="stat-label">${escapeHtml(metric.label)}平均</span>
+        <strong class="${getReturnClass(summary.avg_return)}">${formatReturnPercent(summary.avg_return)}</strong>
+        <small>可用樣本 ${formatNumber(summary.available_count)} / ${formatNumber(summary.signal_count)}</small>
+      </article>
+      <article class="performance-stat-card">
+        <span class="stat-label">正報酬比例</span>
+        <strong>${formatPercent(summary.win_rate)}</strong>
+        <small>正 ${formatNumber(summary.positive_count)}｜負 ${formatNumber(summary.negative_count)}</small>
+      </article>
+      <article class="performance-stat-card">
+        <span class="stat-label">最佳 / 最弱差距</span>
+        <strong class="${getReturnClass(bestWeakGap)}">${formatReturnPercent(bestWeakGap)}</strong>
+        <small>衡量排行分散程度</small>
+      </article>
+      <article class="performance-stat-card">
+        <span class="stat-label">待資料</span>
+        <strong>${formatNumber(summary.pending_count)}</strong>
+        <small>尚無 ${escapeHtml(metric.label)} 價格資料</small>
+      </article>
+    </div>
+  `;
+}
+
+function renderBacktestStockRankingRow(row, index, rankType = "best") {
+  const code = pick(row, ["stock_code"], "-");
+  const name = pick(row, ["stock_name"], code);
+  const selectedReturn = pick(row, ["selected_return_percent"], null);
+  const rankClass = rankType === "weakest" ? "weak-ranking-row" : "best-ranking-row";
+
+  return `
+    <article class="backtest-stock-rank-card ${rankClass}">
+      <div class="backtest-rank-main">
+        <span class="rank-badge">${index + 1}</span>
+        <div>
+          <h4>${escapeHtml(code)} ${escapeHtml(name)}</h4>
+          <p>${escapeHtml(pick(row, ["strategy_name"], "策略"))}｜${formatDate(pick(row, ["signal_trade_date"], "-"))}</p>
+        </div>
+      </div>
+      <div class="backtest-rank-return ${getReturnClass(selectedReturn)}">
+        <strong>${formatReturnPercent(selectedReturn)}</strong>
+        <span>${escapeHtml(getBacktestMetric().label)}</span>
+      </div>
+      <div class="backtest-rank-meta">
+        <span>${escapeHtml(pick(row, ["market_type"], "-"))}</span>
+        <span>${escapeHtml(pick(row, ["industry"], "-"))}</span>
+        <span>分數 ${formatNumber(pick(row, ["strategy_score"], "-"))}</span>
+        <span class="${getBacktestOutcomeClass(pick(row, ["outcome_label"], "pending"))}">${escapeHtml(getBacktestOutcomeText(pick(row, ["outcome_label"], "pending")))}</span>
+      </div>
+      <div class="strategy-performance-pills compact-pills">
+        ${renderPerformancePill("1日", pick(row, ["return_1d_percent"], null), "")}
+        ${renderPerformancePill("3日", pick(row, ["return_3d_percent"], null), "")}
+        ${renderPerformancePill("5日", pick(row, ["return_5d_percent"], null), "")}
+        ${renderPerformancePill("目前", pick(row, ["latest_return_percent"], null), "")}
+      </div>
+      <div class="card-actions rank-card-actions">
+        <span class="card-note">進場價 ${formatPrice(pick(row, ["entry_price"], "-"))}</span>
+        <div class="action-buttons">
+          <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderBacktestStrategyRankingCard(item, index, metric) {
+  const avgReturn = pick(item, ["avg_return"], null);
+  const totalAvailable = toNumber(item.available_count) || 0;
+  const signalCount = toNumber(item.signal_count) || 0;
+  const availableRatio = signalCount > 0 ? (totalAvailable / signalCount) * 100 : null;
+
+  return `
+    <article class="backtest-strategy-rank-card">
+      <div class="backtest-strategy-rank-head">
+        <span class="rank-badge">${index + 1}</span>
+        <div>
+          <h4>${escapeHtml(item.strategy_name || item.strategy_key || "策略")}</h4>
+          <p>${escapeHtml(metric.label)} 樣本 ${formatNumber(item.available_count)} / ${formatNumber(item.signal_count)}</p>
+        </div>
+        <strong class="${getReturnClass(avgReturn)}">${formatReturnPercent(avgReturn)}</strong>
+      </div>
+      <div class="backtest-strategy-rank-bars">
+        <div>
+          <span>勝率 ${formatPercent(item.win_rate)}</span>
+          <div class="rank-progress"><i style="width:${Math.max(0, Math.min(100, toNumber(item.win_rate) || 0))}%"></i></div>
+        </div>
+        <div>
+          <span>可用資料 ${formatPercent(availableRatio)}</span>
+          <div class="rank-progress muted-progress"><i style="width:${Math.max(0, Math.min(100, availableRatio || 0))}%"></i></div>
+        </div>
+      </div>
+      <div class="backtest-rank-meta">
+        <span>正 ${formatNumber(item.positive_count)}</span>
+        <span>負 ${formatNumber(item.negative_count)}</span>
+        <span>待資料 ${formatNumber(item.pending_count)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderBacktestRankingColumns(bestStocks, weakestStocks) {
+  return `
+    <div class="backtest-ranking-columns">
+      <section>
+        <div class="ranking-section-title">
+          <h4>最佳股票排行</h4>
+          <span>報酬高到低</span>
+        </div>
+        <div class="backtest-stock-rank-list">
+          ${bestStocks.slice(0, 10).map((row, index) => renderBacktestStockRankingRow(row, index, "best")).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
+        </div>
+      </section>
+      <section>
+        <div class="ranking-section-title">
+          <h4>最弱股票排行</h4>
+          <span>報酬低到高</span>
+        </div>
+        <div class="backtest-stock-rank-list">
+          ${weakestStocks.slice(0, 10).map((row, index) => renderBacktestStockRankingRow(row, index, "weakest")).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderBacktestStrategyRankingList(strategyRankings, metric) {
+  return `
+    <section class="backtest-strategy-rank-list-wrap">
+      <div class="ranking-section-title">
+        <h4>策略績效排行</h4>
+        <span>依 ${escapeHtml(metric.label)} 平均報酬排序</span>
+      </div>
+      <div class="backtest-strategy-rank-list">
+        ${strategyRankings.map((item, index) => renderBacktestStrategyRankingCard(item, index, metric)).join("") || `<p class="muted-text">目前沒有策略排行資料。</p>`}
+      </div>
+    </section>
+  `;
+}
+
 function renderStrategyBacktestRankingPanel() {
   const payload = state.strategyBacktestRankings?.data || state.strategyBacktestRankings || {};
   const bestStocks = Array.isArray(payload.best_stocks) ? payload.best_stocks : [];
   const weakestStocks = Array.isArray(payload.weakest_stocks) ? payload.weakest_stocks : [];
   const strategyRankings = Array.isArray(payload.strategy_rankings) ? payload.strategy_rankings : [];
   const metric = getBacktestMetric();
+  const rankingMode = getBacktestRankingMode().key;
+
+  const showStocks = rankingMode === "overview" || rankingMode === "best" || rankingMode === "weakest";
+  const showStrategies = rankingMode === "overview" || rankingMode === "strategy";
 
   return `
-    <section class="strategy-ranking-section strategy-backtest-ranking-section">
-      <div class="strategy-ranking-grid">
-        <article class="strategy-ranking-card best-ranking-card">
-          <h4>最佳股票排行</h4>
-          ${bestStocks.slice(0, 8).map((row, index) => `
-            <div class="ranking-row">
-              <span>${index + 1}. ${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</span>
-              <strong class="${getReturnClass(row.selected_return_percent)}">${formatReturnPercent(row.selected_return_percent)}</strong>
-            </div>
-          `).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
-        </article>
-        <article class="strategy-ranking-card weak-ranking-card">
-          <h4>最弱股票排行</h4>
-          ${weakestStocks.slice(0, 8).map((row, index) => `
-            <div class="ranking-row">
-              <span>${index + 1}. ${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</span>
-              <strong class="${getReturnClass(row.selected_return_percent)}">${formatReturnPercent(row.selected_return_percent)}</strong>
-            </div>
-          `).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
-        </article>
-      </div>
-      ${strategyRankings.length ? `
-        <div class="strategy-rank-table">
-          <h4>依 ${escapeHtml(metric.label)} 排名的策略</h4>
-          ${strategyRankings.map((item, index) => `
-            <div class="strategy-rank-row">
-              <span>${index + 1}. ${escapeHtml(item.strategy_name || item.strategy_key)}</span>
-              <strong class="${getReturnClass(item.avg_return)}">平均 ${formatReturnPercent(item.avg_return)}</strong>
-              <small>勝率 ${formatPercent(item.win_rate)}</small>
-              <small>樣本 ${formatNumber(item.available_count)} / ${formatNumber(item.signal_count)}</small>
-            </div>
-          `).join("")}
+    <section class="strategy-ranking-section strategy-backtest-ranking-section enhanced-backtest-ranking-section">
+      <div class="strategy-ranking-header">
+        <div>
+          <p class="section-kicker">V1.3-3-4 排行榜</p>
+          <h3>回測排行榜強化</h3>
+          <p>依 ${escapeHtml(metric.label)} 檢查最佳股票、最弱股票與各策略平均表現。</p>
         </div>
-      ` : ""}
+        <div class="ranking-limit-note">顯示前 ${formatNumber(state.strategyBacktestRankingLimit || 20)} 名資料</div>
+      </div>
+      ${renderStrategyBacktestMetricTabs()}
+      ${renderStrategyBacktestRankingModeTabs()}
+      ${renderBacktestRankingStatCards(payload, metric)}
+      ${showStocks && rankingMode !== "weakest" ? renderBacktestRankingColumns(bestStocks, rankingMode === "overview" ? weakestStocks : []) : ""}
+      ${showStocks && rankingMode === "weakest" ? renderBacktestRankingColumns([], weakestStocks) : ""}
+      ${showStrategies ? renderBacktestStrategyRankingList(strategyRankings, metric) : ""}
+      <div class="strategy-result-note compact-note">
+        排行榜只比較已有價格資料的訊號；樣本數太少時，平均報酬容易被單一股票放大或扭曲。
+      </div>
     </section>
   `;
 }
@@ -4385,13 +4550,15 @@ function handleStrategyBacktestMetric(button) {
   const metric = button.dataset.strategyBacktestMetric;
   if (!STRATEGY_BACKTEST_METRICS.some((item) => item.key === metric)) return;
   state.strategyBacktestMetric = metric;
-  if (!["1d", "3d", "5d", "latest"].includes(metric)) state.strategyBacktestMetric = "5d";
-  if (["1d", "3d", "5d"].includes(metric)) {
-    state.strategyBacktestSort = `${metric}_desc`;
-  } else {
-    state.strategyBacktestSort = "latest_desc";
-  }
+  state.strategyBacktestSort = getBacktestSortForMetric(metric, "desc");
   loadStrategyBacktests();
+}
+
+function handleStrategyBacktestRankingMode(button) {
+  const mode = button.dataset.strategyBacktestRankingMode;
+  if (!STRATEGY_BACKTEST_RANKING_MODES.some((item) => item.key === mode)) return;
+  state.strategyBacktestRankingMode = mode;
+  renderStrategyBacktestPage();
 }
 
 async function loadStrategyBacktests() {
@@ -4409,7 +4576,7 @@ async function loadStrategyBacktests() {
     const runQuery = state.strategyBacktestRunId ? `?run_id=${encodeURIComponent(state.strategyBacktestRunId)}` : "";
     const [summaryResponse, rankingResponse, resultsResponse] = await Promise.all([
       fetchJson(`/strategy-backtests/summary${runQuery}`, { method: "GET", raw: true }),
-      fetchJson(`/strategy-backtests/rankings?metric=${encodeURIComponent(state.strategyBacktestMetric)}${state.strategyBacktestRunId ? `&run_id=${encodeURIComponent(state.strategyBacktestRunId)}` : ""}&limit=10`, { method: "GET", raw: true }),
+      fetchJson(`/strategy-backtests/rankings?metric=${encodeURIComponent(state.strategyBacktestMetric)}${state.strategyBacktestRunId ? `&run_id=${encodeURIComponent(state.strategyBacktestRunId)}` : ""}&limit=${encodeURIComponent(state.strategyBacktestRankingLimit || 20)}`, { method: "GET", raw: true }),
       fetchJson(`/strategy-backtests/results?${buildStrategyBacktestQueryString()}`, { method: "GET", raw: true }),
     ]);
 
@@ -4462,15 +4629,6 @@ async function loadList() {
 
   if (state.page === "strategies") {
     await loadStrategies();
-    return;
-  }
-
-
-  if (state.page === "strategyBacktests") {
-    const metric = getBacktestMetric();
-    pageTitle.textContent = "策略回測";
-    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
     return;
   }
 
@@ -4753,6 +4911,12 @@ stockList.addEventListener("click", (event) => {
   const strategyBacktestMetricButton = event.target.closest("[data-strategy-backtest-metric]");
   if (strategyBacktestMetricButton) {
     handleStrategyBacktestMetric(strategyBacktestMetricButton);
+    return;
+  }
+
+  const strategyBacktestRankingModeButton = event.target.closest("[data-strategy-backtest-ranking-mode]");
+  if (strategyBacktestRankingModeButton) {
+    handleStrategyBacktestRankingMode(strategyBacktestRankingModeButton);
     return;
   }
 

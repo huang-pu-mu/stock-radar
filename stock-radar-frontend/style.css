@@ -3074,3 +3074,220 @@ body.chart-zoom-open {
     grid-column: span 1;
   }
 }
+
+/* V1.3-3-4：策略回測排行榜前端強化 */
+.enhanced-backtest-ranking-section {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(15, 23, 42, 0.72));
+}
+
+.strategy-ranking-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.strategy-ranking-header h3,
+.ranking-section-title h4,
+.backtest-stock-rank-card h4,
+.backtest-strategy-rank-card h4 {
+  margin: 0;
+}
+
+.strategy-ranking-header p,
+.ranking-section-title span,
+.backtest-rank-main p,
+.backtest-strategy-rank-head p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 0.86rem;
+}
+
+.ranking-limit-note {
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.10);
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.backtest-ranking-mode-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.backtest-ranking-stat-grid {
+  margin-bottom: 14px;
+}
+
+.backtest-ranking-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.ranking-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.backtest-stock-rank-list,
+.backtest-strategy-rank-list {
+  display: grid;
+  gap: 10px;
+}
+
+.backtest-stock-rank-card,
+.backtest-strategy-rank-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.backtest-stock-rank-card.best-ranking-row {
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+.backtest-stock-rank-card.weak-ranking-row {
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+.backtest-rank-main,
+.backtest-strategy-rank-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.backtest-rank-main h4,
+.backtest-strategy-rank-head h4 {
+  color: #e5e7eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backtest-rank-return {
+  text-align: right;
+}
+
+.backtest-rank-return strong,
+.backtest-strategy-rank-head strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.backtest-rank-return span {
+  display: block;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  margin-top: 2px;
+}
+
+.backtest-rank-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.backtest-rank-meta span {
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.compact-pills {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 10px 0 0;
+}
+
+.compact-pills .performance-pill {
+  padding: 7px 8px;
+}
+
+.rank-card-actions {
+  margin-top: 10px;
+}
+
+.backtest-strategy-rank-list-wrap {
+  margin-top: 16px;
+}
+
+.backtest-strategy-rank-bars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.backtest-strategy-rank-bars span {
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
+.rank-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  overflow: hidden;
+  margin-top: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.rank-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e, #38bdf8);
+}
+
+.muted-progress i {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
+.compact-note {
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .backtest-ranking-columns,
+  .backtest-strategy-rank-bars {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-ranking-header {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .backtest-rank-main,
+  .backtest-strategy-rank-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .backtest-rank-return,
+  .backtest-strategy-rank-head strong {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .compact-pills {
+    grid-template-columns: 1fr 1fr;
+  }
+}
