@@ -3,6 +3,12 @@ import path from "node:path";
 import pool from "../db.js";
 
 const TAIWAN_TIME_ZONE = "Asia/Taipei";
+const REQUEST_TIMEOUT_MS = 25000;
+
+const MARKET_TYPE_TO_MOPS_TYPEK = {
+  上市: "sii",
+  上櫃: "otc",
+};
 
 const OFFICIAL_SOURCES = [
   {
@@ -30,32 +36,40 @@ const OFFICIAL_SOURCES = [
     url: () => `https://www.tpex.org.tw/www/zh-tw/exRight/TWT49U?response=json&date=${getTaiwanDateSlash()}`,
   },
   {
-    name: "MOPS 上市股東會資料候選來源",
+    name: "TWSE OpenAPI 上市公司股利分派情形",
     marketType: "上市",
     category: "shareholders_meeting",
-    url: () => "https://mopsfin.twse.com.tw/opendata/t108sb31_L.csv",
+    url: () => "https://openapi.twse.com.tw/v1/opendata/t187ap45_L",
+  },
+  {
+    name: "MOPS CSV 上市公司股利分派情形備援",
+    marketType: "上市",
+    category: "shareholders_meeting",
+    url: () => "https://mopsfin.twse.com.tw/opendata/t187ap45_L.csv",
     optional: true,
   },
   {
-    name: "MOPS 上櫃股東會資料候選來源",
+    name: "MOPS CSV 上櫃公司股利分派情形備援",
     marketType: "上櫃",
     category: "shareholders_meeting",
-    url: () => "https://mopsfin.twse.com.tw/opendata/t108sb31_O.csv",
+    url: () => "https://mopsfin.twse.com.tw/opendata/t187ap45_O.csv",
     optional: true,
   },
   {
-    name: "MOPS 上市法說會資料候選來源",
+    name: "MOPS 上市法人說明會查詢",
     marketType: "上市",
     category: "investor_conference",
-    url: () => "https://mopsfin.twse.com.tw/opendata/t100sb02_L.csv",
+    type: "mops_investor_conference",
     optional: true,
+    yearOffset: 0,
   },
   {
-    name: "MOPS 上櫃法說會資料候選來源",
+    name: "MOPS 上櫃法人說明會查詢",
     marketType: "上櫃",
     category: "investor_conference",
-    url: () => "https://mopsfin.twse.com.tw/opendata/t100sb02_O.csv",
+    type: "mops_investor_conference",
     optional: true,
+    yearOffset: 0,
   },
 ];
 
@@ -77,23 +91,31 @@ function getTaiwanDateSlash(date = getTaiwanDate()) {
   return `${year}/${month}/${day}`;
 }
 
+function getRocYear(date = getTaiwanDate()) {
+  return date.getFullYear() - 1911;
+}
+
 function stripHtml(value) {
   return String(value ?? "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/&#x2F;/g, "/")
+    .replace(/\s+/g, " ")
     .replace(/^\uFEFF/, "")
     .trim();
 }
 
 function normalizeKey(value) {
   return stripHtml(value)
-    .replace(/[\s　()（）_\-\/：:、，,.\[\]【】]/g, "")
+    .replace(/[\s　()（）_\-\/：:、，,.\[\]【】「」『』]/g, "")
     .toLowerCase();
 }
 
@@ -178,8 +200,14 @@ function pick(row, candidates) {
 }
 
 function normalizeDate(value) {
-  const text = stripHtml(value).replace(/[年月]/g, "/").replace(/[日號]/g, "").trim();
-  if (!text || ["-", "--", "無", "不適用"].includes(text)) return "";
+  const text = stripHtml(value)
+    .replace(/[年月]/g, "/")
+    .replace(/[日號]/g, "")
+    .replace(/民國/g, "")
+    .replace(/中華民國/g, "")
+    .trim();
+
+  if (!text || ["-", "--", "無", "不適用", "NA", "N/A"].includes(text)) return "";
 
   let match = text.match(/(20\d{2}|1\d{2})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
   if (match) {
@@ -195,6 +223,14 @@ function normalizeDate(value) {
     return `${year}-${match[2]}-${match[3]}`;
   }
 
+  match = text.match(/(\d{1,2})[\/\-.](\d{1,2})/);
+  if (match) {
+    const currentYear = getTaiwanDate().getFullYear();
+    const month = String(Number(match[1])).padStart(2, "0");
+    const day = String(Number(match[2])).padStart(2, "0");
+    return `${currentYear}-${month}-${day}`;
+  }
+
   return "";
 }
 
@@ -207,13 +243,14 @@ function inferEventType(text) {
   if (/股東會|股東常會|股東臨時會|開會日期/.test(value)) return "股東會";
   if (/法說會|法人說明會|說明會/.test(value)) return "法說會";
   if (/停止過戶|最後過戶|停券|融券/.test(value)) return "股務事件";
+  if (/董事會|擬議|股利分派日/.test(value)) return "董事會股利分派";
   if (/財報|盈餘|EPS|季報|年報/.test(value)) return "財報事件";
   return "其他事件";
 }
 
 function getImportance(eventType) {
   if (["除權息", "除息", "除權", "配息", "股東會", "法說會"].includes(eventType)) return "high";
-  if (["股務事件", "財報事件"].includes(eventType)) return "medium";
+  if (["股務事件", "財報事件", "董事會股利分派"].includes(eventType)) return "normal";
   return "normal";
 }
 
@@ -223,7 +260,7 @@ function buildJsonRows(json) {
   if (Array.isArray(json)) return json;
 
   const data = json.data || json.tables?.[0]?.data || json.result?.data || json.aaData;
-  const fields = json.fields || json.tables?.[0]?.fields || json.result?.fields || json.columns;
+  const fields = json.fields || json.tables?.[0]?.fields || json.result?.fields || json.columns || json.title;
 
   if (Array.isArray(data) && Array.isArray(fields)) {
     return data.map((row) => {
@@ -240,20 +277,38 @@ function buildJsonRows(json) {
   return [];
 }
 
-async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 StockRadar/1.0",
-      "Accept": "application/json,text/csv,text/plain,*/*",
-      "Referer": "https://www.twse.com.tw/",
-    },
-  });
+async function fetchText(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      method: options.method || "GET",
+      body: options.body,
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 StockRadar/1.2.6 (+https://stock-radar-pwa)",
+        "Accept": "application/json,text/csv,text/html,text/plain,*/*",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "Referer": options.referer || "https://mops.twse.com.tw/mops/web/index",
+        ...(options.headers || {}),
+      },
+    });
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    if (/錯誤代碼|FOR SECURITY REASONS|CAN NOT BE ACCESSED|無法呈現|Maintainance/i.test(text)) {
+      throw new Error("來源回傳安全性或維護頁面，未取得可解析資料");
+    }
+
+    return text;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.text();
 }
 
 function parseRemoteRows(text) {
@@ -265,7 +320,43 @@ function parseRemoteRows(text) {
     return buildJsonRows(json);
   }
 
+  if (/<table|<tr|<td|<th/i.test(cleanText)) {
+    return parseHtmlTableRows(cleanText);
+  }
+
   return parseCsv(cleanText);
+}
+
+function parseHtmlTableRows(html) {
+  const rows = [];
+  const rowMatches = String(html || "").match(/<tr[\s\S]*?<\/tr>/gi) || [];
+
+  for (const rowHtml of rowMatches) {
+    const cells = [];
+    const cellMatches = rowHtml.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) || [];
+
+    for (const cellHtml of cellMatches) {
+      cells.push(stripHtml(cellHtml));
+    }
+
+    if (cells.some((cell) => cell)) rows.push(cells);
+  }
+
+  if (rows.length < 2) return [];
+
+  const headerIndex = rows.findIndex((row) => row.some((cell) => /公司代號|股票代號|證券代號|日期|時間|地點|內容|標題|資料/.test(cell)));
+  const headers = rows[headerIndex >= 0 ? headerIndex : 0].map(stripHtml);
+  const dataRows = rows.slice((headerIndex >= 0 ? headerIndex : 0) + 1);
+
+  return dataRows
+    .filter((row) => row.length >= 2)
+    .map((values) => {
+      const result = {};
+      headers.forEach((header, index) => {
+        result[header || `欄位${index + 1}`] = stripHtml(values[index]);
+      });
+      return result;
+    });
 }
 
 function pushEvent(events, event) {
@@ -297,17 +388,18 @@ function parseGenericCalendarRows(rows, source) {
       "公司代號",
       "有價證券代號",
       "代號",
+      "公司代號/股票代號",
       "stock_code",
       "code",
     ]));
 
     if (!stockCode) continue;
 
-    const stockName = stripHtml(pick(row, ["股票名稱", "證券名稱", "公司名稱", "有價證券名稱", "名稱"]));
+    const stockName = stripHtml(pick(row, ["股票名稱", "證券名稱", "公司名稱", "公司簡稱", "有價證券名稱", "名稱"]));
     const rowText = Object.values(row).join(" ");
-    const rawType = stripHtml(pick(row, ["事件類型", "類型", "event_type", "項目"]));
-    const rawTitle = stripHtml(pick(row, ["標題", "事件", "內容", "title", "說明", "備註"]));
-    const description = stripHtml(pick(row, ["說明", "備註", "description", "內容"]));
+    const rawType = stripHtml(pick(row, ["事件類型", "類型", "event_type", "項目", "會議類型"]));
+    const rawTitle = stripHtml(pick(row, ["標題", "事件", "內容", "title", "說明", "備註", "擇要訊息", "法人說明會擇要訊息"]));
+    const description = stripHtml(pick(row, ["說明", "備註", "description", "內容", "法人說明會擇要訊息", "地點", "召開地點", "召開法人說明會地點"]));
 
     const exRightDate = normalizeDate(pick(row, [
       "除權息日期",
@@ -316,12 +408,13 @@ function parseGenericCalendarRows(rows, source) {
       "除息交易日",
       "除權日",
       "除息日",
+      "停止過戶日前最後交易日",
       "日期",
     ]));
 
     if (exRightDate) {
-      const cashDividend = normalizeNumber(pick(row, ["現金股利", "現金股利合計", "現金股利(元)", "盈餘分配之現金股利", "資本公積發放之現金"]));
-      const stockDividend = normalizeNumber(pick(row, ["股票股利", "無償配股率", "股票股利合計", "盈餘轉增資配股"]));
+      const cashDividend = normalizeNumber(pick(row, ["現金股利", "現金股利合計", "現金股利(元)", "盈餘分配之現金股利", "股東配發-盈餘分配之現金股利(元/股)", "股東配發-股東配發之現金(股利)總金額(元)", "資本公積發放之現金"]));
+      const stockDividend = normalizeNumber(pick(row, ["股票股利", "無償配股率", "股票股利合計", "盈餘轉增資配股", "股東配發-盈餘轉增資配股(元/股)", "股東配發-股東配股總股數(股)"]));
       const typeText = rawType || rowText;
       const eventType =
         /權.*息|息.*權/.test(typeText) || (cashDividend && stockDividend) ? "除權息" :
@@ -338,6 +431,25 @@ function parseGenericCalendarRows(rows, source) {
         eventType,
         title: `${stockCode}${stockName ? ` ${stockName}` : ""} ${eventType}`,
         description: dividendParts.length > 0 ? dividendParts.join("，") : stripHtml(rowText).slice(0, 180),
+        source: source.name,
+        sourceUrl: source.urlValue,
+      });
+    }
+
+    const boardDividendDate = normalizeDate(pick(row, [
+      "董事會（擬議）股利分派日",
+      "董事會(擬議)股利分派日",
+      "董事會股利分派日",
+      "董事會決議日期",
+    ]));
+
+    if (boardDividendDate) {
+      pushEvent(events, {
+        stockCode,
+        eventDate: boardDividendDate,
+        eventType: "董事會股利分派",
+        title: `${stockCode}${stockName ? ` ${stockName}` : ""} 董事會股利分派`,
+        description: rawTitle || description || stripHtml(rowText).slice(0, 180),
         source: source.name,
         sourceUrl: source.urlValue,
       });
@@ -368,6 +480,8 @@ function parseGenericCalendarRows(rows, source) {
       "停止過戶開始日",
       "停止過戶日",
       "停止過戶期間起",
+      "停止過戶起日",
+      "停止過戶期間",
     ]));
 
     if (bookClosureDate) {
@@ -387,6 +501,11 @@ function parseGenericCalendarRows(rows, source) {
       "開會日期",
       "召開日期",
       "會議日期",
+      "股東常會日期",
+      "股東臨時會日期",
+      "股東會開會日期",
+      "召開股東會日期",
+      "meeting_date",
     ]));
 
     if (meetingDate) {
@@ -405,8 +524,35 @@ function parseGenericCalendarRows(rows, source) {
       });
     }
 
+    const conferenceDate = normalizeDate(pick(row, [
+      "召開法人說明會日期",
+      "法人說明會日期",
+      "法說會日期",
+      "召開日期",
+      "日期",
+    ]));
+
+    if (conferenceDate && !meetingDate && (source.category === "investor_conference" || /法說|法人說明/.test(rowText))) {
+      const timeText = stripHtml(pick(row, ["召開法人說明會時間", "時間", "召開時間"]));
+      const placeText = stripHtml(pick(row, ["召開法人說明會地點", "地點", "召開地點"]));
+      const parts = [];
+      if (timeText) parts.push(`時間：${timeText}`);
+      if (placeText) parts.push(`地點：${placeText}`);
+      if (description) parts.push(description);
+
+      pushEvent(events, {
+        stockCode,
+        eventDate: conferenceDate,
+        eventType: "法說會",
+        title: rawTitle || `${stockCode}${stockName ? ` ${stockName}` : ""} 法人說明會`,
+        description: parts.length > 0 ? parts.join("，") : stripHtml(rowText).slice(0, 180),
+        source: source.name,
+        sourceUrl: source.urlValue,
+      });
+    }
+
     const genericDate = normalizeDate(pick(row, ["事件日期", "event_date"]));
-    if (genericDate && !exRightDate && !paymentDate && !bookClosureDate && !meetingDate) {
+    if (genericDate && !exRightDate && !paymentDate && !bookClosureDate && !meetingDate && !conferenceDate) {
       const eventType = rawType || inferEventType(`${rawTitle} ${description} ${rowText}`);
       pushEvent(events, {
         stockCode,
@@ -508,18 +654,76 @@ async function importCsvFile(csvPath) {
   return events;
 }
 
+function getMopsConferenceRequest(source) {
+  const rocYear = getRocYear() + Number(source.yearOffset || 0);
+  const typeK = MARKET_TYPE_TO_MOPS_TYPEK[source.marketType] || "all";
+  const body = new URLSearchParams({
+    encodeURIComponent: "1",
+    step: "1",
+    firstin: "1",
+    off: "1",
+    TYPEK: typeK,
+    year: String(rocYear),
+    month: "",
+    co_id: "",
+    keyword4: "",
+    code1: "",
+  });
+
+  return {
+    url: "https://mops.twse.com.tw/mops/web/ajax_t100sb02_1",
+    body,
+    sourceUrl: `https://mops.twse.com.tw/mops/web/t100sb02_1?TYPEK=${typeK}&year=${rocYear}`,
+  };
+}
+
+async function importMopsInvestorConference(source) {
+  const request = getMopsConferenceRequest(source);
+  const text = await fetchText(request.url, {
+    method: "POST",
+    body: request.body,
+    referer: "https://mops.twse.com.tw/mops/web/t100sb02_1",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      "Origin": "https://mops.twse.com.tw",
+    },
+  });
+
+  const rows = parseRemoteRows(text);
+  const events = parseGenericCalendarRows(rows, {
+    ...source,
+    urlValue: request.sourceUrl,
+  });
+
+  return {
+    rows,
+    events,
+    urlValue: request.sourceUrl,
+  };
+}
+
 async function importOfficialSources() {
   const allEvents = [];
   const sourceResults = [];
 
   for (const source of OFFICIAL_SOURCES) {
-    const urlValue = source.url();
-    const sourceWithUrl = { ...source, urlValue };
-
     try {
-      const text = await fetchText(urlValue);
-      const rows = parseRemoteRows(text);
-      const events = parseGenericCalendarRows(rows, sourceWithUrl);
+      let rows = [];
+      let events = [];
+      let urlValue = "";
+
+      if (source.type === "mops_investor_conference") {
+        const result = await importMopsInvestorConference(source);
+        rows = result.rows;
+        events = result.events;
+        urlValue = result.urlValue;
+      } else {
+        urlValue = source.url();
+        const sourceWithUrl = { ...source, urlValue };
+        const text = await fetchText(urlValue);
+        rows = parseRemoteRows(text);
+        events = parseGenericCalendarRows(rows, sourceWithUrl);
+      }
 
       sourceResults.push({
         name: source.name,
@@ -537,7 +741,7 @@ async function importOfficialSources() {
         optional: Boolean(source.optional),
         rows: 0,
         events: 0,
-        url: urlValue,
+        url: source.type === "mops_investor_conference" ? getMopsConferenceRequest(source).sourceUrl : source.url?.(),
         error: error.message,
       });
     }
@@ -550,6 +754,11 @@ function getArgValue(name) {
   const index = process.argv.indexOf(name);
   if (index === -1) return "";
   return process.argv[index + 1] || "";
+}
+
+function hasOnlyOptionalFailures(sourceResults) {
+  const failedRequired = sourceResults.filter((result) => !result.ok && !result.optional);
+  return failedRequired.length === 0;
 }
 
 async function main() {
@@ -571,7 +780,7 @@ async function main() {
       events = await importCsvFile(csvPath);
       sourceResults = [{ name: "CSV IMPORT", ok: true, rows: events.length, events: events.length, url: csvPath }];
     } else {
-      console.log("開始匯入個股/ETF 行事曆事件：官方 / 半官方資料來源");
+      console.log("開始匯入個股/ETF 行事曆事件：官方資料來源");
       const officialResult = await importOfficialSources();
       events = officialResult.events;
       sourceResults = officialResult.sourceResults;
@@ -591,7 +800,11 @@ async function main() {
     console.log(`完成：匯入 / 更新 ${imported} 筆，略過 ${skipped} 筆`);
 
     if (!csvPath && imported === 0) {
-      throw new Error("所有官方 / 半官方行事曆來源都沒有可匯入資料，請改用 CSV 匯入或檢查來源格式。");
+      if (hasOnlyOptionalFailures(sourceResults)) {
+        console.log("提醒：本次官方行事曆沒有可匯入事件，但主要來源未失敗，因此不阻斷每日排程。");
+      } else {
+        throw new Error("主要官方行事曆來源沒有可匯入資料，請檢查來源格式或網路狀態。");
+      }
     }
   } catch (error) {
     console.error("匯入個股/ETF 行事曆事件失敗");

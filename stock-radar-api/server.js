@@ -292,7 +292,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.5",
+    version: "stock-radar-api-v1.2.6",
   });
 });
 
@@ -300,7 +300,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.5",
+    version: "stock-radar-api-v1.2.6",
     time: new Date().toISOString(),
   });
 });
@@ -2231,6 +2231,63 @@ app.get("/foreign/top", async (req, res) => {
 });
 
 
+
+// ==============================
+// 個股 / ETF 行事曆統計
+// GET /calendar-events/stats
+// ==============================
+app.get("/calendar-events/stats", async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        event_type,
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN event_date >= CURDATE() THEN 1 ELSE 0 END) AS upcoming_count,
+        MIN(DATE_FORMAT(event_date, '%Y-%m-%d')) AS first_event_date,
+        MAX(DATE_FORMAT(event_date, '%Y-%m-%d')) AS last_event_date,
+        MAX(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s')) AS last_updated_at
+      FROM stock_calendar_events
+      WHERE is_active = 1
+      GROUP BY event_type
+      ORDER BY
+        FIELD(event_type, '除權息', '除息', '除權', '配息', '股東會', '法說會', '股務事件', '董事會股利分派', '財報事件', '其他事件'),
+        event_type ASC
+      `,
+    );
+
+    const totals = await query(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        COUNT(DISTINCT stock_code) AS stock_count,
+        SUM(CASE WHEN event_date >= CURDATE() THEN 1 ELSE 0 END) AS upcoming_count,
+        MIN(DATE_FORMAT(event_date, '%Y-%m-%d')) AS first_event_date,
+        MAX(DATE_FORMAT(event_date, '%Y-%m-%d')) AS last_event_date,
+        MAX(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s')) AS last_updated_at
+      FROM stock_calendar_events
+      WHERE is_active = 1
+      `,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        summary: convertBigIntToString(totals?.[0] || {}),
+        by_event_type: convertBigIntToString(rows),
+      },
+    });
+  } catch (error) {
+    console.error("查詢行事曆統計失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢行事曆統計失敗",
+      error: error.message,
+    });
+  }
+});
+
 // ==============================
 // 個股 / ETF 行事曆事件
 // GET /calendar-events/:stockCode
@@ -2922,7 +2979,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.5",
+    version: "stock-radar-api-v1.2.6",
   });
 });
 
