@@ -927,23 +927,142 @@ h1 {
   flex-wrap: wrap;
 }
 
+.calendar-section {
+  border-top-color: rgba(86, 214, 255, 0.18);
+}
+
+.etf-profile-section .status-box,
+.calendar-section .status-box {
+  margin-top: 10px;
+}
+
+.calendar-event-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.calendar-event-card {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 12px;
+  align-items: stretch;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.calendar-event-card.upcoming {
+  border-color: rgba(86, 214, 255, 0.22);
+  background: rgba(86, 214, 255, 0.07);
+}
+
+.calendar-event-card.high {
+  border-color: rgba(248, 214, 109, 0.3);
+}
+
+.calendar-date-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 15px;
+  padding: 10px;
+  text-align: center;
+  background: rgba(7, 17, 31, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.calendar-date-box strong {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.calendar-date-box span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.calendar-event-main {
+  min-width: 0;
+}
+
+.calendar-event-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.calendar-event-title-row h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.calendar-type-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--accent);
+  background: rgba(86, 214, 255, 0.1);
+  border: 1px solid rgba(86, 214, 255, 0.22);
+  font-size: 13px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.calendar-type-chip.high {
+  color: var(--accent-2);
+  background: rgba(248, 214, 109, 0.1);
+  border-color: rgba(248, 214, 109, 0.28);
+}
+
+.calendar-type-chip.low {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendar-event-main p {
+  margin: 8px 0 0;
+  color: #c7d8ec;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.calendar-event-meta {
+  margin-top: 8px;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.calendar-event-meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 @media (max-width: 620px) {
-  .market-summary-title-row {
-    display: grid;
+  .calendar-event-card {
+    grid-template-columns: 1fr;
   }
 
-  .summary-date-chip {
-    width: fit-content;
+  .calendar-date-box {
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
   }
+}
 
-  .market-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .market-summary-item strong {
-    font-size: 17px;
-  }
-
+@media (max-width: 620px) {
   .app-shell {
     padding-top: 14px;
   }
@@ -1245,7 +1364,7 @@ code {
 
 @media (min-width: 621px) {
   .tab-row {
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    grid-template-columns: repeat(9, minmax(0, 1fr));
   }
 }
 
@@ -2012,841 +2131,5 @@ body.chart-zoom-open {
 
   .chart-zoom-header h2 {
     font-size: 23px;
-  }
-}
-
-/* V1.2 第一項：上市 / 上櫃指數即時走勢 */
-.tab-row {
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
-  border-radius: 24px;
-}
-
-.market-overview-card {
-  border: 1px solid rgba(86, 214, 255, 0.18);
-  border-radius: 24px;
-  padding: 17px;
-  background: rgba(86, 214, 255, 0.075);
-  box-shadow: var(--shadow);
-}
-
-.market-overview-card h3 {
-  margin-bottom: 7px;
-  font-size: 24px;
-}
-
-.market-overview-card p:last-child {
-  margin-bottom: 0;
-  color: var(--muted);
-  line-height: 1.65;
-}
-
-.market-index-card .index-score-value {
-  font-size: 24px;
-}
-
-.market-index-grid .info-value {
-  font-variant-numeric: tabular-nums;
-}
-
-.market-index-chart-section {
-  margin-top: 14px;
-}
-
-.market-chart-scroll {
-  margin-top: 10px;
-}
-
-.market-index-line {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.market-index-dot {
-  fill: var(--accent-2);
-  stroke: rgba(7, 17, 31, 0.95);
-  stroke-width: 3;
-}
-
-.market-volume-bar {
-  fill: rgba(173, 193, 216, 0.45);
-}
-
-.market-summary-panel {
-  margin-top: 14px;
-  border: 1px solid rgba(86, 214, 255, 0.18);
-  border-radius: 22px;
-  padding: 15px;
-  background: linear-gradient(135deg, rgba(86, 214, 255, 0.1), rgba(255, 255, 255, 0.045));
-}
-
-.market-summary-title-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.market-summary-title-row h3 {
-  margin-bottom: 0;
-  font-size: 20px;
-}
-
-.summary-date-chip {
-  flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 7px 10px;
-  color: var(--muted);
-  background: rgba(7, 17, 31, 0.48);
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.market-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.market-summary-item {
-  min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 18px;
-  padding: 12px;
-  background: rgba(7, 17, 31, 0.48);
-}
-
-.market-summary-item.highlight {
-  border-color: rgba(248, 214, 109, 0.28);
-  background: rgba(248, 214, 109, 0.1);
-}
-
-.market-summary-item span {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.market-summary-item strong {
-  display: block;
-  color: var(--text);
-  font-size: 20px;
-  line-height: 1.25;
-  font-variant-numeric: tabular-nums;
-  word-break: break-word;
-}
-
-.market-summary-note {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.error-note {
-  border-color: rgba(255, 111, 134, 0.26);
-  background: rgba(255, 111, 134, 0.08);
-}
-
-@media (max-width: 620px) {
-  .market-index-card .stock-top {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .market-index-card .score-box {
-    width: 100%;
-  }
-
-  .market-index-card .index-score-value {
-    font-size: 26px;
-  }
-}
-
-/* V1.2 第 2 項：個股即時行情 */
-.realtime-quote-section {
-  border-color: rgba(86, 214, 255, 0.2);
-  background: rgba(86, 214, 255, 0.055);
-}
-
-.realtime-title-row,
-.realtime-hero-row,
-.quote-side-panel,
-.chart-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.realtime-title-row {
-  margin-bottom: 14px;
-}
-
-.realtime-title-row h3 {
-  margin: 0;
-}
-
-.realtime-hero-row {
-  align-items: stretch;
-  margin-bottom: 14px;
-}
-
-.realtime-label {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.realtime-price {
-  display: block;
-  font-size: clamp(34px, 8vw, 56px);
-  line-height: 1;
-  letter-spacing: 0.02em;
-}
-
-.realtime-change-box {
-  min-width: 132px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.055);
-  text-align: right;
-}
-
-.realtime-change-box span,
-.realtime-change-box small {
-  display: block;
-  color: var(--muted);
-  font-weight: 900;
-}
-
-.realtime-change-box strong {
-  display: block;
-  margin: 4px 0;
-  font-size: 25px;
-  line-height: 1.1;
-}
-
-.realtime-info-grid {
-  margin-bottom: 14px;
-}
-
-.quote-side-panel {
-  margin: 12px 0 16px;
-}
-
-.quote-side-card {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 13px;
-  background: rgba(255, 255, 255, 0.055);
-}
-
-.quote-side-card span,
-.quote-side-card small {
-  display: block;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.45;
-}
-
-.quote-side-card strong {
-  display: block;
-  margin: 5px 0;
-  font-size: 22px;
-  line-height: 1.15;
-}
-
-.quote-side-card.good strong {
-  color: var(--success);
-}
-
-.quote-side-card.bad strong {
-  color: var(--danger);
-}
-
-.quote-side-card.warn strong {
-  color: var(--warning);
-}
-
-.quote-level-block {
-  margin-top: 10px;
-}
-
-.quote-level-table {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
-
-.quote-level-row {
-  display: grid;
-  grid-template-columns: 0.55fr 1fr 1fr 1fr 1fr;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.quote-level-row:first-child {
-  border-top: 0;
-}
-
-.quote-level-head {
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.055);
-  font-size: 12px;
-  letter-spacing: 0.05em;
-}
-
-.quote-level-name {
-  color: var(--muted);
-}
-
-.quote-bid-price {
-  color: var(--success);
-}
-
-.quote-ask-volume {
-  color: var(--danger);
-}
-
-@media (max-width: 720px) {
-  .realtime-title-row,
-  .realtime-hero-row,
-  .quote-side-panel {
-    flex-direction: column;
-  }
-
-  .realtime-change-box {
-    width: 100%;
-    text-align: left;
-  }
-
-  .quote-side-card {
-    width: 100%;
-  }
-
-  .quote-level-row {
-    grid-template-columns: 0.45fr 1fr 1fr 1fr 1fr;
-    gap: 5px;
-    padding: 9px 8px;
-    font-size: 12px;
-  }
-}
-
-/* V1.2 第 3 項：個股每月營收 */
-.revenue-section {
-  border-color: rgba(248, 214, 109, 0.22);
-  background: rgba(248, 214, 109, 0.055);
-}
-
-.revenue-summary {
-  margin-bottom: 14px;
-}
-
-.revenue-hero-grid {
-  display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.revenue-hero-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.055);
-}
-
-.revenue-hero-card.highlight {
-  background: linear-gradient(135deg, rgba(248, 214, 109, 0.18), rgba(86, 214, 255, 0.08));
-}
-
-.revenue-hero-card span,
-.revenue-hero-card small {
-  display: block;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.45;
-}
-
-.revenue-hero-card strong {
-  display: block;
-  margin: 6px 0;
-  font-size: clamp(24px, 5vw, 34px);
-  line-height: 1.12;
-  font-variant-numeric: tabular-nums;
-}
-
-.revenue-hero-card.good strong {
-  color: var(--success);
-}
-
-.revenue-hero-card.bad strong {
-  color: var(--danger);
-}
-
-.revenue-hero-card.warn strong {
-  color: var(--warning);
-}
-
-.revenue-info-grid {
-  margin-bottom: 14px;
-}
-
-.revenue-chart-title {
-  margin: 8px 0 10px;
-}
-
-.revenue-table {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
-
-.revenue-row {
-  display: grid;
-  grid-template-columns: 0.9fr 1.2fr 1fr 1fr;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.revenue-row:first-child {
-  border-top: 0;
-}
-
-.revenue-head {
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.055);
-  font-size: 12px;
-  letter-spacing: 0.05em;
-}
-
-@media (max-width: 720px) {
-  .revenue-hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .revenue-row {
-    grid-template-columns: 0.85fr 1.1fr 0.9fr 0.9fr;
-    padding: 9px 8px;
-    font-size: 12px;
-  }
-}
-
-
-.eps-section {
-  border-color: rgba(248, 214, 109, 0.28);
-}
-
-.eps-summary {
-  margin-bottom: 14px;
-}
-
-.eps-table .eps-row {
-  grid-template-columns: 0.95fr 1fr 1fr 1fr;
-}
-
-.eps-info-grid {
-  margin-top: 2px;
-}
-
-@media (max-width: 720px) {
-  .eps-table .eps-row {
-    grid-template-columns: 0.85fr 0.95fr 0.95fr 0.95fr;
-  }
-}
-
-.calendar-section {
-  border-color: rgba(97, 218, 251, 0.25);
-}
-
-.calendar-summary {
-  margin-bottom: 14px;
-}
-
-.calendar-hero-grid {
-  margin-bottom: 14px;
-}
-
-.calendar-info-grid {
-  margin-bottom: 14px;
-}
-
-.calendar-chart-title {
-  margin: 8px 0 10px;
-}
-
-.calendar-event-list {
-  display: grid;
-  gap: 10px;
-}
-
-.calendar-event-row {
-  display: grid;
-  grid-template-columns: 118px 1fr;
-  gap: 12px;
-  align-items: stretch;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.calendar-event-date {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  min-height: 72px;
-  padding: 10px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.055);
-}
-
-.calendar-event-date strong {
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 950;
-}
-
-.calendar-event-date small,
-.calendar-event-main p {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.calendar-event-main {
-  display: grid;
-  align-content: center;
-  gap: 7px;
-  min-width: 0;
-}
-
-.calendar-event-main > strong {
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 950;
-  line-height: 1.4;
-}
-
-.calendar-event-main p {
-  margin: 0;
-}
-
-.calendar-event-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.calendar-importance {
-  color: var(--muted-2);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-@media (max-width: 720px) {
-  .calendar-event-row {
-    grid-template-columns: 1fr;
-  }
-
-  .calendar-event-date {
-    min-height: auto;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-}
-
-.etf-badge {
-  color: #06111e;
-  border-color: rgba(248, 214, 109, 0.45);
-  background: rgba(248, 214, 109, 0.86);
-}
-
-.etf-score-box {
-  background: rgba(248, 214, 109, 0.15);
-  border-color: rgba(248, 214, 109, 0.34);
-}
-
-.etf-score-box .score-value {
-  color: var(--accent-2);
-  font-size: 24px;
-}
-
-.etf-info-panel {
-  border-top-color: rgba(248, 214, 109, 0.28);
-}
-
-.panel-note {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-/* V1.2 第 7 項：三大法人總覽 */
-.institutional-overview-card,
-.institutional-market-section,
-.institutional-history-section,
-.institutional-top-wrapper {
-  border-color: rgba(86, 214, 255, 0.18);
-}
-
-.institutional-score-value {
-  font-size: 24px;
-  white-space: nowrap;
-}
-
-.institutional-entity-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.institutional-entity-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.institutional-entity-card.score-high {
-  background: rgba(255, 93, 124, 0.08);
-  border-color: rgba(255, 93, 124, 0.18);
-}
-
-.institutional-entity-card.score-low {
-  background: rgba(84, 217, 156, 0.08);
-  border-color: rgba(84, 217, 156, 0.18);
-}
-
-.institutional-entity-card span,
-.institutional-entity-card small,
-.institutional-entity-card em {
-  display: block;
-}
-
-.institutional-entity-card span {
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.institutional-entity-card strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 23px;
-  font-weight: 950;
-  letter-spacing: -0.02em;
-}
-
-.institutional-entity-card small,
-.institutional-entity-card em {
-  margin-top: 5px;
-  color: var(--muted-2);
-  font-size: 12px;
-  font-style: normal;
-  line-height: 1.45;
-}
-
-.institutional-info-grid {
-  margin-top: 14px;
-}
-
-.institutional-note {
-  margin-top: 14px;
-}
-
-.institutional-market-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.institutional-market-card {
-  display: grid;
-  gap: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.institutional-market-card h4 {
-  margin: 8px 0 0;
-  font-size: 26px;
-  font-weight: 950;
-}
-
-.institutional-market-items {
-  display: grid;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.institutional-history-list {
-  display: grid;
-  gap: 9px;
-}
-
-.institutional-history-row {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr) 108px;
-  gap: 10px;
-  align-items: center;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.institutional-history-row strong {
-  text-align: right;
-  font-size: 13px;
-}
-
-.institutional-history-bar-track {
-  overflow: hidden;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.institutional-history-bar {
-  height: 100%;
-  border-radius: inherit;
-}
-
-.institutional-history-bar.up {
-  background: linear-gradient(90deg, rgba(255, 93, 124, 0.45), rgba(255, 93, 124, 0.95));
-}
-
-.institutional-history-bar.down {
-  background: linear-gradient(90deg, rgba(84, 217, 156, 0.45), rgba(84, 217, 156, 0.95));
-}
-
-.institutional-top-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.institutional-top-section h4 {
-  margin: 0 0 10px;
-  font-size: 16px;
-}
-
-.institutional-top-list {
-  display: grid;
-  gap: 9px;
-}
-
-.institutional-stock-row {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 17px;
-  padding: 11px 12px;
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.045);
-  text-align: left;
-  cursor: pointer;
-}
-
-.institutional-stock-row:hover {
-  border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.institutional-stock-main strong,
-.institutional-stock-main em,
-.institutional-stock-value strong,
-.institutional-stock-value small {
-  display: block;
-}
-
-.institutional-stock-main strong {
-  font-size: 15px;
-  font-weight: 950;
-}
-
-.institutional-stock-main small,
-.institutional-stock-main em,
-.institutional-stock-value small {
-  color: var(--muted-2);
-  font-size: 12px;
-  font-style: normal;
-}
-
-.institutional-stock-value {
-  text-align: right;
-}
-
-.institutional-stock-value strong {
-  font-size: 15px;
-}
-
-.institutional-empty {
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  padding: 13px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.035);
-  font-size: 14px;
-}
-
-@media (max-width: 860px) {
-  .institutional-entity-grid,
-  .institutional-market-grid,
-  .institutional-top-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .institutional-history-row {
-    grid-template-columns: 82px minmax(0, 1fr);
-  }
-
-  .institutional-history-row strong {
-    grid-column: 1 / -1;
-    text-align: left;
-  }
-
-  .institutional-stock-row {
-    grid-template-columns: 30px minmax(0, 1fr);
-  }
-
-  .institutional-stock-value {
-    grid-column: 2;
-    text-align: left;
   }
 }

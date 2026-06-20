@@ -226,427 +226,6 @@ function isValidDateText(value) {
 }
 
 
-const MARKET_INDEX_CONFIGS = [
-  {
-    key: "twse",
-    market_type: "上市",
-    index_code: "TAIEX",
-    index_name: "加權指數",
-    symbols: ["^TWII"],
-  },
-  {
-    key: "tpex",
-    market_type: "上櫃",
-    index_code: "TPEX",
-    index_name: "上櫃指數",
-    symbols: ["^TWOII", "TWOII.TWO", "TPEX.TWO"],
-  },
-];
-
-function toFiniteNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const numberValue = Number(String(value).replaceAll(",", ""));
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function getTaiwanDateTimeText(date = new Date()) {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date).replace(" ", " ");
-}
-
-function getTaiwanTimeTextFromUnix(unixSeconds) {
-  if (!unixSeconds) return "";
-
-  return new Intl.DateTimeFormat("zh-TW", {
-    timeZone: "Asia/Taipei",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(Number(unixSeconds) * 1000));
-}
-
-async function fetchExternalJson(url, label) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 9000);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 stock-radar-api",
-        Accept: "application/json,text/plain,*/*",
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-        Referer: "https://mis.twse.com.tw/stock/fibest.jsp",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`${label} HTTP ${response.status}`);
-    }
-
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function fetchExternalText(url, label, headers = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 stock-radar-api",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-        ...headers,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`${label} HTTP ${response.status}`);
-    }
-
-    return response.text();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function getLastFiniteValue(values = []) {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const value = toFiniteNumber(values[index]);
-    if (value !== null) return value;
-  }
-
-  return null;
-}
-
-function buildYahooIndexPoint(timestamp, quote, index) {
-  const close = toFiniteNumber(quote?.close?.[index]);
-
-  if (close === null) return null;
-
-  return {
-    time: getTaiwanTimeTextFromUnix(timestamp),
-    timestamp,
-    open: toFiniteNumber(quote?.open?.[index]),
-    high: toFiniteNumber(quote?.high?.[index]),
-    low: toFiniteNumber(quote?.low?.[index]),
-    close,
-    volume: toFiniteNumber(quote?.volume?.[index]),
-  };
-}
-
-function parseTwseRocDate(value) {
-  const text = String(value || "").replaceAll("/", "").trim();
-
-  if (!/^\d{7}$/.test(text)) {
-    return "";
-  }
-
-  const year = Number(text.slice(0, 3)) + 1911;
-  const month = text.slice(3, 5);
-  const day = text.slice(5, 7);
-
-  return `${year}-${month}-${day}`;
-}
-
-function getLatestValidTwseMarketRow(rows = []) {
-  if (!Array.isArray(rows)) return null;
-
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index];
-
-    if (row && row.Date && toFiniteNumber(row.TradeValue) !== null) {
-      return row;
-    }
-  }
-
-  return null;
-}
-
-function buildTwseMarketSummary(row) {
-  if (!row) return null;
-
-  return {
-    key: "twse",
-    market_type: "上市",
-    trade_date: parseTwseRocDate(row.Date),
-    trade_volume: toFiniteNumber(row.TradeVolume),
-    total_trade_amount: toFiniteNumber(row.TradeValue),
-    transaction_count: toFiniteNumber(row.Transaction),
-    daily_index_point: toFiniteNumber(row.TAIEX),
-    daily_change_point: toFiniteNumber(row.Change),
-    source: "TWSE OpenAPI FMTQIK",
-  };
-}
-
-async function fetchTwseMarketSummary() {
-  const rows = await fetchExternalJson(
-    "https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK",
-    "上市市場成交資訊",
-  );
-
-  const latestRow = getLatestValidTwseMarketRow(rows);
-
-  if (!latestRow) {
-    throw new Error("上市市場成交資訊查無資料");
-  }
-
-  return buildTwseMarketSummary(latestRow);
-}
-
-function marketKeyFromType(marketType) {
-  if (marketType === "上市") return "twse";
-  if (marketType === "上櫃") return "tpex";
-  return "market";
-}
-
-async function fetchImportedMarketSummary(marketType) {
-  try {
-    const rows = await query(
-      `
-      SELECT
-        market_type,
-        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
-        trade_volume,
-        total_trade_amount,
-        transaction_count,
-        daily_index_point,
-        daily_change_point,
-        source
-      FROM market_daily_summaries
-      WHERE market_type = ?
-      ORDER BY trade_date DESC
-      LIMIT 1
-      `,
-      [marketType],
-    );
-
-    const row = rows[0];
-    if (!row) return null;
-
-    return {
-      key: marketKeyFromType(row.market_type),
-      market_type: row.market_type,
-      trade_date: row.trade_date,
-      trade_volume: toFiniteNumber(row.trade_volume),
-      total_trade_amount: toFiniteNumber(row.total_trade_amount),
-      transaction_count: toFiniteNumber(row.transaction_count),
-      daily_index_point: toFiniteNumber(row.daily_index_point),
-      daily_change_point: toFiniteNumber(row.daily_change_point),
-      source: row.source || "資料庫 market_daily_summaries",
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-async function fetchMarketSummaryFromDatabase(marketType) {
-  const latestRows = await query(
-    `
-    SELECT DATE_FORMAT(MAX(p.trade_date), '%Y-%m-%d') AS latest_date
-    FROM daily_prices p
-    INNER JOIN stocks s
-      ON p.stock_code = s.stock_code
-    WHERE s.market_type = ?
-      AND (p.transaction_amount IS NOT NULL OR p.volume IS NOT NULL OR p.transaction_count IS NOT NULL)
-    `,
-    [marketType],
-  );
-
-  const latestDate = latestRows[0]?.latest_date || null;
-  if (!latestDate) return null;
-
-  const rows = await query(
-    `
-    SELECT
-      DATE_FORMAT(p.trade_date, '%Y-%m-%d') AS trade_date,
-      CAST(SUM(COALESCE(p.volume, 0)) AS CHAR) AS trade_volume,
-      CAST(SUM(COALESCE(p.transaction_amount, p.turnover, 0)) AS CHAR) AS total_trade_amount,
-      CAST(SUM(COALESCE(p.transaction_count, 0)) AS CHAR) AS transaction_count
-    FROM daily_prices p
-    INNER JOIN stocks s
-      ON p.stock_code = s.stock_code
-    WHERE s.market_type = ?
-      AND p.trade_date = ?
-    GROUP BY p.trade_date
-    LIMIT 1
-    `,
-    [marketType, latestDate],
-  );
-
-  const row = rows[0];
-  if (!row) return null;
-
-  return {
-    key: marketKeyFromType(marketType),
-    market_type: marketType,
-    trade_date: row.trade_date,
-    trade_volume: toFiniteNumber(row.trade_volume),
-    total_trade_amount: toFiniteNumber(row.total_trade_amount),
-    transaction_count: toFiniteNumber(row.transaction_count),
-    daily_index_point: null,
-    daily_change_point: null,
-    source: "資料庫 daily_prices 匯總",
-  };
-}
-
-async function fetchMarketSummary(config) {
-  const importedSummary = await fetchImportedMarketSummary(config.market_type);
-  if (importedSummary) return importedSummary;
-
-  if (config.key === "twse") {
-    try {
-      return await fetchTwseMarketSummary();
-    } catch (error) {
-      const dbSummary = await fetchMarketSummaryFromDatabase(config.market_type);
-      if (dbSummary) return dbSummary;
-      throw error;
-    }
-  }
-
-  return fetchMarketSummaryFromDatabase(config.market_type);
-}
-
-async function fetchMarketIndexWithSummary(config) {
-  const [chartResult, summaryResult] = await Promise.allSettled([
-    fetchYahooIndexChart(config),
-    fetchMarketSummary(config),
-  ]);
-
-  const chart = chartResult.status === "fulfilled"
-    ? chartResult.value
-    : {
-        key: config.key,
-        market_type: config.market_type,
-        index_code: config.index_code,
-        index_name: config.index_name,
-        symbol: config.symbols[0],
-        current_point: null,
-        previous_close: null,
-        change_point: null,
-        change_percent: null,
-        open: null,
-        high: null,
-        low: null,
-        volume: null,
-        total_trade_amount: null,
-        latest_time: "",
-        updated_at: getTaiwanDateTimeText(),
-        source: "Yahoo Finance chart",
-        points: [],
-        error: chartResult.reason?.message || "即時走勢讀取失敗",
-      };
-
-  const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
-  const summaryError = summaryResult.status === "rejected" ? summaryResult.reason?.message : "";
-
-  return {
-    ...chart,
-    total_trade_amount: summary?.total_trade_amount ?? chart.total_trade_amount ?? null,
-    trade_volume: summary?.trade_volume ?? chart.volume ?? null,
-    transaction_count: summary?.transaction_count ?? null,
-    summary_trade_date: summary?.trade_date || "",
-    summary_index_point: summary?.daily_index_point ?? null,
-    summary_change_point: summary?.daily_change_point ?? null,
-    summary_source: summary?.source || "",
-    summary_error: summaryError || "",
-  };
-}
-
-async function fetchYahooIndexChart(config) {
-  let lastError = null;
-
-  for (const symbol of config.symbols) {
-    try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m&includePrePost=false`;
-      const json = await fetchExternalJson(url, `${config.index_name} 即時走勢`);
-      const result = json?.chart?.result?.[0];
-      const error = json?.chart?.error;
-
-      if (!result) {
-        throw new Error(error?.description || `${config.index_name} 查無即時走勢資料`);
-      }
-
-      const meta = result.meta || {};
-      const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
-      const quote = result.indicators?.quote?.[0] || {};
-      const points = timestamps
-        .map((timestamp, index) => buildYahooIndexPoint(timestamp, quote, index))
-        .filter(Boolean);
-      const closeSeries = points.map((point) => point.close);
-      const currentPoint = toFiniteNumber(meta.regularMarketPrice) ?? getLastFiniteValue(closeSeries);
-      const previousClose =
-        toFiniteNumber(meta.previousClose) ??
-        toFiniteNumber(meta.chartPreviousClose) ??
-        (closeSeries.length >= 2 ? closeSeries[closeSeries.length - 2] : null);
-      const change = currentPoint !== null && previousClose !== null ? currentPoint - previousClose : null;
-      const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
-      const latestPoint = points[points.length - 1] || null;
-      const latestVolume = toFiniteNumber(meta.regularMarketVolume) ?? latestPoint?.volume ?? null;
-
-      return {
-        key: config.key,
-        market_type: config.market_type,
-        index_code: config.index_code,
-        index_name: config.index_name,
-        symbol,
-        current_point: currentPoint,
-        previous_close: previousClose,
-        change_point: change,
-        change_percent: changePercent,
-        open: toFiniteNumber(meta.regularMarketOpen) ?? latestPoint?.open ?? null,
-        high: toFiniteNumber(meta.regularMarketDayHigh) ?? getLastFiniteValue(points.map((point) => point.high)) ?? null,
-        low: toFiniteNumber(meta.regularMarketDayLow) ?? getLastFiniteValue(points.map((point) => point.low)) ?? null,
-        volume: latestVolume,
-        total_trade_amount: null,
-        latest_time: latestPoint?.time || getTaiwanTimeTextFromUnix(meta.regularMarketTime),
-        updated_at: getTaiwanDateTimeText(),
-        source: "Yahoo Finance chart",
-        points,
-        error: null,
-      };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  return {
-    key: config.key,
-    market_type: config.market_type,
-    index_code: config.index_code,
-    index_name: config.index_name,
-    symbol: config.symbols[0],
-    current_point: null,
-    previous_close: null,
-    change_point: null,
-    change_percent: null,
-    open: null,
-    high: null,
-    low: null,
-    volume: null,
-    total_trade_amount: null,
-    latest_time: "",
-    updated_at: getTaiwanDateTimeText(),
-    source: "Yahoo Finance chart",
-    points: [],
-    error: lastError?.message || "即時走勢讀取失敗",
-  };
-}
-
-
 function toPlainNumber(value) {
   if (value === null || value === undefined || value === "") return 0;
   const numberValue = Number(String(value).replaceAll(",", ""));
@@ -842,1430 +421,6 @@ app.post("/auth/logout", (req, res) => {
     success: true,
     message: "已登出",
   });
-});
-
-
-// ==============================
-// 大盤指數即時走勢
-// GET /market/indices/intraday
-// ==============================
-
-function parseTwseRealtimeDate(value) {
-  const text = String(value || "").replaceAll("/", "").replaceAll("-", "").trim();
-
-  if (/^\d{8}$/.test(text)) {
-    return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
-  }
-
-  if (/^\d{7}$/.test(text)) {
-    const year = Number(text.slice(0, 3)) + 1911;
-    return `${year}-${text.slice(3, 5)}-${text.slice(5, 7)}`;
-  }
-
-  return "";
-}
-
-function normalizeRealtimeNumber(value) {
-  if (value === null || value === undefined) return null;
-
-  const text = String(value)
-    .replaceAll(",", "")
-    .replaceAll("--", "-")
-    .trim();
-
-  if (!text || text === "-" || text === "－" || text.toLowerCase() === "nan") {
-    return null;
-  }
-
-  const numberValue = Number(text);
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function pickRealtimeNumber(row, keys = []) {
-  for (const key of keys) {
-    const numberValue = normalizeRealtimeNumber(row?.[key]);
-    if (numberValue !== null) return numberValue;
-  }
-
-  return null;
-}
-
-function parseTwseLevelField(value) {
-  return String(value || "")
-    .split("_")
-    .map((item) => item.trim())
-    .filter((item) => item && item !== "-" && item !== "－")
-    .map(normalizeRealtimeNumber);
-}
-
-function buildRealtimeLevels(priceText, volumeText, side) {
-  const prices = parseTwseLevelField(priceText);
-  const volumes = parseTwseLevelField(volumeText);
-  const length = Math.max(prices.length, volumes.length, 5);
-
-  return Array.from({ length })
-    .map((_, index) => ({
-      level: index + 1,
-      side,
-      price: prices[index] ?? null,
-      volume_lots: volumes[index] ?? null,
-    }))
-    .filter((item) => item.price !== null || item.volume_lots !== null);
-}
-
-function getQuoteChannels(stockCode, marketType = "") {
-  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
-  const market = String(marketType || "");
-  const primary = market.includes("上櫃") ? "otc" : "tse";
-  const secondary = primary === "tse" ? "otc" : "tse";
-
-  return [`${primary}_${code}.tw`, `${secondary}_${code}.tw`];
-}
-
-function getRealtimeTradeSide(currentPrice, bestBid, bestAsk) {
-  if (currentPrice === null) return "來源未提供";
-  if (bestAsk !== null && currentPrice >= bestAsk) return "外盤參考";
-  if (bestBid !== null && currentPrice <= bestBid) return "內盤參考";
-  return "買賣中間";
-}
-
-function getRealtimeTradeSideNote(side) {
-  if (side === "外盤參考") return "最新成交價接近委賣價，代表最新一筆較偏主動買進。";
-  if (side === "內盤參考") return "最新成交價接近委買價，代表最新一筆較偏主動賣出。";
-  if (side === "買賣中間") return "最新成交價在委買與委賣中間，暫不明顯偏內盤或外盤。";
-  return "目前資料來源沒有提供可判斷內外盤的即時欄位。";
-}
-
-function findRealtimeQuoteRow(json, stockCode) {
-  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
-  const rows = Array.isArray(json?.msgArray)
-    ? json.msgArray
-    : Array.isArray(json?.data)
-      ? json.data
-      : Array.isArray(json)
-        ? json
-        : [];
-
-  return rows.find((row) => normalizeStockCodeValue(row?.c) === code) || rows[0] || null;
-}
-
-function buildRealtimeQuote(row, stockInfo, channel) {
-  const bidLevels = buildRealtimeLevels(row?.b, row?.g, "bid");
-  const askLevels = buildRealtimeLevels(row?.a, row?.f, "ask");
-  const bestBid = bidLevels.find((item) => item.price !== null)?.price ?? null;
-  const bestAsk = askLevels.find((item) => item.price !== null)?.price ?? null;
-  const currentPrice = pickRealtimeNumber(row, ["z", "pz", "price", "current_price"]);
-  const previousClose = pickRealtimeNumber(row, ["y", "previous_close", "previousClose"]);
-  const change = currentPrice !== null && previousClose !== null ? currentPrice - previousClose : pickRealtimeNumber(row, ["change", "price_change"]);
-  const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
-  const volumeLots = pickRealtimeNumber(row, ["v", "volume", "trade_volume"]);
-  const latestVolumeLots = pickRealtimeNumber(row, ["tv", "latest_volume", "last_volume"]);
-  const innerVolumeLots = pickRealtimeNumber(row, ["iv", "inner_volume", "inside_volume", "in_volume"]);
-  const outerVolumeLots = pickRealtimeNumber(row, ["ov", "outer_volume", "outside_volume", "out_volume"]);
-  const totalAmount = pickRealtimeNumber(row, ["amount", "trade_value", "transaction_amount", "amt"]);
-  const tradeSide = getRealtimeTradeSide(currentPrice, bestBid, bestAsk);
-
-  return {
-    stock_code: stockInfo.stock_code,
-    stock_name: stockInfo.stock_name,
-    market_type: stockInfo.market_type,
-    industry: stockInfo.industry,
-    security_type: getSecurityType(stockInfo),
-    channel,
-    symbol: `${normalizeStockCodeValue(stockInfo.stock_code)}.${String(stockInfo.market_type || "").includes("上櫃") ? "TWO" : "TW"}`,
-    trade_date: parseTwseRealtimeDate(row?.d),
-    latest_time: String(row?.t || row?.time || "").trim(),
-    current_price: currentPrice,
-    price_change: change,
-    change_percent: changePercent,
-    open_price: pickRealtimeNumber(row, ["o", "open_price", "open"]),
-    high_price: pickRealtimeNumber(row, ["h", "high_price", "high"]),
-    low_price: pickRealtimeNumber(row, ["l", "low_price", "low"]),
-    previous_close: previousClose,
-    volume_lots: volumeLots,
-    latest_volume_lots: latestVolumeLots,
-    total_trade_amount: totalAmount,
-    bid_price: bestBid,
-    ask_price: bestAsk,
-    bid_levels: bidLevels.slice(0, 5),
-    ask_levels: askLevels.slice(0, 5),
-    inner_volume_lots: innerVolumeLots,
-    outer_volume_lots: outerVolumeLots,
-    trade_side: tradeSide,
-    trade_side_note: getRealtimeTradeSideNote(tradeSide),
-    source: "TWSE MIS 即時行情",
-    updated_at: getTaiwanDateTimeText(),
-  };
-}
-
-async function getStockInfoForRealtime(stockCode) {
-  const code = normalizeStockCodeValue(stockCode);
-  const rows = await query(
-    `
-    SELECT
-      stock_code,
-      stock_name,
-      market_type,
-      industry
-    FROM stocks
-    WHERE stock_code = ?
-    LIMIT 1
-    `,
-    [code],
-  );
-
-  if (rows[0]) {
-    return {
-      ...rows[0],
-      security_type: getSecurityType(rows[0]),
-    };
-  }
-
-  return ensureEtfStockInfo(code);
-}
-
-async function fetchTwseRealtimeQuote(stockInfo) {
-  const channels = getQuoteChannels(stockInfo.stock_code, stockInfo.market_type);
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${encodeURIComponent(channels.join("|"))}&json=1&delay=0`;
-  const json = await fetchExternalJson(url, `${stockInfo.stock_code} 即時行情`);
-  const row = findRealtimeQuoteRow(json, stockInfo.stock_code);
-
-  if (!row) {
-    throw new Error("即時行情來源查無資料");
-  }
-
-  const channel = String(row?.ch || "").split(".")[0] || channels[0];
-  return buildRealtimeQuote(row, stockInfo, channel);
-}
-
-function isLikelyTaiwanEtfCode(stockCode) {
-  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
-
-  return /^00\d{2,4}[A-Z]?$/.test(code);
-}
-
-function isEtfStockInfo(stockInfo) {
-  const securityType = String(stockInfo?.security_type || stockInfo?.instrument_type || "").toUpperCase();
-  const industry = String(stockInfo?.industry || "").toUpperCase();
-  const marketType = String(stockInfo?.market_type || "").toUpperCase();
-
-  return securityType === "ETF" || industry === "ETF" || marketType.includes("ETF") || isLikelyTaiwanEtfCode(stockInfo?.stock_code);
-}
-
-function getSecurityType(stockInfo) {
-  return isEtfStockInfo(stockInfo) ? "ETF" : "STOCK";
-}
-
-function getYahooSymbolCandidates(stockCode, marketType = "") {
-  const code = normalizeStockCodeValue(stockCode).replace(/\.(TW|TWO)$/i, "");
-  const market = String(marketType || "");
-
-  if (market.includes("上櫃")) return [`${code}.TWO`, `${code}.TW`];
-  if (market.includes("上市")) return [`${code}.TW`, `${code}.TWO`];
-
-  return [`${code}.TW`, `${code}.TWO`];
-}
-
-function getYahooTwSymbol(stockInfo) {
-  const stockCode = normalizeStockCodeValue(stockInfo?.stock_code);
-
-  if (stockInfo?.symbol && /\.(TW|TWO)$/i.test(String(stockInfo.symbol))) {
-    return String(stockInfo.symbol).toUpperCase();
-  }
-
-  return getYahooSymbolCandidates(stockCode, stockInfo?.market_type)[0];
-}
-
-function getMarketTypeFromYahooSymbol(symbol, fallback = "上市") {
-  return String(symbol || "").toUpperCase().endsWith(".TWO") ? "上櫃" : fallback;
-}
-
-function normalizeYahooQuoteMeta(stockCode, symbol, meta = {}) {
-  const code = normalizeStockCodeValue(stockCode);
-  const name = String(meta.shortName || meta.longName || meta.symbol || code).trim();
-  const marketType = getMarketTypeFromYahooSymbol(symbol, "上市");
-
-  return {
-    stock_code: code,
-    stock_name: name || code,
-    market_type: marketType,
-    industry: "ETF",
-    security_type: "ETF",
-    symbol,
-  };
-}
-
-async function fetchYahooQuoteSnapshot(stockCode, stockInfo = {}) {
-  const code = normalizeStockCodeValue(stockCode);
-  const symbols = getYahooSymbolCandidates(code, stockInfo.market_type);
-  const errors = [];
-
-  for (const symbol of symbols) {
-    try {
-      const sourceUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m`;
-      const json = await fetchExternalJson(sourceUrl, `${code} Yahoo 即時行情`);
-      const result = json?.chart?.result?.[0];
-      const meta = result?.meta || {};
-      const quote = result?.indicators?.quote?.[0] || {};
-      const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
-      const closes = Array.isArray(quote.close) ? quote.close : [];
-      const volumes = Array.isArray(quote.volume) ? quote.volume : [];
-
-      const latestClose = getLastFiniteValue(closes);
-      const latestVolume = getLastFiniteValue(volumes);
-      const totalVolume = toFiniteNumber(meta.regularMarketVolume) ?? latestVolume;
-      const currentPrice = toFiniteNumber(meta.regularMarketPrice) ?? latestClose;
-
-      if (currentPrice === null) {
-        errors.push(`${symbol}：沒有即時價格`);
-        continue;
-      }
-
-      const previousClose = toFiniteNumber(meta.chartPreviousClose) ?? toFiniteNumber(meta.previousClose);
-      const change = previousClose !== null ? currentPrice - previousClose : null;
-      const changePercent = change !== null && previousClose ? (change / previousClose) * 100 : null;
-      const lastTimestamp = timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
-      const tradeDate = meta.regularMarketTime
-        ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Number(meta.regularMarketTime) * 1000))
-        : getTaiwanDateTimeText().slice(0, 10);
-      const normalizedInfo = normalizeYahooQuoteMeta(code, symbol, meta);
-
-      return {
-        stock_info: {
-          ...normalizedInfo,
-          stock_name: stockInfo.stock_name || normalizedInfo.stock_name,
-          market_type: stockInfo.market_type || normalizedInfo.market_type,
-          industry: stockInfo.industry || normalizedInfo.industry,
-          security_type: getSecurityType({ ...normalizedInfo, ...stockInfo }),
-        },
-        quote: {
-          stock_code: code,
-          stock_name: stockInfo.stock_name || normalizedInfo.stock_name,
-          market_type: stockInfo.market_type || normalizedInfo.market_type,
-          industry: stockInfo.industry || normalizedInfo.industry,
-          security_type: getSecurityType({ ...normalizedInfo, ...stockInfo }),
-          symbol,
-          trade_date: tradeDate,
-          latest_time: meta.regularMarketTime ? getTaiwanTimeTextFromUnix(meta.regularMarketTime) : getTaiwanTimeTextFromUnix(lastTimestamp),
-          current_price: currentPrice,
-          close_price: currentPrice,
-          price_change: change,
-          change_percent: changePercent,
-          open_price: toFiniteNumber(meta.regularMarketDayLow) === currentPrice ? null : getLastFiniteValue(quote.open || []) ?? toFiniteNumber(meta.regularMarketOpen),
-          high_price: toFiniteNumber(meta.regularMarketDayHigh) ?? getLastFiniteValue(quote.high || []),
-          low_price: toFiniteNumber(meta.regularMarketDayLow) ?? getLastFiniteValue(quote.low || []),
-          previous_close: previousClose,
-          volume: totalVolume,
-          volume_lots: totalVolume !== null && totalVolume !== undefined ? totalVolume / 1000 : null,
-          total_trade_amount: currentPrice !== null && totalVolume !== null ? currentPrice * totalVolume : null,
-          source: "Yahoo Finance chart",
-          source_url: sourceUrl,
-          updated_at: getTaiwanDateTimeText(),
-        },
-      };
-    } catch (error) {
-      errors.push(`${symbol}：${error.message}`);
-    }
-  }
-
-  throw new Error(errors.join("；") || "Yahoo 即時行情查無資料");
-}
-
-async function ensureEtfStockInfo(stockCode) {
-  const code = normalizeStockCodeValue(stockCode);
-
-  if (!isLikelyTaiwanEtfCode(code)) {
-    return null;
-  }
-
-  const snapshot = await fetchYahooQuoteSnapshot(code);
-  const stockInfo = {
-    ...snapshot.stock_info,
-    industry: "ETF",
-    security_type: "ETF",
-  };
-
-  try {
-    await query(
-      `
-      INSERT INTO stocks (
-        stock_code,
-        stock_name,
-        market_type,
-        industry,
-        security_type,
-        is_active
-      )
-      VALUES (?, ?, ?, 'ETF', 'ETF', 1)
-      ON DUPLICATE KEY UPDATE
-        stock_name = VALUES(stock_name),
-        market_type = VALUES(market_type),
-        industry = 'ETF',
-        security_type = 'ETF',
-        is_active = 1,
-        updated_at = NOW()
-      `,
-      [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
-    );
-  } catch (error) {
-    await query(
-      `
-      INSERT INTO stocks (
-        stock_code,
-        stock_name,
-        market_type,
-        industry,
-        is_active
-      )
-      VALUES (?, ?, ?, 'ETF', 1)
-      ON DUPLICATE KEY UPDATE
-        stock_name = VALUES(stock_name),
-        market_type = VALUES(market_type),
-        industry = 'ETF',
-        is_active = 1,
-        updated_at = NOW()
-      `,
-      [stockInfo.stock_code, stockInfo.stock_name, stockInfo.market_type],
-    );
-  }
-
-  return stockInfo;
-}
-
-function buildEtfSummaryFromQuote(stockInfo, quote) {
-  const change = toFiniteNumber(quote.price_change);
-  const scoreStatus = "ETF 不計算籌碼分數";
-
-  return {
-    stock_code: stockInfo.stock_code,
-    stock_name: stockInfo.stock_name,
-    market_type: stockInfo.market_type,
-    industry: "ETF",
-    security_type: "ETF",
-    trade_date: quote.trade_date,
-    open_price: quote.open_price,
-    high_price: quote.high_price,
-    low_price: quote.low_price,
-    close_price: quote.close_price ?? quote.current_price,
-    price_change: change,
-    change_percent: quote.change_percent,
-    volume: quote.volume_lots ?? (quote.volume ? quote.volume / 1000 : null),
-    transaction_amount: quote.total_trade_amount,
-    transaction_count: null,
-    foreign_buy: null,
-    foreign_sell: null,
-    foreign_net: null,
-    investment_trust_buy: null,
-    investment_trust_sell: null,
-    investment_trust_net: null,
-    dealer_net: null,
-    total_net: null,
-    chip_score: null,
-    foreign_score: null,
-    investment_trust_score: null,
-    dealer_score: null,
-    big_holder_score: null,
-    volume_score: null,
-    price_score: null,
-    foreign_status: scoreStatus,
-    investment_trust_status: scoreStatus,
-    dealer_status: scoreStatus,
-    big_holder_status: scoreStatus,
-    volume_status: "ETF 成交量看即時行情",
-    price_position: "ETF 以即時價格觀察",
-    realtime_quote: quote,
-  };
-}
-
-async function fetchYahooEtfSummary(stockCode, stockInfo = null) {
-  const snapshot = await fetchYahooQuoteSnapshot(stockCode, stockInfo || {});
-  const mergedStockInfo = {
-    ...snapshot.stock_info,
-    ...(stockInfo || {}),
-    industry: "ETF",
-    security_type: "ETF",
-  };
-
-  return buildEtfSummaryFromQuote(mergedStockInfo, {
-    ...snapshot.quote,
-    stock_name: mergedStockInfo.stock_name,
-    market_type: mergedStockInfo.market_type,
-    industry: "ETF",
-    security_type: "ETF",
-  });
-}
-
-function decodeBasicHtmlEntities(value) {
-  return String(value || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x2F;/gi, "/")
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
-}
-
-function htmlToReadableText(html) {
-  return decodeBasicHtmlEntities(
-    String(html || "")
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>|<\/div>|<\/li>|<\/tr>|<\/h[1-6]>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-  )
-    .replace(/\u00a0/g, " ")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{2,}/g, "\n")
-    .trim();
-}
-
-function parseRevenuePercent(value) {
-  if (value === null || value === undefined || value === "" || value === "-") return null;
-  return toFiniteNumber(String(value).replace("%", ""));
-}
-
-function parseYahooRevenueRowsFromText(text, limit = 24) {
-  const normalized = String(text || "")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/−/g, "-");
-  const rowPattern = /(\d{4}\/\d{2})\s+([0-9,]+)\s+(-?[0-9,.]+%|-)\s+([0-9,]+)\s+(-?[0-9,.]+%|-)\s+([0-9,]+)\s+([0-9,]+)\s+(-?[0-9,.]+%|-)/g;
-  const rows = [];
-  const seenPeriods = new Set();
-  let match;
-
-  while ((match = rowPattern.exec(normalized)) !== null) {
-    const period = match[1];
-
-    if (seenPeriods.has(period)) continue;
-    seenPeriods.add(period);
-
-    const year = Number(period.slice(0, 4));
-    const month = Number(period.slice(5, 7));
-
-    rows.push({
-      period,
-      year,
-      month,
-      month_revenue_thousand: toFiniteNumber(match[2]),
-      month_over_month_percent: parseRevenuePercent(match[3]),
-      last_year_month_revenue_thousand: toFiniteNumber(match[4]),
-      year_over_year_percent: parseRevenuePercent(match[5]),
-      cumulative_revenue_thousand: toFiniteNumber(match[6]),
-      last_year_cumulative_revenue_thousand: toFiniteNumber(match[7]),
-      cumulative_year_over_year_percent: parseRevenuePercent(match[8]),
-    });
-
-    if (rows.length >= limit) break;
-  }
-
-  return rows;
-}
-
-function getRevenueGrowthStatus(latest, rows = []) {
-  if (!latest) return "營收資料不足";
-
-  const yoy = toFiniteNumber(latest.year_over_year_percent);
-  const mom = toFiniteNumber(latest.month_over_month_percent);
-  const recentRows = rows.slice(0, 3);
-  const positiveYoyCount = recentRows.filter((row) => toFiniteNumber(row.year_over_year_percent) !== null && toFiniteNumber(row.year_over_year_percent) > 0).length;
-  const positiveMomCount = recentRows.filter((row) => toFiniteNumber(row.month_over_month_percent) !== null && toFiniteNumber(row.month_over_month_percent) > 0).length;
-
-  if (yoy !== null && yoy >= 20 && mom !== null && mom >= 0) return "營收明顯成長";
-  if (positiveYoyCount >= 3 && positiveMomCount >= 2) return "營收連續轉強";
-  if (yoy !== null && yoy > 0) return "營收年增";
-  if (yoy !== null && yoy < 0) return "營收年減";
-  return "營收持平觀察";
-}
-
-function buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl, source = "Yahoo 股市營收表") {
-  const latest = rows[0] || null;
-
-  return {
-    stock_code: stockInfo.stock_code,
-    stock_name: stockInfo.stock_name,
-    market_type: stockInfo.market_type,
-    industry: stockInfo.industry,
-    symbol,
-    unit: "仟元",
-    latest_period: latest?.period || "",
-    latest_month_revenue_thousand: latest?.month_revenue_thousand ?? null,
-    latest_month_over_month_percent: latest?.month_over_month_percent ?? null,
-    latest_last_year_month_revenue_thousand: latest?.last_year_month_revenue_thousand ?? null,
-    latest_year_over_year_percent: latest?.year_over_year_percent ?? null,
-    latest_cumulative_revenue_thousand: latest?.cumulative_revenue_thousand ?? null,
-    latest_cumulative_year_over_year_percent: latest?.cumulative_year_over_year_percent ?? null,
-    growth_status: getRevenueGrowthStatus(latest, rows),
-    rows,
-    source,
-    source_url: sourceUrl,
-    updated_at: getTaiwanDateTimeText(),
-  };
-}
-
-async function fetchDatabaseMonthlyRevenue(stockInfo, limit = 24) {
-  try {
-    const rows = await query(
-      `
-      SELECT
-        CONCAT(revenue_year, '/', LPAD(revenue_month, 2, '0')) AS period,
-        revenue_year AS year,
-        revenue_month AS month,
-        month_revenue_thousand,
-        month_over_month_percent,
-        last_year_month_revenue_thousand,
-        year_over_year_percent,
-        cumulative_revenue_thousand,
-        last_year_cumulative_revenue_thousand,
-        cumulative_year_over_year_percent
-      FROM monthly_revenues
-      WHERE stock_code = ?
-      ORDER BY revenue_year DESC, revenue_month DESC
-      LIMIT ?
-      `,
-      [stockInfo.stock_code, limit],
-    );
-
-    if (rows.length === 0) return null;
-
-    return buildMonthlyRevenueSummary(
-      stockInfo,
-      stockInfo.stock_code,
-      rows.map((row) => ({
-        period: row.period,
-        year: Number(row.year),
-        month: Number(row.month),
-        month_revenue_thousand: toFiniteNumber(row.month_revenue_thousand),
-        month_over_month_percent: toFiniteNumber(row.month_over_month_percent),
-        last_year_month_revenue_thousand: toFiniteNumber(row.last_year_month_revenue_thousand),
-        year_over_year_percent: toFiniteNumber(row.year_over_year_percent),
-        cumulative_revenue_thousand: toFiniteNumber(row.cumulative_revenue_thousand),
-        last_year_cumulative_revenue_thousand: toFiniteNumber(row.last_year_cumulative_revenue_thousand),
-        cumulative_year_over_year_percent: toFiniteNumber(row.cumulative_year_over_year_percent),
-      })),
-      "database:monthly_revenues",
-      "資料庫 monthly_revenues",
-    );
-  } catch (error) {
-    return null;
-  }
-}
-
-async function fetchYahooMonthlyRevenue(stockInfo, limit = 24) {
-  const symbol = getYahooTwSymbol(stockInfo);
-  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/revenue`;
-  const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 每月營收`, {
-    Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
-  });
-  const text = htmlToReadableText(html);
-  const rows = parseYahooRevenueRowsFromText(text, limit);
-
-  if (rows.length === 0) {
-    throw new Error("每月營收來源暫時沒有回傳可解析資料");
-  }
-
-  return buildMonthlyRevenueSummary(stockInfo, symbol, rows, sourceUrl);
-}
-
-function parseEpsPercent(value) {
-  if (value === null || value === undefined || value === "" || value === "-") return null;
-  return toFiniteNumber(String(value).replace("%", ""));
-}
-
-function buildQuarterKey(year, quarter) {
-  const yearValue = Number(year);
-  const quarterValue = Number(quarter);
-
-  if (!Number.isFinite(yearValue) || !Number.isFinite(quarterValue)) {
-    return null;
-  }
-
-  return yearValue * 4 + quarterValue;
-}
-
-function normalizeEpsRows(rows = []) {
-  const sortedRows = rows
-    .filter((row) => row && Number.isFinite(Number(row.year)) && Number.isFinite(Number(row.quarter)))
-    .map((row) => ({
-      ...row,
-      year: Number(row.year),
-      quarter: Number(row.quarter),
-      period: row.period || `${row.year} Q${row.quarter}`,
-      quarter_key: buildQuarterKey(row.year, row.quarter),
-      eps: toFiniteNumber(row.eps),
-      quarter_over_quarter_percent: parseEpsPercent(row.quarter_over_quarter_percent),
-      year_over_year_percent: parseEpsPercent(row.year_over_year_percent),
-    }))
-    .sort((a, b) => b.quarter_key - a.quarter_key);
-
-  return sortedRows.map((row, index, allRows) => {
-    const previousQuarter = allRows.find((item) => item.quarter_key === row.quarter_key - 1);
-    const sameQuarterLastYear = allRows.find((item) => item.quarter_key === row.quarter_key - 4);
-    const eps = toFiniteNumber(row.eps);
-    const previousEps = toFiniteNumber(previousQuarter?.eps);
-    const lastYearEps = toFiniteNumber(sameQuarterLastYear?.eps);
-    const qoq = row.quarter_over_quarter_percent ?? (
-      eps !== null && previousEps !== null && previousEps !== 0
-        ? ((eps - previousEps) / Math.abs(previousEps)) * 100
-        : null
-    );
-    const yoy = row.year_over_year_percent ?? (
-      eps !== null && lastYearEps !== null && lastYearEps !== 0
-        ? ((eps - lastYearEps) / Math.abs(lastYearEps)) * 100
-        : null
-    );
-
-    return {
-      ...row,
-      quarter_over_quarter_percent: qoq,
-      year_over_year_percent: yoy,
-    };
-  });
-}
-
-function parseYahooEpsRowsFromText(text, limit = 20) {
-  const normalized = String(text || "")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/−/g, "-");
-  const rowPattern = /(20\d{2})\s*(?:\/\s*)?(?:Q\s*([1-4])|([1-4])\s*Q|第\s*([1-4])\s*季|([1-4])\s*季)\s+(-?[0-9,.]+|-)\s+(-?[0-9,.]+%?|-)?\s*([-+]?[0-9,.]+%?|-)?/gi;
-  const rows = [];
-  const seenPeriods = new Set();
-  let match;
-
-  while ((match = rowPattern.exec(normalized)) !== null) {
-    const year = Number(match[1]);
-    const quarter = Number(match[2] || match[3] || match[4] || match[5]);
-    const period = `${year} Q${quarter}`;
-
-    if (seenPeriods.has(period)) continue;
-    seenPeriods.add(period);
-
-    rows.push({
-      period,
-      year,
-      quarter,
-      eps: toFiniteNumber(match[6]),
-      quarter_over_quarter_percent: parseEpsPercent(match[7]),
-      year_over_year_percent: parseEpsPercent(match[8]),
-    });
-
-    if (rows.length >= limit) break;
-  }
-
-  return normalizeEpsRows(rows).slice(0, limit);
-}
-
-function getEpsGrowthStatus(latest, rows = []) {
-  if (!latest || toFiniteNumber(latest.eps) === null) return "EPS 資料不足";
-
-  const eps = toFiniteNumber(latest.eps);
-  const qoq = toFiniteNumber(latest.quarter_over_quarter_percent);
-  const yoy = toFiniteNumber(latest.year_over_year_percent);
-  const recentRows = rows.slice(0, 4);
-  const positiveEpsCount = recentRows.filter((row) => toFiniteNumber(row.eps) !== null && toFiniteNumber(row.eps) > 0).length;
-  const positiveYoyCount = recentRows.filter((row) => toFiniteNumber(row.year_over_year_percent) !== null && toFiniteNumber(row.year_over_year_percent) > 0).length;
-
-  if (eps !== null && eps > 0 && yoy !== null && yoy >= 20 && (qoq === null || qoq >= 0)) return "EPS 明顯成長";
-  if (positiveEpsCount >= 4 && positiveYoyCount >= 3) return "EPS 連續轉強";
-  if (eps !== null && eps > 0 && yoy !== null && yoy > 0) return "EPS 年增";
-  if (eps !== null && eps > 0) return "EPS 獲利觀察";
-  if (eps !== null && eps < 0) return "EPS 虧損觀察";
-  return "EPS 持平觀察";
-}
-
-function buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl, source = "Yahoo 股市 EPS 表") {
-  const latest = rows[0] || null;
-  const recentFourRows = rows.slice(0, 4);
-  const validRecentEps = recentFourRows
-    .map((row) => toFiniteNumber(row.eps))
-    .filter((value) => value !== null);
-  const trailingFourQuarterEps = validRecentEps.length > 0
-    ? validRecentEps.reduce((sum, value) => sum + value, 0)
-    : null;
-  const averageQuarterEps = validRecentEps.length > 0
-    ? trailingFourQuarterEps / validRecentEps.length
-    : null;
-
-  return {
-    stock_code: stockInfo.stock_code,
-    stock_name: stockInfo.stock_name,
-    market_type: stockInfo.market_type,
-    industry: stockInfo.industry,
-    symbol,
-    unit: "元",
-    latest_period: latest?.period || "",
-    latest_eps: latest?.eps ?? null,
-    latest_quarter_over_quarter_percent: latest?.quarter_over_quarter_percent ?? null,
-    latest_year_over_year_percent: latest?.year_over_year_percent ?? null,
-    trailing_four_quarter_eps: trailingFourQuarterEps,
-    average_quarter_eps: averageQuarterEps,
-    growth_status: getEpsGrowthStatus(latest, rows),
-    rows,
-    source,
-    source_url: sourceUrl,
-    updated_at: getTaiwanDateTimeText(),
-  };
-}
-
-function normalizeYahooQuoteSummaryEpsRows(history = [], limit = 20) {
-  const rows = history
-    .map((item) => {
-      const quarterText = String(item?.quarter?.fmt || item?.quarter?.raw || "").trim();
-      const match = quarterText.match(/(20\d{2}).*?([1-4])/);
-      const year = match ? Number(match[1]) : null;
-      const quarter = match ? Number(match[2]) : null;
-      const eps = toFiniteNumber(item?.epsActual?.raw ?? item?.epsActual?.fmt);
-
-      if (!year || !quarter || eps === null) return null;
-
-      return {
-        period: `${year} Q${quarter}`,
-        year,
-        quarter,
-        eps,
-        quarter_over_quarter_percent: null,
-        year_over_year_percent: null,
-      };
-    })
-    .filter(Boolean);
-
-  return normalizeEpsRows(rows).slice(0, limit);
-}
-
-async function fetchDatabaseQuarterlyEps(stockInfo, limit = 20) {
-  try {
-    const rows = await query(
-      `
-      SELECT
-        CONCAT(eps_year, ' Q', eps_quarter) AS period,
-        eps_year AS year,
-        eps_quarter AS quarter,
-        eps,
-        quarter_over_quarter_percent,
-        year_over_year_percent
-      FROM quarterly_eps
-      WHERE stock_code = ?
-      ORDER BY eps_year DESC, eps_quarter DESC
-      LIMIT ?
-      `,
-      [stockInfo.stock_code, limit],
-    );
-
-    if (rows.length === 0) return null;
-
-    return buildQuarterlyEpsSummary(
-      stockInfo,
-      stockInfo.stock_code,
-      normalizeEpsRows(rows.map((row) => ({
-        period: row.period,
-        year: Number(row.year),
-        quarter: Number(row.quarter),
-        eps: toFiniteNumber(row.eps),
-        quarter_over_quarter_percent: toFiniteNumber(row.quarter_over_quarter_percent),
-        year_over_year_percent: toFiniteNumber(row.year_over_year_percent),
-      }))).slice(0, limit),
-      "database:quarterly_eps",
-      "資料庫 quarterly_eps",
-    );
-  } catch (error) {
-    return null;
-  }
-}
-
-async function fetchYahooEpsQuoteSummary(stockInfo, limit = 20) {
-  const symbol = getYahooTwSymbol(stockInfo);
-  const sourceUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earningsHistory`;
-  const json = await fetchExternalJson(sourceUrl, `${stockInfo.stock_code} EPS 備援資料`);
-  const history = json?.quoteSummary?.result?.[0]?.earningsHistory?.history || [];
-  const rows = normalizeYahooQuoteSummaryEpsRows(history, limit);
-
-  if (rows.length === 0) {
-    throw new Error("EPS 備援來源暫時沒有回傳可解析資料");
-  }
-
-  return buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl);
-}
-
-async function fetchYahooQuarterlyEps(stockInfo, limit = 20) {
-  const symbol = getYahooTwSymbol(stockInfo);
-  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/eps`;
-
-  try {
-    const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 每季 EPS`, {
-      Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
-    });
-    const text = htmlToReadableText(html);
-    const rows = parseYahooEpsRowsFromText(text, limit);
-
-    if (rows.length > 0) {
-      return buildQuarterlyEpsSummary(stockInfo, symbol, rows, sourceUrl);
-    }
-  } catch (error) {
-    // 頁面解析失敗時改用 Yahoo Finance quoteSummary 備援。
-  }
-
-  return fetchYahooEpsQuoteSummary(stockInfo, limit);
-}
-
-function getTaiwanDateText(date = new Date()) {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
-
-function normalizeCalendarDateText(value) {
-  const text = String(value || "").trim();
-  const match = text.match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
-
-  if (!match) return "";
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  if (!year || !month || !day || month > 12 || day > 31) return "";
-
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function dateFromYahooRaw(value) {
-  const raw = toFiniteNumber(value?.raw ?? value);
-  if (raw === null) return "";
-  return getTaiwanDateText(new Date(raw * 1000));
-}
-
-function getCalendarEventType(title) {
-  const text = String(title || "");
-
-  if (/除權息|除權交易|除權/.test(text)) return "ex_right";
-  if (/除息|除息交易/.test(text)) return "ex_dividend";
-  if (/配息|發放日|現金股利|股利發放/.test(text)) return "dividend";
-  if (/股東會|股東常會|股東臨時會/.test(text)) return "shareholders_meeting";
-  if (/法說會|法人說明會|業績發表/.test(text)) return "investor_conference";
-  if (/停止過戶|最後過戶|停券|融券/.test(text)) return "book_closure";
-  if (/財報|盈餘|EPS|季報|年報|營收公布|收益/.test(text)) return "earnings";
-  return "other";
-}
-
-function getCalendarEventTypeName(type) {
-  const typeMap = {
-    ex_right: "除權",
-    ex_dividend: "除息",
-    dividend: "配息",
-    shareholders_meeting: "股東會",
-    investor_conference: "法說會",
-    book_closure: "股務事件",
-    earnings: "財報事件",
-    other: "其他事件",
-  };
-
-  return typeMap[type] || typeMap.other;
-}
-
-function getCalendarEventImportance(type) {
-  if (["ex_dividend", "ex_right", "dividend", "shareholders_meeting", "investor_conference"].includes(type)) {
-    return "high";
-  }
-
-  if (["book_closure", "earnings"].includes(type)) return "medium";
-  return "normal";
-}
-
-function cleanCalendarTitle(value) {
-  return decodeBasicHtmlEntities(String(value || ""))
-    .replace(/\s+/g, " ")
-    .replace(/[｜|]{2,}/g, "｜")
-    .replace(/^[-–—｜|:：,，\s]+/, "")
-    .replace(/[-–—｜|:：,，\s]+$/, "")
-    .trim();
-}
-
-function normalizeCalendarEvent(event) {
-  const eventDate = normalizeCalendarDateText(event?.event_date || event?.date || "");
-  const title = cleanCalendarTitle(event?.title || event?.event_name || "");
-
-  if (!eventDate || !title) return null;
-
-  const type = getCalendarEventType(title);
-
-  return {
-    event_date: eventDate,
-    title,
-    event_type: type,
-    event_type_name: getCalendarEventTypeName(type),
-    importance: getCalendarEventImportance(type),
-    description: cleanCalendarTitle(event?.description || ""),
-  };
-}
-
-function dedupeCalendarEvents(events = []) {
-  const seen = new Set();
-
-  return events
-    .map(normalizeCalendarEvent)
-    .filter(Boolean)
-    .filter((event) => {
-      const key = `${event.event_date}|${event.title}|${event.event_type}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => a.event_date.localeCompare(b.event_date));
-}
-
-function parseYahooCalendarEventsFromText(text, limit = 40) {
-  const normalized = String(text || "")
-    .replace(/\r/g, "\n")
-    .replace(/\\u002F/g, "/")
-    .replace(/\u00a0/g, " ")
-    .replace(/−/g, "-");
-  const lines = normalized
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const eventKeywords = /(除權息|除權交易|除權|除息交易|除息|配息|股利發放|發放日|現金股利|股東會|股東常會|股東臨時會|法說會|法人說明會|停止過戶|最後過戶|停券|融券|財報|盈餘|EPS|季報|年報|營收公布)/;
-  const events = [];
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const dateMatch = line.match(/20\d{2}[\/\-.年]\d{1,2}[\/\-.月]\d{1,2}/);
-
-    if (!dateMatch) continue;
-
-    const nearbyText = [line, lines[index + 1] || "", lines[index + 2] || ""]
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (!eventKeywords.test(nearbyText)) continue;
-
-    const eventDate = normalizeCalendarDateText(dateMatch[0]);
-    const title = cleanCalendarTitle(
-      nearbyText
-        .replace(dateMatch[0], "")
-        .replace(/^(日期|時間|項目|事件|內容)\s*/g, "")
-        .slice(0, 90)
-    );
-
-    events.push({
-      event_date: eventDate,
-      title: title || nearbyText.match(eventKeywords)?.[0] || "個股行事曆事件",
-      description: nearbyText,
-    });
-  }
-
-  const compactText = normalized.replace(/\s+/g, " ");
-  const compactPattern = /(20\d{2}[\/\-.年]\d{1,2}[\/\-.月]\d{1,2})\s*([^。\n]{0,80}?(?:除權息|除權交易|除權|除息交易|除息|配息|股利發放|發放日|現金股利|股東會|股東常會|股東臨時會|法說會|法人說明會|停止過戶|最後過戶|停券|融券|財報|盈餘|EPS|季報|年報|營收公布)[^。\n]{0,80})/g;
-  let match;
-
-  while ((match = compactPattern.exec(compactText)) !== null) {
-    events.push({
-      event_date: normalizeCalendarDateText(match[1]),
-      title: cleanCalendarTitle(match[2].slice(0, 90)),
-      description: cleanCalendarTitle(match[0].slice(0, 120)),
-    });
-
-    if (events.length >= limit * 2) break;
-  }
-
-  return dedupeCalendarEvents(events).slice(0, limit);
-}
-
-function buildYahooQuoteSummaryCalendarEvents(stockInfo, symbol, json) {
-  const result = json?.quoteSummary?.result?.[0] || {};
-  const calendarEvents = result?.calendarEvents || {};
-  const summaryDetail = result?.summaryDetail || {};
-  const events = [];
-
-  const exDividendDate = dateFromYahooRaw(summaryDetail?.exDividendDate || calendarEvents?.exDividendDate);
-  if (exDividendDate) {
-    events.push({
-      event_date: exDividendDate,
-      title: "除息日",
-      description: "Yahoo Finance quoteSummary 提供的除息日期",
-    });
-  }
-
-  const dividendDate = dateFromYahooRaw(summaryDetail?.dividendDate || calendarEvents?.dividendDate);
-  if (dividendDate) {
-    events.push({
-      event_date: dividendDate,
-      title: "股利發放日 / 配息日",
-      description: "Yahoo Finance quoteSummary 提供的股利日期",
-    });
-  }
-
-  const earningsDates = Array.isArray(calendarEvents?.earnings?.earningsDate)
-    ? calendarEvents.earnings.earningsDate
-    : [];
-
-  earningsDates.forEach((item) => {
-    const earningsDate = dateFromYahooRaw(item);
-    if (earningsDate) {
-      events.push({
-        event_date: earningsDate,
-        title: "財報 / 盈餘公布參考日",
-        description: "Yahoo Finance quoteSummary 提供的財報日期",
-      });
-    }
-  });
-
-  return dedupeCalendarEvents(events);
-}
-
-async function fetchYahooCalendarQuoteSummary(stockInfo, limit = 40) {
-  const symbol = getYahooTwSymbol(stockInfo);
-  const sourceUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents,summaryDetail`;
-  const json = await fetchExternalJson(sourceUrl, `${stockInfo.stock_code} 行事曆備援資料`);
-  const events = buildYahooQuoteSummaryCalendarEvents(stockInfo, symbol, json).slice(0, limit);
-
-  if (events.length === 0) {
-    throw new Error("行事曆備援來源暫時沒有回傳可解析資料");
-  }
-
-  return buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl, "Yahoo Finance quoteSummary");
-}
-
-function buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl, source = "Yahoo 股市行事曆") {
-  const todayText = getTaiwanDateText();
-  const normalizedEvents = dedupeCalendarEvents(events);
-  const upcomingEvents = normalizedEvents.filter((event) => event.event_date >= todayText);
-  const pastEvents = normalizedEvents.filter((event) => event.event_date < todayText).reverse();
-  const nextEvent = upcomingEvents[0] || normalizedEvents[normalizedEvents.length - 1] || null;
-  const typeCount = normalizedEvents.reduce((result, event) => {
-    result[event.event_type] = (result[event.event_type] || 0) + 1;
-    return result;
-  }, {});
-
-  return {
-    stock_code: stockInfo.stock_code,
-    stock_name: stockInfo.stock_name,
-    market_type: stockInfo.market_type,
-    industry: stockInfo.industry,
-    symbol,
-    today: todayText,
-    next_event: nextEvent,
-    upcoming_count: upcomingEvents.length,
-    past_count: pastEvents.length,
-    event_type_count: typeCount,
-    events: [...upcomingEvents, ...pastEvents].slice(0, 40),
-    source,
-    source_url: sourceUrl,
-    updated_at: getTaiwanDateTimeText(),
-  };
-}
-
-async function fetchDatabaseStockCalendar(stockInfo, limit = 40) {
-  try {
-    const rows = await query(
-      `
-      SELECT
-        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
-        event_type,
-        title,
-        description,
-        importance
-      FROM stock_calendar_events
-      WHERE stock_code = ?
-        AND is_active = 1
-      ORDER BY
-        CASE WHEN event_date >= CURDATE() THEN 0 ELSE 1 END ASC,
-        CASE WHEN event_date >= CURDATE() THEN event_date END ASC,
-        CASE WHEN event_date < CURDATE() THEN event_date END DESC
-      LIMIT ?
-      `,
-      [stockInfo.stock_code, limit],
-    );
-
-    if (rows.length === 0) return null;
-
-    const events = rows.map((row) => ({
-      event_date: row.event_date,
-      event_type: row.event_type || inferCalendarEventType(row.title || row.description || ""),
-      title: row.title || row.event_type || "個股行事曆事件",
-      description: row.description || "",
-      importance: row.importance || getCalendarEventImportance(row.event_type),
-    }));
-
-    return buildStockCalendarSummary(
-      stockInfo,
-      stockInfo.stock_code,
-      events,
-      "database:stock_calendar_events",
-      "資料庫 stock_calendar_events",
-    );
-  } catch (error) {
-    return null;
-  }
-}
-
-async function fetchYahooStockCalendar(stockInfo, limit = 40) {
-  const symbol = getYahooTwSymbol(stockInfo);
-  const sourceUrl = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}/calendar`;
-
-  try {
-    const html = await fetchExternalText(sourceUrl, `${stockInfo.stock_code} 個股行事曆`, {
-      Referer: `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}`,
-    });
-    const text = htmlToReadableText(html);
-    const events = parseYahooCalendarEventsFromText(text, limit);
-
-    if (events.length > 0) {
-      return buildStockCalendarSummary(stockInfo, symbol, events, sourceUrl);
-    }
-  } catch (error) {
-    // Yahoo 股市頁面解析失敗時，改用 quoteSummary 備援。
-  }
-
-  return fetchYahooCalendarQuoteSummary(stockInfo, limit);
-}
-
-
-app.get("/market/indices/intraday", async (req, res) => {
-  try {
-    const indices = await Promise.all(MARKET_INDEX_CONFIGS.map(fetchMarketIndexWithSummary));
-
-    res.json({
-      success: true,
-      message: "大盤指數即時走勢讀取完成",
-      updated_at: getTaiwanDateTimeText(),
-      data: convertBigIntToString({
-        indices,
-      }),
-    });
-  } catch (error) {
-    console.error("查詢大盤指數即時走勢失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢大盤指數即時走勢失敗",
-      error: error.message,
-    });
-  }
-});
-
-
-app.get("/stock/:stockCode/realtime", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票代號格式不正確",
-      });
-    }
-
-    const stockInfo = await getStockInfoForRealtime(stockCode);
-
-    if (!stockInfo) {
-      return res.status(404).json({
-        success: false,
-        message: "Stock not found",
-      });
-    }
-
-    let realtimeQuote;
-
-    try {
-      realtimeQuote = await fetchTwseRealtimeQuote(stockInfo);
-    } catch (misError) {
-      if (!isEtfStockInfo(stockInfo)) throw misError;
-      const snapshot = await fetchYahooQuoteSnapshot(stockCode, stockInfo);
-      realtimeQuote = {
-        ...snapshot.quote,
-        bid_levels: [],
-        ask_levels: [],
-        inner_volume_lots: null,
-        outer_volume_lots: null,
-        trade_side: "ETF 即時參考",
-        trade_side_note: "ETF 目前使用 Yahoo 即時資料，五檔與內外盤若來源未提供則不顯示。",
-      };
-    }
-
-    res.json({
-      success: true,
-      message: "個股即時行情讀取完成",
-      data: convertBigIntToString(realtimeQuote),
-    });
-  } catch (error) {
-    console.error("查詢個股即時行情失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢個股即時行情失敗",
-      error: error.message,
-    });
-  }
-});
-
-app.get("/stock/:stockCode/revenue", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票代號格式不正確",
-      });
-    }
-
-    const stockInfo = await getStockInfoForRealtime(stockCode);
-
-    if (!stockInfo) {
-      return res.status(404).json({
-        success: false,
-        message: "Stock not found",
-      });
-    }
-
-    if (isEtfStockInfo(stockInfo)) {
-      return res.json({
-        success: true,
-        message: "ETF 沒有公司每月營收資料",
-        data: convertBigIntToString({
-          stock_code: stockInfo.stock_code,
-          stock_name: stockInfo.stock_name,
-          market_type: stockInfo.market_type,
-          industry: "ETF",
-          security_type: "ETF",
-          not_applicable: true,
-          status: "ETF 不適用每月營收",
-          rows: [],
-        }),
-      });
-    }
-
-    const limit = parseLimit(req.query.limit, 24, 60);
-    const revenue =
-      (await fetchDatabaseMonthlyRevenue(stockInfo, limit)) ||
-      (await fetchYahooMonthlyRevenue(stockInfo, limit));
-
-    res.json({
-      success: true,
-      message: "個股每月營收讀取完成",
-      data: convertBigIntToString(revenue),
-    });
-  } catch (error) {
-    console.error("查詢個股每月營收失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢個股每月營收失敗",
-      error: error.message,
-    });
-  }
-});
-
-
-app.get("/stock/:stockCode/eps", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票代號格式不正確",
-      });
-    }
-
-    const stockInfo = await getStockInfoForRealtime(stockCode);
-
-    if (!stockInfo) {
-      return res.status(404).json({
-        success: false,
-        message: "Stock not found",
-      });
-    }
-
-    if (isEtfStockInfo(stockInfo)) {
-      return res.json({
-        success: true,
-        message: "ETF 沒有公司 EPS 資料",
-        data: convertBigIntToString({
-          stock_code: stockInfo.stock_code,
-          stock_name: stockInfo.stock_name,
-          market_type: stockInfo.market_type,
-          industry: "ETF",
-          security_type: "ETF",
-          not_applicable: true,
-          status: "ETF 不適用 EPS",
-          rows: [],
-        }),
-      });
-    }
-
-    const limit = parseLimit(req.query.limit, 20, 40);
-    const eps =
-      (await fetchDatabaseQuarterlyEps(stockInfo, limit)) ||
-      (await fetchYahooQuarterlyEps(stockInfo, limit));
-
-    res.json({
-      success: true,
-      message: "個股每季 EPS 讀取完成",
-      data: convertBigIntToString(eps),
-    });
-  } catch (error) {
-    console.error("查詢個股每季 EPS 失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢個股每季 EPS 失敗",
-      error: error.message,
-    });
-  }
-});
-
-
-app.get("/stock/:stockCode/calendar", async (req, res) => {
-  try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票代號格式不正確",
-      });
-    }
-
-    const stockInfo = await getStockInfoForRealtime(stockCode);
-
-    if (!stockInfo) {
-      return res.status(404).json({
-        success: false,
-        message: "Stock not found",
-      });
-    }
-
-    const limit = parseLimit(req.query.limit, 40, 80);
-    const calendar =
-      (await fetchDatabaseStockCalendar(stockInfo, limit)) ||
-      (await fetchYahooStockCalendar(stockInfo, limit));
-
-    res.json({
-      success: true,
-      message: "個股行事曆讀取完成",
-      data: convertBigIntToString(calendar),
-    });
-  } catch (error) {
-    console.error("查詢個股行事曆失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢個股行事曆失敗",
-      error: error.message,
-    });
-  }
 });
 
 app.get("/test-db", async (req, res) => {
@@ -3170,341 +1325,6 @@ app.get("/radar/institutional-sync-buying", async (req, res) => {
 });
 
 
-
-async function fetchOfficialInstitutionalOverview(targetDate, market, days) {
-  try {
-    const marketCondition = market ? "AND market_type = ?" : "";
-    const params = market ? [targetDate, market] : [targetDate];
-    const summaryRows = await query(
-      `
-      SELECT
-        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
-        ? AS market_type,
-        CAST(SUM(COALESCE(foreign_buy_amount, 0)) AS CHAR) AS foreign_buy_amount,
-        CAST(SUM(COALESCE(foreign_sell_amount, 0)) AS CHAR) AS foreign_sell_amount,
-        CAST(SUM(COALESCE(foreign_net_amount, 0)) AS CHAR) AS foreign_net_amount,
-        CAST(SUM(COALESCE(investment_trust_buy_amount, 0)) AS CHAR) AS investment_trust_buy_amount,
-        CAST(SUM(COALESCE(investment_trust_sell_amount, 0)) AS CHAR) AS investment_trust_sell_amount,
-        CAST(SUM(COALESCE(investment_trust_net_amount, 0)) AS CHAR) AS investment_trust_net_amount,
-        CAST(SUM(COALESCE(dealer_buy_amount, 0)) AS CHAR) AS dealer_buy_amount,
-        CAST(SUM(COALESCE(dealer_sell_amount, 0)) AS CHAR) AS dealer_sell_amount,
-        CAST(SUM(COALESCE(dealer_net_amount, 0)) AS CHAR) AS dealer_net_amount,
-        CAST(SUM(COALESCE(total_buy_amount, 0)) AS CHAR) AS total_buy_amount,
-        CAST(SUM(COALESCE(total_sell_amount, 0)) AS CHAR) AS total_sell_amount,
-        CAST(SUM(COALESCE(total_net_amount, 0)) AS CHAR) AS total_net_amount,
-        GROUP_CONCAT(DISTINCT source ORDER BY source SEPARATOR ', ') AS source
-      FROM institutional_amount_summaries
-      WHERE trade_date = ?
-        ${marketCondition}
-      GROUP BY trade_date
-      `,
-      [market || "全部", ...params],
-    );
-
-    if (summaryRows.length === 0) return null;
-
-    const byMarketRows = await query(
-      `
-      SELECT
-        market_type,
-        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
-        CAST(COALESCE(foreign_net_amount, 0) AS CHAR) AS foreign_net_amount,
-        CAST(COALESCE(investment_trust_net_amount, 0) AS CHAR) AS investment_trust_net_amount,
-        CAST(COALESCE(dealer_net_amount, 0) AS CHAR) AS dealer_net_amount,
-        CAST(COALESCE(total_net_amount, 0) AS CHAR) AS total_net_amount,
-        source
-      FROM institutional_amount_summaries
-      WHERE trade_date = ?
-        ${marketCondition}
-      ORDER BY market_type ASC
-      `,
-      params,
-    );
-
-    const historyMarketCondition = market ? "WHERE market_type = ?" : "";
-    const historyParams = market ? [market, days] : [days];
-    const historyRows = await query(
-      `
-      SELECT
-        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
-        CAST(SUM(COALESCE(foreign_net_amount, 0)) AS CHAR) AS foreign_net_amount,
-        CAST(SUM(COALESCE(investment_trust_net_amount, 0)) AS CHAR) AS investment_trust_net_amount,
-        CAST(SUM(COALESCE(dealer_net_amount, 0)) AS CHAR) AS dealer_net_amount,
-        CAST(SUM(COALESCE(total_net_amount, 0)) AS CHAR) AS total_net_amount
-      FROM institutional_amount_summaries
-      WHERE trade_date IN (
-        SELECT trade_date
-        FROM (
-          SELECT DISTINCT trade_date
-          FROM institutional_amount_summaries
-          ${historyMarketCondition}
-          ORDER BY trade_date DESC
-          LIMIT ?
-        ) recent_dates
-      )
-      ${market ? "AND market_type = ?" : ""}
-      GROUP BY trade_date
-      ORDER BY trade_date DESC
-      `,
-      market ? [market, days, market] : [days],
-    );
-
-    return {
-      summary: summaryRows[0],
-      by_market: byMarketRows,
-      history: historyRows,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-// ==============================
-// 三大法人每日買賣總覽
-// GET /market/institutional/summary?market=上市&date=YYYY-MM-DD&days=10
-// ==============================
-app.get("/market/institutional/summary", async (req, res) => {
-  try {
-    const market = parseMarket(req.query.market);
-    const queryDate = req.query.date || null;
-    const days = parseLimit(req.query.days, 10, 30);
-
-    if (queryDate && !isValidDateText(queryDate)) {
-      return res.status(400).json({
-        success: false,
-        message: "date 格式錯誤，請使用 YYYY-MM-DD",
-      });
-    }
-
-    let targetDate = queryDate;
-
-    if (!targetDate) {
-      const latestDateRows = await query(
-        `
-        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
-        FROM (
-          SELECT i.trade_date AS trade_date
-          FROM institutional_trades i
-          LEFT JOIN stocks s
-            ON i.stock_code = s.stock_code
-          WHERE (? IS NULL OR s.market_type = ?)
-          UNION ALL
-          SELECT a.trade_date AS trade_date
-          FROM institutional_amount_summaries a
-          WHERE (? IS NULL OR a.market_type = ?)
-        ) latest_dates
-        `,
-        [market, market, market, market],
-      );
-
-      targetDate = latestDateRows[0]?.latest_date || null;
-    }
-
-    if (!targetDate) {
-      return res.json({
-        success: true,
-        data: {
-          trade_date: null,
-          market: market || "全部",
-          summary: null,
-          by_market: [],
-          history: [],
-          top_net_buy: [],
-          top_net_sell: [],
-          note: "目前尚未匯入三大法人買賣超資料。",
-        },
-      });
-    }
-
-    const marketCondition = market ? "AND s.market_type = ?" : "";
-    const baseParams = market ? [targetDate, market] : [targetDate];
-
-    const summaryRows = await query(
-      `
-      SELECT
-        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
-        COUNT(DISTINCT i.stock_code) AS stock_count,
-        COUNT(DISTINCT CASE WHEN p.close_price IS NOT NULL THEN i.stock_code END) AS priced_stock_count,
-        CAST(SUM(COALESCE(i.foreign_buy, 0)) AS CHAR) AS foreign_buy_lots,
-        CAST(SUM(COALESCE(i.foreign_sell, 0)) AS CHAR) AS foreign_sell_lots,
-        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
-        CAST(SUM(COALESCE(i.investment_trust_buy, 0)) AS CHAR) AS investment_trust_buy_lots,
-        CAST(SUM(COALESCE(i.investment_trust_sell, 0)) AS CHAR) AS investment_trust_sell_lots,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
-        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
-        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
-        CAST(SUM(COALESCE(i.foreign_buy, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_buy_amount,
-        CAST(SUM(COALESCE(i.foreign_sell, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_sell_amount,
-        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
-        CAST(SUM(COALESCE(i.investment_trust_buy, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_buy_amount,
-        CAST(SUM(COALESCE(i.investment_trust_sell, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_sell_amount,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
-        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
-        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount,
-        CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS market_transaction_amount
-      FROM institutional_trades i
-      LEFT JOIN stocks s
-        ON i.stock_code = s.stock_code
-      LEFT JOIN daily_prices p
-        ON i.stock_code = p.stock_code
-       AND i.trade_date = p.trade_date
-      WHERE i.trade_date = ?
-        ${marketCondition}
-      GROUP BY i.trade_date
-      `,
-      baseParams,
-    );
-
-    const byMarketRows = await query(
-      `
-      SELECT
-        COALESCE(NULLIF(s.market_type, ''), '未分類') AS market_type,
-        COUNT(DISTINCT i.stock_code) AS stock_count,
-        COUNT(DISTINCT CASE WHEN p.close_price IS NOT NULL THEN i.stock_code END) AS priced_stock_count,
-        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
-        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
-        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
-        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
-        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
-        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount,
-        CAST(SUM(COALESCE(p.transaction_amount, 0)) AS CHAR) AS market_transaction_amount
-      FROM institutional_trades i
-      LEFT JOIN stocks s
-        ON i.stock_code = s.stock_code
-      LEFT JOIN daily_prices p
-        ON i.stock_code = p.stock_code
-       AND i.trade_date = p.trade_date
-      WHERE i.trade_date = ?
-        ${marketCondition}
-      GROUP BY COALESCE(NULLIF(s.market_type, ''), '未分類')
-      ORDER BY COALESCE(NULLIF(s.market_type, ''), '未分類') ASC
-      `,
-      baseParams,
-    );
-
-    const historyMarketOuter = market ? "s.market_type = ? AND" : "";
-    const historyMarketInner = market ? "WHERE s2.market_type = ?" : "";
-    const historyParams = market ? [market, market, days] : [days];
-
-    const historyRows = await query(
-      `
-      SELECT
-        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
-        COUNT(DISTINCT i.stock_code) AS stock_count,
-        CAST(SUM(COALESCE(i.foreign_net, 0)) AS CHAR) AS foreign_net_lots,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0)) AS CHAR) AS investment_trust_net_lots,
-        CAST(SUM(COALESCE(i.dealer_net, 0)) AS CHAR) AS dealer_net_lots,
-        CAST(SUM(COALESCE(i.total_net, 0)) AS CHAR) AS total_net_lots,
-        CAST(SUM(COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
-        CAST(SUM(COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
-        CAST(SUM(COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
-        CAST(SUM(COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount
-      FROM institutional_trades i
-      LEFT JOIN stocks s
-        ON i.stock_code = s.stock_code
-      LEFT JOIN daily_prices p
-        ON i.stock_code = p.stock_code
-       AND i.trade_date = p.trade_date
-      WHERE ${historyMarketOuter} i.trade_date IN (
-        SELECT trade_date
-        FROM (
-          SELECT DISTINCT i2.trade_date AS trade_date
-          FROM institutional_trades i2
-          LEFT JOIN stocks s2
-            ON i2.stock_code = s2.stock_code
-          ${historyMarketInner}
-          ORDER BY i2.trade_date DESC
-          LIMIT ?
-        ) recent_dates
-      )
-      GROUP BY i.trade_date
-      ORDER BY i.trade_date DESC
-      `,
-      historyParams,
-    );
-
-    const topParams = market ? [targetDate, market] : [targetDate];
-    const topSelectSql = `
-      SELECT
-        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
-        i.stock_code,
-        s.stock_name,
-        s.market_type,
-        s.industry,
-        p.close_price,
-        p.price_change,
-        CAST(i.foreign_net AS CHAR) AS foreign_net_lots,
-        CAST(i.investment_trust_net AS CHAR) AS investment_trust_net_lots,
-        CAST(i.dealer_net AS CHAR) AS dealer_net_lots,
-        CAST(i.total_net AS CHAR) AS total_net_lots,
-        CAST((COALESCE(i.foreign_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS foreign_net_amount,
-        CAST((COALESCE(i.investment_trust_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS investment_trust_net_amount,
-        CAST((COALESCE(i.dealer_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS dealer_net_amount,
-        CAST((COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0) * 1000) AS CHAR) AS total_net_amount
-      FROM institutional_trades i
-      LEFT JOIN stocks s
-        ON i.stock_code = s.stock_code
-      LEFT JOIN daily_prices p
-        ON i.stock_code = p.stock_code
-       AND i.trade_date = p.trade_date
-      WHERE i.trade_date = ?
-        ${marketCondition}
-        AND p.close_price IS NOT NULL
-    `;
-
-    const topNetBuyRows = await query(
-      `${topSelectSql}
-      ORDER BY (COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0)) DESC, i.stock_code ASC
-      LIMIT 5
-      `,
-      topParams,
-    );
-
-    const topNetSellRows = await query(
-      `${topSelectSql}
-      ORDER BY (COALESCE(i.total_net, 0) * COALESCE(p.close_price, 0)) ASC, i.stock_code ASC
-      LIMIT 5
-      `,
-      topParams,
-    );
-
-    const officialOverview = await fetchOfficialInstitutionalOverview(targetDate, market, days);
-    const hasOfficialAmount = Boolean(officialOverview?.summary);
-
-    res.json({
-      success: true,
-      data: convertBigIntToString({
-        trade_date: targetDate,
-        market: market || "全部",
-        days,
-        official_amount_available: hasOfficialAmount,
-        unit: {
-          lots: "張",
-          amount: hasOfficialAmount
-            ? "新台幣，優先使用 institutional_amount_summaries 官方金額匯入表"
-            : "新台幣，使用法人買賣超張數 × 收盤價 × 1000 估算",
-        },
-        summary: officialOverview?.summary || summaryRows[0] || null,
-        by_market: officialOverview?.by_market || byMarketRows,
-        history: officialOverview?.history || historyRows,
-        top_net_buy: topNetBuyRows,
-        top_net_sell: topNetSellRows,
-      }),
-    });
-  } catch (error) {
-    console.error("查詢三大法人買賣總覽失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢三大法人買賣總覽失敗",
-      error: error.message,
-    });
-  }
-});
-
-
 // ==============================
 // 產業分類完成度
 // GET /industries/status
@@ -4306,6 +2126,144 @@ app.get("/foreign/top", async (req, res) => {
   }
 });
 
+
+// ==============================
+// 個股 / ETF 行事曆事件
+// GET /calendar-events/:stockCode
+// ==============================
+app.get("/calendar-events/:stockCode", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const fromDate = isValidDateText(req.query.from) ? String(req.query.from) : null;
+    const toDate = isValidDateText(req.query.to) ? String(req.query.to) : null;
+    const includePast = String(req.query.includePast || "").toLowerCase() === "true" || String(req.query.includePast || "") === "1";
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "股票代號格式不正確。",
+      });
+    }
+
+    const params = [stockCode];
+    const conditions = ["stock_code = ?", "is_active = 1"];
+
+    if (fromDate) {
+      conditions.push("event_date >= ?");
+      params.push(fromDate);
+    } else if (!includePast) {
+      conditions.push("event_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)");
+    }
+
+    if (toDate) {
+      conditions.push("event_date <= ?");
+      params.push(toDate);
+    }
+
+    params.push(limit);
+
+    const events = await query(
+      `
+      SELECT
+        id,
+        stock_code,
+        DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date,
+        event_type,
+        title,
+        description,
+        importance,
+        source,
+        source_url,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM stock_calendar_events
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY
+        CASE WHEN event_date >= CURDATE() THEN 0 ELSE 1 END,
+        event_date ASC,
+        FIELD(importance, 'high', 'normal', 'low'),
+        id ASC
+      LIMIT ?
+      `,
+      params,
+    );
+
+    res.json({
+      success: true,
+      stock_code: stockCode,
+      count: events.length,
+      data: convertBigIntToString(events),
+    });
+  } catch (error) {
+    console.error("查詢行事曆事件失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢行事曆事件失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// ETF 主檔資料
+// GET /etf-profiles/:stockCode
+// ==============================
+app.get("/etf-profiles/:stockCode", async (req, res) => {
+  try {
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+
+    if (!isValidStockCodeValue(stockCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "ETF 代號格式不正確。",
+      });
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        stock_code,
+        stock_name,
+        market_type,
+        fund_type,
+        underlying_index,
+        issuer,
+        DATE_FORMAT(listing_date, '%Y-%m-%d') AS listing_date,
+        source,
+        source_url,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM etf_profiles
+      WHERE stock_code = ?
+      LIMIT 1
+      `,
+      [stockCode],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "ETF profile not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: rows[0],
+    });
+  } catch (error) {
+    console.error("查詢 ETF 主檔失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢 ETF 主檔失敗",
+      error: error.message,
+    });
+  }
+});
+
 // ==============================
 // 個股摘要
 // GET /stock/:stockCode/summary
@@ -4314,14 +2272,7 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
   let conn;
 
   try {
-    const stockCode = normalizeStockCodeValue(req.params.stockCode);
-
-    if (!isValidStockCodeValue(stockCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "股票或 ETF 代號格式不正確",
-      });
-    }
+    const stockCode = req.params.stockCode;
 
     conn = await pool.getConnection();
 
@@ -4332,6 +2283,14 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
         s.stock_name,
         s.market_type,
         s.industry,
+        s.security_type,
+
+        e.fund_type,
+        e.underlying_index,
+        e.issuer,
+        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
+        e.source AS etf_profile_source,
+        e.source_url AS etf_profile_source_url,
 
         p.trade_date,
         p.open_price,
@@ -4366,6 +2325,8 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
         c.volume_status,
         c.price_position
       FROM stocks s
+      LEFT JOIN etf_profiles e
+        ON s.stock_code = e.stock_code
       LEFT JOIN daily_prices p
         ON s.stock_code = p.stock_code
        AND p.trade_date = (
@@ -4386,46 +2347,15 @@ app.get("/stock/:stockCode/summary", async (req, res) => {
     );
 
     if (rows.length === 0) {
-      if (isLikelyTaiwanEtfCode(stockCode)) {
-        const stockInfo = await ensureEtfStockInfo(stockCode);
-        const etfSummary = await fetchYahooEtfSummary(stockCode, stockInfo);
-
-        return res.json({
-          success: true,
-          data: convertBigIntToString(etfSummary),
-        });
-      }
-
       return res.status(404).json({
         success: false,
         message: "Stock not found",
       });
     }
 
-    const summaryRow = {
-      ...rows[0],
-      security_type: getSecurityType(rows[0]),
-    };
-
-    if (isEtfStockInfo(summaryRow)) {
-      try {
-        const etfSummary = await fetchYahooEtfSummary(stockCode, summaryRow);
-
-        return res.json({
-          success: true,
-          data: convertBigIntToString({ ...summaryRow, ...etfSummary }),
-        });
-      } catch (etfError) {
-        return res.json({
-          success: true,
-          data: convertBigIntToString(summaryRow),
-        });
-      }
-    }
-
     res.json({
       success: true,
-      data: convertBigIntToString(summaryRow),
+      data: convertBigIntToString(rows[0]),
     });
   } catch (error) {
     console.error("查詢個股摘要失敗：", error);
@@ -4447,37 +2377,6 @@ function normalizeStockCodeValue(value) {
 
 function isValidStockCodeValue(value) {
   return /^[0-9A-Z]{2,10}$/.test(String(value || ""));
-}
-
-async function enrichWatchlistEtfRows(rows = []) {
-  const enrichedRows = await Promise.all(rows.map(async (row) => {
-    const baseRow = {
-      ...row,
-      security_type: getSecurityType(row),
-    };
-
-    if (!isEtfStockInfo(baseRow)) return baseRow;
-
-    try {
-      const etfSummary = await fetchYahooEtfSummary(baseRow.stock_code, baseRow);
-
-      return {
-        ...baseRow,
-        ...etfSummary,
-        watchlist_id: baseRow.watchlist_id,
-        user_id: baseRow.user_id,
-        note: baseRow.note,
-        sort_order: baseRow.sort_order,
-        watchlist_created_at: baseRow.watchlist_created_at,
-        watchlist_updated_at: baseRow.watchlist_updated_at,
-        security_type: "ETF",
-      };
-    } catch (error) {
-      return baseRow;
-    }
-  }));
-
-  return enrichedRows;
 }
 
 async function getWatchlistRows(userId, stockCode = null) {
@@ -4566,7 +2465,7 @@ async function getWatchlistRows(userId, stockCode = null) {
 // ==============================
 app.get("/watchlist", requireAuth, async (req, res) => {
   try {
-    const rows = await enrichWatchlistEtfRows(await getWatchlistRows(req.user.id));
+    const rows = await getWatchlistRows(req.user.id);
 
     res.json({
       success: true,
@@ -4608,7 +2507,7 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       });
     }
 
-    let stocks = await query(
+    const stocks = await query(
       `
       SELECT stock_code
       FROM stocks
@@ -4619,15 +2518,10 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       [stockCode],
     );
 
-    if (stocks.length === 0 && isLikelyTaiwanEtfCode(stockCode)) {
-      const etfInfo = await ensureEtfStockInfo(stockCode);
-      stocks = etfInfo ? [{ stock_code: etfInfo.stock_code }] : [];
-    }
-
     if (stocks.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "查不到這檔股票或 ETF，請確認代號是否正確。",
+        message: "查不到這檔股票，請確認股票代號是否正確。",
       });
     }
 
@@ -4652,7 +2546,7 @@ app.post("/watchlist", requireAuth, async (req, res) => {
       [req.user.id, stockCode, note, nextSortOrder],
     );
 
-    const rows = await enrichWatchlistEtfRows(await getWatchlistRows(req.user.id, stockCode));
+    const rows = await getWatchlistRows(req.user.id, stockCode);
 
     res.json({
       success: true,

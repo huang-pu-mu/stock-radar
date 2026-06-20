@@ -22,7 +22,6 @@ const state = {
   market: "",
   limit: 20,
   latestRows: [],
-  marketIndices: [],
   lastSearchCode: "",
   lastSearchData: null,
   authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
@@ -288,23 +287,15 @@ function updatePageText() {
   const isSearchPage = state.page === "search";
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
-  const isMarketIndexPage = state.page === "marketIndex";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isMarketIndexPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
-
-  if (state.page === "marketIndex") {
-    pageTitle.textContent = "大盤走勢";
-    pageDesc.textContent = "查看上市加權指數、上櫃指數、漲跌幅與市場成交總金額。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看大盤方向，再看總交易金額；指數漲且成交金額放大，通常代表市場熱度較強。</span>`;
-    return;
-  }
 
   if (state.page === "watchlist") {
     pageTitle.textContent = "自選股";
-    pageDesc.textContent = "登入後，每個 Google 帳號都會看到自己的自選股票與 ETF 清單。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡只顯示你自己加入的股票與 ETF；想移除就按「已自選」。</span>`;
+    pageDesc.textContent = "登入後，每個 Google 帳號都會看到自己的自選股票清單。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡只顯示你自己加入的股票；想移除就按「已自選」。</span>`;
     return;
   }
 
@@ -316,9 +307,9 @@ function updatePageText() {
   }
 
   if (state.page === "search") {
-    pageTitle.textContent = "個股 / ETF 查詢";
-    pageDesc.textContent = "直接輸入股票或 ETF 代號，查看即時行情、五檔報價、成交量與明細。";
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>股票可看法人與籌碼；ETF 先看現價、成交量、漲跌幅，也可以加入自選。</span>`;
+    pageTitle.textContent = "個股查詢";
+    pageDesc.textContent = "直接輸入股票代號，查看該股票的行情、法人與籌碼分數。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先輸入股票代號，例如 2330；查到後再看分數、法人買賣超與成交量。</span>`;
     window.setTimeout(() => stockSearchInput.focus(), 80);
     renderRecentSearches();
     return;
@@ -349,13 +340,6 @@ function updatePageText() {
     pageTitle.textContent = "法人同步買超";
     pageDesc.textContent = `${marketText}外資與投信同一天買超排行，優先看法人方向一致的股票。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>外資和投信同時買超，代表兩種主要法人同向偏多；同步天數越多、合計買超越大，觀察價值越高。</span>`;
-    return;
-  }
-
-  if (state.page === "institutionalOverview") {
-    pageTitle.textContent = "法人總覽";
-    pageDesc.textContent = `${marketText}三大法人每日買賣超總覽，分開看外資、投信、自營商與合計金額。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看法人合計金額是流入還是流出，再看外資、投信、自營商哪一方主導；金額目前用買賣超張數乘收盤價估算。</span>`;
     return;
   }
 
@@ -831,288 +815,6 @@ function renderTechnicalCharts(enrichedRows) {
   `;
 }
 
-
-function formatIndexPoint(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  return numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatIndexChange(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatIndexPercent(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function formatNullableNumber(value, emptyText = "來源未提供") {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return emptyText;
-  return numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 });
-}
-
-function formatMarketAmount(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "來源未提供";
-  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
-}
-
-function formatMarketShares(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "來源未提供";
-  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億股`;
-}
-
-function formatMarketTransactions(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "來源未提供";
-  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 筆`;
-}
-
-function formatMarketSummaryDate(value) {
-  if (!value) return "來源未提供";
-  return formatDate(value);
-}
-
-function getMarketTrendText(changeValue) {
-  const change = toNumber(changeValue);
-  if (change === null) return "資料讀取中";
-  if (change > 0) return "大盤偏強";
-  if (change < 0) return "大盤偏弱";
-  return "大盤持平";
-}
-
-function renderMarketIndexChart(points = []) {
-  const rows = Array.isArray(points)
-    ? points.filter((point) => toNumber(point.close) !== null)
-    : [];
-
-  if (rows.length < 2) {
-    return renderEmptyChart("目前即時走勢資料不足，請盤中或稍後重新整理。");
-  }
-
-  const width = 900;
-  const height = 310;
-  const left = 54;
-  const right = 24;
-  const top = 22;
-  const priceBottom = 210;
-  const volumeTop = 230;
-  const bottom = 282;
-  const chartWidth = width - left - right;
-  const priceHeight = priceBottom - top;
-  const volumeHeight = bottom - volumeTop;
-  const closes = rows.map((point) => toNumber(point.close)).filter((value) => value !== null);
-  const minValue = Math.min(...closes);
-  const maxValue = Math.max(...closes);
-  const paddingValue = Math.max((maxValue - minValue) * 0.1, maxValue * 0.001, 1);
-  const lowBound = minValue - paddingValue;
-  const highBound = maxValue + paddingValue;
-  const valueRange = highBound - lowBound || 1;
-  const xStep = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
-  const maxVolume = Math.max(...rows.map((point) => toNumber(point.volume) || 0), 0);
-
-  const xFor = (index) => left + index * xStep;
-  const yFor = (value) => top + ((highBound - value) / valueRange) * priceHeight;
-
-  const path = rows
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${svgPoint(xFor(index), yFor(toNumber(point.close)))}`)
-    .join(" ");
-
-  const volumeBars = maxVolume > 0
-    ? rows.map((point, index) => {
-        const volume = toNumber(point.volume) || 0;
-        const barHeight = Math.max(1, (volume / maxVolume) * volumeHeight);
-        const x = xFor(index) - Math.max(2, Math.min(8, xStep * 0.35)) / 2;
-        const y = bottom - barHeight;
-        const widthValue = Math.max(2, Math.min(8, xStep * 0.7));
-        return `<rect class="market-volume-bar" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${widthValue.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2"></rect>`;
-      }).join("")
-    : "";
-
-  const firstRow = rows[0];
-  const lastRow = rows[rows.length - 1];
-  const middleTime = rows[Math.floor(rows.length / 2)]?.time || "";
-
-  return `
-    <div class="chart-scroll market-chart-scroll">
-      <svg class="stock-chart market-index-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="大盤即時走勢圖">
-        <rect class="chart-bg" x="0" y="0" width="${width}" height="${height}" rx="18"></rect>
-        <line class="chart-grid" x1="${left}" y1="${top}" x2="${width - right}" y2="${top}"></line>
-        <line class="chart-grid" x1="${left}" y1="${(top + priceBottom) / 2}" x2="${width - right}" y2="${(top + priceBottom) / 2}"></line>
-        <line class="chart-grid" x1="${left}" y1="${priceBottom}" x2="${width - right}" y2="${priceBottom}"></line>
-        <line class="chart-grid" x1="${left}" y1="${bottom}" x2="${width - right}" y2="${bottom}"></line>
-        ${volumeBars}
-        <path class="market-index-line" d="${path}"></path>
-        <circle class="market-index-dot" cx="${xFor(rows.length - 1).toFixed(2)}" cy="${yFor(toNumber(lastRow.close)).toFixed(2)}" r="4"></circle>
-        <text class="chart-axis-text" x="${left}" y="${height - 9}">${escapeHtml(firstRow.time || "")}</text>
-        <text class="chart-axis-text" x="${left + chartWidth / 2}" y="${height - 9}" text-anchor="middle">${escapeHtml(middleTime)}</text>
-        <text class="chart-axis-text" x="${width - right}" y="${height - 9}" text-anchor="end">${escapeHtml(lastRow.time || "")}</text>
-        <text class="chart-axis-text" x="${left - 8}" y="${top + 5}" text-anchor="end">${formatIndexPoint(highBound)}</text>
-        <text class="chart-axis-text" x="${left - 8}" y="${priceBottom}" text-anchor="end">${formatIndexPoint(lowBound)}</text>
-      </svg>
-    </div>
-  `;
-}
-
-function renderMarketSummaryPanel(row) {
-  const hasAmount = toNumber(pick(row, ["total_trade_amount"], null)) !== null;
-  const hasVolume = toNumber(pick(row, ["trade_volume", "volume"], null)) !== null;
-  const hasTransactions = toNumber(pick(row, ["transaction_count"], null)) !== null;
-  const hasSummary = hasAmount || hasVolume || hasTransactions;
-  const source = pick(row, ["summary_source"], "");
-  const summaryError = pick(row, ["summary_error"], "");
-
-  return `
-    <section class="market-summary-panel" aria-label="市場成交總覽">
-      <div class="market-summary-title-row">
-        <div>
-          <p class="eyebrow">V1.2 第 1-1 項</p>
-          <h3>指數與成交總覽</h3>
-        </div>
-        <span class="summary-date-chip">資料日：${formatMarketSummaryDate(pick(row, ["summary_trade_date"], ""))}</span>
-      </div>
-
-      <div class="market-summary-grid">
-        <div class="market-summary-item highlight">
-          <span>總交易金額</span>
-          <strong>${formatMarketAmount(pick(row, ["total_trade_amount"], null))}</strong>
-        </div>
-        <div class="market-summary-item">
-          <span>成交股數</span>
-          <strong>${formatMarketShares(pick(row, ["trade_volume", "volume"], null))}</strong>
-        </div>
-        <div class="market-summary-item">
-          <span>成交筆數</span>
-          <strong>${formatMarketTransactions(pick(row, ["transaction_count"], null))}</strong>
-        </div>
-        <div class="market-summary-item">
-          <span>收盤指數參考</span>
-          <strong>${formatIndexPoint(pick(row, ["summary_index_point", "current_point"], null))}</strong>
-        </div>
-      </div>
-
-      ${!hasSummary ? `<p class="market-summary-note">${escapeHtml(summaryError || "這個市場的總交易金額來源尚未提供，先保留欄位，後續補上資料源即可顯示。")}</p>` : ""}
-      ${source ? `<p class="market-summary-note">成交總覽來源：${escapeHtml(source)}</p>` : ""}
-    </section>
-  `;
-}
-
-function renderMarketIndexCard(row) {
-  const change = pick(row, ["change_point"], null);
-  const trendClass = getChangeClass(change);
-  const trendText = getMarketTrendText(change);
-  const point = pick(row, ["current_point"], "-");
-  const points = Array.isArray(row.points) ? row.points : [];
-  const hasError = Boolean(row.error);
-
-  return `
-    <article class="stock-card market-index-card">
-      <div class="stock-top">
-        <div class="stock-main">
-          <span class="rank-badge">${escapeHtml(pick(row, ["market_type"], "市場"))}</span>
-          <div class="stock-name">
-            <h3>${escapeHtml(pick(row, ["index_name"], "大盤指數"))}</h3>
-            <span class="stock-code">${escapeHtml(pick(row, ["index_code"], "INDEX"))}</span>
-            <span class="badge">${escapeHtml(pick(row, ["symbol"], "-"))}</span>
-          </div>
-        </div>
-        <div class="score-box ${trendClass === "price-up" ? "score-high" : trendClass === "price-down" ? "score-low" : "score-mid"}">
-          <span class="score-value index-score-value">${formatIndexPoint(point)}</span>
-          <span class="score-label">目前指數</span>
-        </div>
-      </div>
-
-      <div class="quick-summary">
-        <span class="summary-pill ${trendClass === "price-up" ? "score-high" : trendClass === "price-down" ? "score-low" : "score-mid"}">${escapeHtml(trendText)}</span>
-        <span class="summary-text">漲跌 <strong class="${trendClass}">${formatIndexChange(change)}</strong>，漲跌幅 <strong class="${trendClass}">${formatIndexPercent(pick(row, ["change_percent"], null))}</strong>，總交易金額 <strong>${formatMarketAmount(pick(row, ["total_trade_amount"], null))}</strong></span>
-      </div>
-
-      ${hasError ? `<div class="result-note error-note"><strong>讀取提醒：</strong>${escapeHtml(row.error)}</div>` : ""}
-
-      <div class="info-grid market-index-grid">
-        ${createInfoItem("開盤", formatIndexPoint(pick(row, ["open"], null)))}
-        ${createInfoItem("最高", formatIndexPoint(pick(row, ["high"], null)))}
-        ${createInfoItem("最低", formatIndexPoint(pick(row, ["low"], null)))}
-        ${createInfoItem("昨收", formatIndexPoint(pick(row, ["previous_close"], null)))}
-        ${createInfoItem("成交股數", formatMarketShares(pick(row, ["trade_volume", "volume"], null)))}
-        ${createInfoItem("成交筆數", formatMarketTransactions(pick(row, ["transaction_count"], null)))}
-        ${createInfoItem("總交易金額", formatMarketAmount(pick(row, ["total_trade_amount"], null)))}
-      </div>
-
-      ${renderMarketSummaryPanel(row)}
-
-      <section class="detail-section chart-section market-index-chart-section">
-        <div class="chart-title-row">
-          <h3>盤中即時走勢</h3>
-          <span>${escapeHtml(pick(row, ["latest_time"], ""))} 更新</span>
-        </div>
-        ${renderMarketIndexChart(points)}
-        <p class="chart-note">圖一已完成指數走勢；圖二這次補上總交易金額、成交股數與成交筆數。</p>
-      </section>
-
-      <div class="card-actions">
-        <span class="card-note">來源：${escapeHtml(pick(row, ["source"], "即時行情來源"))}；更新：${escapeHtml(pick(row, ["updated_at"], "-"))}</span>
-      </div>
-    </article>
-  `;
-}
-
-function renderMarketIndexPage(result) {
-  const indices = Array.isArray(result) ? result : Array.isArray(result?.indices) ? result.indices : [];
-  state.marketIndices = indices;
-
-  if (indices.length === 0) {
-    stockList.innerHTML = "";
-    showStatus("目前沒有大盤指數資料，請稍後重新整理。", "error");
-    return;
-  }
-
-  stockList.innerHTML = `
-    <article class="market-overview-card">
-      <div>
-        <p class="eyebrow">V1.2 第一項 + 第 1-1 項</p>
-        <h3>上市 / 上櫃指數與市場成交總覽</h3>
-        <p>圖一已完成盤中走勢；這次接續圖二，補上加權指數、漲跌點數、漲跌百分比、總交易金額、成交股數與成交筆數。</p>
-      </div>
-    </article>
-    ${indices.map(renderMarketIndexCard).join("")}
-  `;
-}
-
-async function loadMarketIndexPage() {
-  setLoading(true);
-  renderLoadingCards();
-
-  try {
-    const result = await fetchJson("/market/indices/intraday");
-    renderMarketIndexPage(result);
-    showTemporaryStatus("已更新大盤指數走勢。", "success");
-  } catch (error) {
-    stockList.innerHTML = "";
-    showStatus(
-      `
-        <div class="status-title">大盤走勢讀取失敗</div>
-        <div>${escapeHtml(error.message)}</div>
-        <div style="margin-top:10px;">
-          <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
-        </div>
-      `,
-      "error"
-    );
-    document.getElementById("retryBtn")?.addEventListener("click", loadList);
-  } finally {
-    setLoading(false);
-  }
-}
-
 function renderLoadingCards() {
   stockList.innerHTML = Array.from({ length: 4 })
     .map(
@@ -1135,13 +837,12 @@ function renderSearchIntro() {
   stockList.innerHTML = `
     <article class="search-intro-card">
       <div class="intro-icon">🔎</div>
-      <h3>請輸入股票或 ETF 代號</h3>
-      <p>例如輸入 <strong>2330</strong> 查個股，或輸入 <strong>0050</strong>、<strong>00878</strong> 查 ETF 即時行情。</p>
+      <h3>請輸入股票代號</h3>
+      <p>例如輸入 <strong>2330</strong>，就可以查台積電的最新行情、三大法人與籌碼分數。</p>
       <div class="example-row" aria-label="查詢範例">
         <button class="example-btn" type="button" data-search-code="2330">查 2330</button>
         <button class="example-btn" type="button" data-search-code="2317">查 2317</button>
-        <button class="example-btn" type="button" data-search-code="0050">查 0050 ETF</button>
-        <button class="example-btn" type="button" data-search-code="00878">查 00878 ETF</button>
+        <button class="example-btn" type="button" data-search-code="0050">查 0050</button>
       </div>
     </article>
   `;
@@ -1231,11 +932,6 @@ function rerenderCurrentContent() {
     return;
   }
 
-  if (state.page === "marketIndex" && state.marketIndices.length > 0) {
-    renderMarketIndexPage({ indices: state.marketIndices });
-    return;
-  }
-
   if (["radar", "foreign", "foreignStreak", "trust", "syncBuy"].includes(state.page) && state.latestRows.length > 0) {
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
     return;
@@ -1251,7 +947,7 @@ function renderWatchlistLoginPrompt() {
     <article class="search-intro-card watchlist-login-card">
       <div class="intro-icon">⭐</div>
       <h3>請先登入 Google 帳號</h3>
-      <p>登入後就可以把股票或 ETF 加入自選股，而且每個 Google 帳號看到的清單都不一樣。</p>
+      <p>登入後就可以把股票加入自選股，而且每個 Google 帳號看到的清單都不一樣。</p>
       <div class="example-row">
         <button class="example-btn" type="button" data-go-account="true">前往登入</button>
       </div>
@@ -1264,7 +960,7 @@ function renderEmptyWatchlist() {
     <article class="search-intro-card watchlist-empty-card">
       <div class="intro-icon">⭐</div>
       <h3>目前還沒有自選股</h3>
-      <p>可以先到「今日雷達」或「個股 / ETF」，看到想追蹤的股票或 ETF 後按「加入自選」。</p>
+      <p>可以先到「今日雷達」或「個股查詢」，看到想追蹤的股票後按「加入自選」。</p>
       <div class="example-row">
         <button class="example-btn" type="button" data-go-page="radar">看今日雷達</button>
         <button class="example-btn" type="button" data-go-page="search">去個股查詢</button>
@@ -1636,7 +1332,6 @@ function renderForeignStreakCard(row, index) {
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
-            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
         <div class="score-box ${strengthClass}">
@@ -1836,268 +1531,6 @@ function renderSyncBuyCard(row, index) {
       </div>
     </article>
   `;
-}
-
-
-function formatSignedAmountYi(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
-}
-
-function formatInstitutionalLots(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
-}
-
-function getInstitutionalStrengthClass(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "score-low";
-  if (numberValue > 0) return "score-high";
-  if (numberValue < 0) return "score-low";
-  return "score-mid";
-}
-
-function getInstitutionalFlowText(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "資料不足";
-  if (numberValue > 0) return "法人淨流入";
-  if (numberValue < 0) return "法人淨流出";
-  return "法人持平";
-}
-
-function renderInstitutionalEntityCard(label, row, amountKey, lotsKey, options = {}) {
-  const amount = pick(row, [amountKey], null);
-  const lots = pick(row, [lotsKey], null);
-  const className = getInstitutionalStrengthClass(amount);
-  const note = options.note || "買賣超估算金額";
-  const buyAmount = options.buyAmountKey ? pick(row, [options.buyAmountKey], null) : null;
-  const sellAmount = options.sellAmountKey ? pick(row, [options.sellAmountKey], null) : null;
-
-  return `
-    <div class="institutional-entity-card ${className}">
-      <span>${escapeHtml(label)}</span>
-      <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
-      <small>${formatInstitutionalLots(lots)}｜${escapeHtml(note)}</small>
-      ${buyAmount !== null || sellAmount !== null ? `<em>買進 ${formatAmountYi(buyAmount)}｜賣出 ${formatAmountYi(sellAmount)}</em>` : ""}
-    </div>
-  `;
-}
-
-function renderInstitutionalByMarket(rows) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-
-  if (safeRows.length === 0) {
-    return `<div class="institutional-empty">沒有市場別彙總資料。</div>`;
-  }
-
-  return `
-    <div class="institutional-market-grid">
-      ${safeRows.map((row) => {
-        const market = pick(row, ["market_type", "market"], "市場");
-        const amount = pick(row, ["total_net_amount"], null);
-        return `
-          <div class="institutional-market-card">
-            <div>
-              <span class="badge">${escapeHtml(market)}</span>
-              <h4 class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</h4>
-            </div>
-            <div class="institutional-market-items">
-              <span>外資 <strong class="${getChangeClass(pick(row, ["foreign_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["foreign_net_amount"], null))}</strong></span>
-              <span>投信 <strong class="${getChangeClass(pick(row, ["investment_trust_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["investment_trust_net_amount"], null))}</strong></span>
-              <span>自營商 <strong class="${getChangeClass(pick(row, ["dealer_net_amount"], null))}">${formatSignedAmountYi(pick(row, ["dealer_net_amount"], null))}</strong></span>
-              <span>檔數 ${formatNumber(pick(row, ["stock_count"], 0))}｜有收盤價 ${formatNumber(pick(row, ["priced_stock_count"], 0))}</span>
-            </div>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function renderInstitutionalHistory(rows) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-
-  if (safeRows.length === 0) {
-    return `<div class="institutional-empty">尚無近日期法人歷史資料。</div>`;
-  }
-
-  const orderedRows = [...safeRows].reverse();
-  const maxAmount = Math.max(1, ...orderedRows.map((row) => Math.abs(toNumber(pick(row, ["total_net_amount"], 0)) || 0)));
-
-  return `
-    <div class="institutional-history-list">
-      ${orderedRows.map((row) => {
-        const amount = toNumber(pick(row, ["total_net_amount"], 0)) || 0;
-        const width = Math.max(4, Math.min(100, Math.abs(amount) / maxAmount * 100));
-        const tone = amount >= 0 ? "up" : "down";
-        return `
-          <div class="institutional-history-row">
-            <span>${formatDate(pick(row, ["trade_date"], "-"))}</span>
-            <div class="institutional-history-bar-track">
-              <div class="institutional-history-bar ${tone}" style="width:${width.toFixed(1)}%"></div>
-            </div>
-            <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function renderInstitutionalTopStocks(rows, title) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-
-  if (safeRows.length === 0) {
-    return `<div class="institutional-empty">${escapeHtml(title)}目前沒有資料。</div>`;
-  }
-
-  return `
-    <section class="institutional-top-section">
-      <h4>${escapeHtml(title)}</h4>
-      <div class="institutional-top-list">
-        ${safeRows.map((row, index) => {
-          const code = pick(row, ["stock_code", "code"], "-");
-          const name = pick(row, ["stock_name", "name"], "-");
-          const amount = pick(row, ["total_net_amount"], null);
-          const lots = pick(row, ["total_net_lots"], null);
-          const change = pick(row, ["price_change", "change"], null);
-          return `
-            <button class="institutional-stock-row detail-btn" type="button" data-code="${escapeHtml(code)}">
-              <span class="leader-rank">${index + 1}</span>
-              <span class="institutional-stock-main">
-                <strong>${escapeHtml(name)} <small>${escapeHtml(code)}</small></strong>
-                <em>${escapeHtml(pick(row, ["market_type", "market"], "-"))}｜收盤 ${formatPrice(pick(row, ["close_price"], null))}｜漲跌 <span class="${getChangeClass(change)}">${formatPrice(change)}</span></em>
-              </span>
-              <span class="institutional-stock-value">
-                <strong class="${getChangeClass(amount)}">${formatSignedAmountYi(amount)}</strong>
-                <small>${formatInstitutionalLots(lots)}</small>
-              </span>
-            </button>
-          `;
-        }).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderInstitutionalOverviewPage(result) {
-  const overview = result || {};
-  const summary = overview.summary || {};
-  const tradeDate = overview.trade_date || pick(summary, ["trade_date"], "-");
-  const totalAmount = pick(summary, ["total_net_amount"], null);
-  const flowClass = getInstitutionalStrengthClass(totalAmount);
-  const stockCount = pick(summary, ["stock_count"], 0);
-  const pricedCount = pick(summary, ["priced_stock_count"], 0);
-
-  if (!summary || !overview.trade_date) {
-    stockList.innerHTML = `
-      <article class="search-intro-card error-card">
-        <div class="intro-icon">⚠️</div>
-        <h3>尚無法人總覽資料</h3>
-        <p>請先確認每日上市 / 上櫃匯入已完成，資料表 institutional_trades 有資料後就會顯示。</p>
-      </article>
-    `;
-    return;
-  }
-
-  stockList.innerHTML = `
-    <article class="stock-card institutional-overview-card">
-      <div class="stock-top">
-        <div class="stock-main">
-          <span class="rank-badge">V1.2 第 7 項</span>
-          <div class="stock-name">
-            <h3>三大法人買賣總覽</h3>
-            <span class="badge">${escapeHtml(overview.market || "全部")}</span>
-            <span class="badge">資料日 ${formatDate(tradeDate)}</span>
-          </div>
-        </div>
-        <div class="score-box ${flowClass}">
-          <span class="score-value institutional-score-value">${formatSignedAmountYi(totalAmount)}</span>
-          <span class="score-label">法人合計金額</span>
-        </div>
-      </div>
-
-      <div class="quick-summary">
-        <span class="summary-pill ${flowClass}">${escapeHtml(getInstitutionalFlowText(totalAmount))}</span>
-        <span class="summary-text">三大法人合計 <strong class="${getChangeClass(totalAmount)}">${formatSignedAmountYi(totalAmount)}</strong>，合計張數 <strong class="${getChangeClass(pick(summary, ["total_net_lots"], null))}">${formatInstitutionalLots(pick(summary, ["total_net_lots"], null))}</strong></span>
-      </div>
-
-      <div class="institutional-entity-grid">
-        ${renderInstitutionalEntityCard("外資", summary, "foreign_net_amount", "foreign_net_lots", { buyAmountKey: "foreign_buy_amount", sellAmountKey: "foreign_sell_amount" })}
-        ${renderInstitutionalEntityCard("投信", summary, "investment_trust_net_amount", "investment_trust_net_lots", { buyAmountKey: "investment_trust_buy_amount", sellAmountKey: "investment_trust_sell_amount" })}
-        ${renderInstitutionalEntityCard("自營商", summary, "dealer_net_amount", "dealer_net_lots", { note: "目前資料表只有自營商淨買賣超" })}
-        ${renderInstitutionalEntityCard("合計", summary, "total_net_amount", "total_net_lots", { note: "三大法人合計" })}
-      </div>
-
-      <div class="info-grid institutional-info-grid">
-        ${createInfoItem("統計檔數", formatNumber(stockCount))}
-        ${createInfoItem("有收盤價可估金額", `${formatNumber(pricedCount)} 檔`)}
-        ${createInfoItem("市場成交金額", formatAmountYi(pick(summary, ["market_transaction_amount"], null)))}
-        ${createInfoItem("估算方式", "買賣超張數 × 收盤價 × 1000")}
-      </div>
-
-      <p class="panel-note institutional-note">金額為估算值，方便快速看法人資金方向；正式買進 / 賣出成交金額若之後要精準到官方口徑，可再新增專用資料源。</p>
-    </article>
-
-    <article class="stock-card institutional-market-section">
-      <div class="chart-title-row">
-        <h3>上市 / 上櫃分別金額</h3>
-        <span>${formatDate(tradeDate)}</span>
-      </div>
-      ${renderInstitutionalByMarket(overview.by_market)}
-    </article>
-
-    <article class="stock-card institutional-history-section">
-      <div class="chart-title-row">
-        <h3>近 ${formatNumber(overview.days || 10)} 日法人合計趨勢</h3>
-        <span>正數偏流入，負數偏流出</span>
-      </div>
-      ${renderInstitutionalHistory(overview.history)}
-    </article>
-
-    <article class="stock-card institutional-top-wrapper">
-      <div class="chart-title-row">
-        <h3>法人金額排行</h3>
-        <span>點股票可看明細</span>
-      </div>
-      <div class="institutional-top-grid">
-        ${renderInstitutionalTopStocks(overview.top_net_buy, "法人估算買超前 5")}
-        ${renderInstitutionalTopStocks(overview.top_net_sell, "法人估算賣超前 5")}
-      </div>
-    </article>
-  `;
-}
-
-async function loadInstitutionalOverviewPage() {
-  setLoading(true);
-  renderLoadingCards();
-
-  try {
-    const params = new URLSearchParams({ days: "10" });
-    if (state.market) params.set("market", state.market);
-    const result = await fetchJson(`/market/institutional/summary?${params.toString()}`);
-    renderInstitutionalOverviewPage(result);
-    showTemporaryStatus("已更新三大法人總覽。", "success");
-  } catch (error) {
-    stockList.innerHTML = "";
-    showStatus(
-      `
-        <div class="status-title">法人總覽讀取失敗</div>
-        <div>${escapeHtml(error.message)}</div>
-        <div style="margin-top:10px;">
-          <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
-        </div>
-      `,
-      "error"
-    );
-    document.getElementById("retryBtn")?.addEventListener("click", loadList);
-  } finally {
-    setLoading(false);
-  }
 }
 
 
@@ -2343,7 +1776,6 @@ function renderMajorHolderCard(row, index) {
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
             <span class="badge">${escapeHtml(industry)}</span>
-            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
         <div class="score-box ${strengthClass}">
@@ -2384,13 +1816,12 @@ function renderStockCard(row, index) {
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
   const score = pick(row, ["total_score", "chip_score", "score"], "-");
-  const closePrice = pick(row, ["close_price", "closing_price", "close", "current_price"], "-");
+  const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
-  const isEtf = isEtfRow(row);
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
-  const scoreText = isEtf ? "ETF 即時追蹤" : getScoreText(score);
+  const scoreText = getScoreText(score);
 
   const radarItems = [
     createStatusItem("外資", pick(row, ["foreign_status", "foreign_investor_status"])),
@@ -2419,24 +1850,21 @@ function renderStockCard(row, index) {
             <h3>${escapeHtml(name)}</h3>
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
-            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(row))}</span>
           </div>
         </div>
-        ${renderScoreBox(row, score, scoreClass)}
+        <div class="score-box ${scoreClass}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">籌碼分數</span>
+        </div>
       </div>
 
       <div class="quick-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">${isEtf ? "現價" : "收盤"} ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
       </div>
 
       <div class="info-grid">
-        ${isEtf ? [
-          createInfoItem("類型", "ETF"),
-          createInfoItem("成交量", `${formatNumber(pick(row, ["volume", "trade_volume", "volume_lots"]))} 張`),
-          createInfoItem("漲跌幅", pick(row, ["change_percent"], null) === null ? "-" : formatPercent(pick(row, ["change_percent"])), getChangeClass(pick(row, ["change_percent"]))),
-          createInfoItem("市場別", escapeHtml(market)),
-        ].join("") : (state.page === "foreign" ? foreignItems : radarItems)}
+        ${state.page === "foreign" ? foreignItems : radarItems}
       </div>
 
       <div class="card-actions">
@@ -2444,6 +1872,146 @@ function renderStockCard(row, index) {
         ${getCardActionButtons(code, "看明細", index)}
       </div>
     </article>
+  `;
+}
+
+function normalizeTextValue(value) {
+  const text = String(value ?? "").trim();
+  return text && text !== "-" ? text : "";
+}
+
+function firstNonEmptyValue(...values) {
+  for (const value of values) {
+    const text = normalizeTextValue(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function getTodayDateText() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatCalendarEventType(value) {
+  const text = normalizeTextValue(value);
+  if (!text) return "其他事件";
+
+  const lower = text.toLowerCase();
+  if (text.includes("除權") && text.includes("息")) return "除權息";
+  if (text.includes("除息") || lower.includes("ex-dividend")) return "除息";
+  if (text.includes("除權") || lower.includes("ex-right")) return "除權";
+  if (text.includes("發放") || text.includes("股利") || lower.includes("payment")) return "股利發放";
+  if (text.includes("股東會") || lower.includes("shareholder")) return "股東會";
+  if (text.includes("法說") || lower.includes("conference")) return "法說會";
+  if (text.includes("停止過戶") || text.includes("閉鎖") || lower.includes("book")) return "停止過戶";
+  return text;
+}
+
+function getCalendarImportanceClass(value) {
+  const text = String(value ?? "normal").toLowerCase();
+  if (text === "high") return "high";
+  if (text === "low") return "low";
+  return "normal";
+}
+
+function getCalendarEventTimingClass(eventDate) {
+  const dateText = formatDate(eventDate);
+  if (!dateText || dateText === "-") return "normal";
+  return dateText >= getTodayDateText() ? "upcoming" : "past";
+}
+
+function getCalendarEventTimingText(eventDate) {
+  return getCalendarEventTimingClass(eventDate) === "upcoming" ? "即將到來" : "近期已發生";
+}
+
+function renderEtfProfileDetailSection(profile, summaryData) {
+  const securityType = firstNonEmptyValue(
+    pick(profile, ["security_type"], ""),
+    pick(summaryData, ["security_type"], ""),
+  ).toUpperCase();
+  const hasProfile = Boolean(profile && Object.keys(profile).length > 0 && normalizeTextValue(profile.stock_code));
+  const isEtf = securityType === "ETF" || hasProfile;
+
+  if (!isEtf) return "";
+
+  if (!hasProfile && securityType === "ETF") {
+    return `
+      <section class="detail-section etf-profile-section">
+        <h3>ETF 基本資料</h3>
+        <div class="status-box">目前尚未建立完整 ETF 主檔資料。</div>
+      </section>
+    `;
+  }
+
+  const fundType = firstNonEmptyValue(pick(profile, ["fund_type"], ""), pick(summaryData, ["fund_type"], "")) || "-";
+  const underlyingIndex = firstNonEmptyValue(pick(profile, ["underlying_index"], ""), pick(summaryData, ["underlying_index"], "")) || "-";
+  const issuer = firstNonEmptyValue(pick(profile, ["issuer"], ""), pick(summaryData, ["issuer"], "")) || "-";
+  const listingDate = firstNonEmptyValue(pick(profile, ["listing_date"], ""), pick(summaryData, ["listing_date"], "")) || "-";
+  const source = firstNonEmptyValue(pick(profile, ["source"], ""), pick(summaryData, ["etf_profile_source"], "")) || "-";
+
+  return renderDetailSection("ETF 基本資料", [
+    createInfoItem("ETF 類型", escapeHtml(fundType)),
+    createInfoItem("追蹤指數", escapeHtml(underlyingIndex)),
+    createInfoItem("基金公司", escapeHtml(issuer)),
+    createInfoItem("上市日期", formatDate(listingDate)),
+    createInfoItem("資料來源", escapeHtml(source)),
+  ]);
+}
+
+function renderCalendarEventCard(event) {
+  const eventDate = formatDate(pick(event, ["event_date"]));
+  const eventType = formatCalendarEventType(pick(event, ["event_type"]));
+  const title = firstNonEmptyValue(pick(event, ["title"], ""), eventType) || "行事曆事件";
+  const description = firstNonEmptyValue(pick(event, ["description"], ""));
+  const source = firstNonEmptyValue(pick(event, ["source"], ""));
+  const sourceUrl = firstNonEmptyValue(pick(event, ["source_url"], ""));
+  const timingClass = getCalendarEventTimingClass(eventDate);
+  const importanceClass = getCalendarImportanceClass(pick(event, ["importance"], "normal"));
+  const sourceHtml = source
+    ? sourceUrl
+      ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source)}</a>`
+      : escapeHtml(source)
+    : "-";
+
+  return `
+    <article class="calendar-event-card ${timingClass} ${importanceClass}">
+      <div class="calendar-date-box">
+        <strong>${escapeHtml(eventDate)}</strong>
+        <span>${escapeHtml(getCalendarEventTimingText(eventDate))}</span>
+      </div>
+      <div class="calendar-event-main">
+        <div class="calendar-event-title-row">
+          <span class="calendar-type-chip ${importanceClass}">${escapeHtml(eventType)}</span>
+          <h4>${escapeHtml(title)}</h4>
+        </div>
+        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+        <div class="calendar-event-meta">資料來源：${sourceHtml}</div>
+      </div>
+    </article>
+  `;
+}
+
+function renderCalendarDetailSection(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return `
+      <section class="detail-section calendar-section">
+        <h3>個股 / ETF 行事曆</h3>
+        <div class="status-box">目前尚無近期行事曆事件。</div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="detail-section calendar-section">
+      <h3>個股 / ETF 行事曆</h3>
+      <div class="calendar-event-list">
+        ${events.map(renderCalendarEventCard).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -2456,561 +2024,6 @@ function renderDetailSection(title, rows) {
   `;
 }
 
-
-function formatSignedPrice(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toFixed(2).replace(/\.00$/, "")}`;
-}
-
-function formatRealtimePercent(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function formatLotsWithUnit(value, emptyText = "來源未提供") {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return emptyText;
-  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
-}
-
-function formatRealtimeAmount(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "來源未提供";
-  return `${(numberValue / 100000000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
-}
-
-function hasRealtimeQuote(quote) {
-  if (!quote || quote.error) return false;
-  return ["current_price", "bid_price", "ask_price", "volume_lots", "open_price", "high_price", "low_price"]
-    .some((key) => toNumber(quote[key]) !== null);
-}
-
-function hasMonthlyRevenue(revenue) {
-  return revenue && !revenue.error && Array.isArray(revenue.rows) && revenue.rows.length > 0;
-}
-
-function formatRevenueAmount(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  return `${(numberValue / 100000).toLocaleString("zh-TW", { maximumFractionDigits: 2 })} 億`;
-}
-
-function getRevenueToneClass(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null || numberValue === 0) return "warn";
-  return numberValue > 0 ? "good" : "bad";
-}
-
-function getRevenueScoreClass(revenue) {
-  const yoy = toNumber(pick(revenue, ["latest_year_over_year_percent"], null));
-  const mom = toNumber(pick(revenue, ["latest_month_over_month_percent"], null));
-
-  if (yoy !== null && yoy >= 20 && mom !== null && mom >= 0) return "score-high";
-  if (yoy !== null && yoy > 0) return "score-mid";
-  return "score-low";
-}
-
-function formatRevenuePercent(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function renderRevenueRows(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return `<div class="result-note">目前沒有近月營收資料。</div>`;
-  }
-
-  return `
-    <div class="revenue-table" aria-label="近月營收表格">
-      <div class="revenue-row revenue-head">
-        <span>月份</span>
-        <span>單月營收</span>
-        <span>月增率</span>
-        <span>年增率</span>
-      </div>
-      ${rows.slice(0, 8).map((row) => `
-        <div class="revenue-row">
-          <strong>${escapeHtml(pick(row, ["period"], "-"))}</strong>
-          <span>${formatRevenueAmount(pick(row, ["month_revenue_thousand"], null))}</span>
-          <span class="${getChangeClass(pick(row, ["month_over_month_percent"], null))}">${formatRevenuePercent(pick(row, ["month_over_month_percent"], null))}</span>
-          <span class="${getChangeClass(pick(row, ["year_over_year_percent"], null))}">${formatRevenuePercent(pick(row, ["year_over_year_percent"], null))}</span>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderMonthlyRevenuePanel(revenue) {
-  const monthlyRevenue = revenue || {};
-
-  if (!hasMonthlyRevenue(monthlyRevenue)) {
-    return `
-      <section class="detail-section revenue-section revenue-empty-section">
-        <h3>每月營收</h3>
-        <div class="result-note error-note">
-          <strong>每月營收暫時讀不到：</strong>${escapeHtml(monthlyRevenue.error || "資料來源目前沒有回傳營收資料。")}
-        </div>
-      </section>
-    `;
-  }
-
-  const scoreClass = getRevenueScoreClass(monthlyRevenue);
-  const mom = pick(monthlyRevenue, ["latest_month_over_month_percent"], null);
-  const yoy = pick(monthlyRevenue, ["latest_year_over_year_percent"], null);
-  const cumulativeYoy = pick(monthlyRevenue, ["latest_cumulative_year_over_year_percent"], null);
-
-  return `
-    <section class="detail-section revenue-section">
-      <div class="realtime-title-row">
-        <div>
-          <p class="eyebrow">V1.2 第 3 項</p>
-          <h3>每月營收</h3>
-        </div>
-        <span class="summary-date-chip">最新：${escapeHtml(pick(monthlyRevenue, ["latest_period"], "-"))}</span>
-      </div>
-
-      <div class="quick-summary revenue-summary">
-        <span class="summary-pill ${scoreClass}">${escapeHtml(pick(monthlyRevenue, ["growth_status"], "營收觀察"))}</span>
-        <span class="summary-text">當月營收 <strong>${formatRevenueAmount(pick(monthlyRevenue, ["latest_month_revenue_thousand"], null))}</strong>，年增率 <strong class="${getChangeClass(yoy)}">${formatRevenuePercent(yoy)}</strong></span>
-      </div>
-
-      <div class="revenue-hero-grid">
-        <div class="revenue-hero-card highlight">
-          <span>當月營收</span>
-          <strong>${formatRevenueAmount(pick(monthlyRevenue, ["latest_month_revenue_thousand"], null))}</strong>
-          <small>單位換算：億元</small>
-        </div>
-        <div class="revenue-hero-card ${getRevenueToneClass(mom)}">
-          <span>月增率</span>
-          <strong>${formatRevenuePercent(mom)}</strong>
-          <small>跟上個月比較</small>
-        </div>
-        <div class="revenue-hero-card ${getRevenueToneClass(yoy)}">
-          <span>年增率</span>
-          <strong>${formatRevenuePercent(yoy)}</strong>
-          <small>跟去年同月比較</small>
-        </div>
-      </div>
-
-      <div class="info-grid revenue-info-grid">
-        ${createInfoItem("去年同月營收", formatRevenueAmount(pick(monthlyRevenue, ["latest_last_year_month_revenue_thousand"], null)))}
-        ${createInfoItem("累計營收", formatRevenueAmount(pick(monthlyRevenue, ["latest_cumulative_revenue_thousand"], null)))}
-        ${createInfoItem("累計年增率", formatRevenuePercent(cumulativeYoy), getChangeClass(cumulativeYoy))}
-        ${createInfoItem("資料來源", escapeHtml(pick(monthlyRevenue, ["source"], "Yahoo 股市營收表")))}
-      </div>
-
-      <div class="chart-title-row revenue-chart-title">
-        <h3>近月營收表格</h3>
-        <span>單位：億元</span>
-      </div>
-      ${renderRevenueRows(monthlyRevenue.rows)}
-
-      <p class="chart-note">營收資料用來確認基本面是否支撐股價；單月月增率可能受季節性影響，建議搭配年增率與累計年增率一起看。</p>
-    </section>
-  `;
-}
-
-
-function hasQuarterlyEps(eps) {
-  return eps && !eps.error && Array.isArray(eps.rows) && eps.rows.length > 0;
-}
-
-function formatEpsValue(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  return `${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 元`;
-}
-
-function getEpsToneClass(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null || numberValue === 0) return "warn";
-  return numberValue > 0 ? "good" : "bad";
-}
-
-function getEpsScoreClass(eps) {
-  const yoy = toNumber(pick(eps, ["latest_year_over_year_percent"], null));
-  const qoq = toNumber(pick(eps, ["latest_quarter_over_quarter_percent"], null));
-  const latestEps = toNumber(pick(eps, ["latest_eps"], null));
-
-  if (latestEps !== null && latestEps > 0 && yoy !== null && yoy >= 20 && (qoq === null || qoq >= 0)) return "score-high";
-  if (latestEps !== null && latestEps > 0 && yoy !== null && yoy > 0) return "score-mid";
-  return "score-low";
-}
-
-function formatEpsPercent(value) {
-  const numberValue = toNumber(value);
-  if (numberValue === null) return "-";
-  const sign = numberValue > 0 ? "+" : "";
-  return `${sign}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function renderEpsRows(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return `<div class="result-note">目前沒有近季 EPS 資料。</div>`;
-  }
-
-  return `
-    <div class="revenue-table eps-table" aria-label="近季 EPS 表格">
-      <div class="revenue-row revenue-head eps-row">
-        <span>季度</span>
-        <span>EPS</span>
-        <span>季增率</span>
-        <span>年增率</span>
-      </div>
-      ${rows.slice(0, 8).map((row) => `
-        <div class="revenue-row eps-row">
-          <strong>${escapeHtml(pick(row, ["period"], "-"))}</strong>
-          <span class="${getChangeClass(pick(row, ["eps"], null))}">${formatEpsValue(pick(row, ["eps"], null))}</span>
-          <span class="${getChangeClass(pick(row, ["quarter_over_quarter_percent"], null))}">${formatEpsPercent(pick(row, ["quarter_over_quarter_percent"], null))}</span>
-          <span class="${getChangeClass(pick(row, ["year_over_year_percent"], null))}">${formatEpsPercent(pick(row, ["year_over_year_percent"], null))}</span>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderQuarterlyEpsPanel(eps) {
-  const quarterlyEps = eps || {};
-
-  if (!hasQuarterlyEps(quarterlyEps)) {
-    return `
-      <section class="detail-section revenue-section eps-section eps-empty-section">
-        <h3>每季 EPS / 盈餘狀況</h3>
-        <div class="result-note error-note">
-          <strong>EPS 暫時讀不到：</strong>${escapeHtml(quarterlyEps.error || "資料來源目前沒有回傳 EPS 資料。")}
-        </div>
-      </section>
-    `;
-  }
-
-  const scoreClass = getEpsScoreClass(quarterlyEps);
-  const qoq = pick(quarterlyEps, ["latest_quarter_over_quarter_percent"], null);
-  const yoy = pick(quarterlyEps, ["latest_year_over_year_percent"], null);
-  const latestEps = pick(quarterlyEps, ["latest_eps"], null);
-  const averageEps = pick(quarterlyEps, ["average_quarter_eps"], null);
-
-  return `
-    <section class="detail-section revenue-section eps-section">
-      <div class="realtime-title-row">
-        <div>
-          <p class="eyebrow">V1.2 第 4 項</p>
-          <h3>每季 EPS / 盈餘狀況</h3>
-        </div>
-        <span class="summary-date-chip">最新：${escapeHtml(pick(quarterlyEps, ["latest_period"], "-"))}</span>
-      </div>
-
-      <div class="quick-summary revenue-summary eps-summary">
-        <span class="summary-pill ${scoreClass}">${escapeHtml(pick(quarterlyEps, ["growth_status"], "EPS 觀察"))}</span>
-        <span class="summary-text">最新 EPS <strong class="${getChangeClass(latestEps)}">${formatEpsValue(latestEps)}</strong>，年增率 <strong class="${getChangeClass(yoy)}">${formatEpsPercent(yoy)}</strong></span>
-      </div>
-
-      <div class="revenue-hero-grid eps-hero-grid">
-        <div class="revenue-hero-card highlight">
-          <span>最新 EPS</span>
-          <strong>${formatEpsValue(latestEps)}</strong>
-          <small>每股盈餘</small>
-        </div>
-        <div class="revenue-hero-card ${getEpsToneClass(qoq)}">
-          <span>季增率</span>
-          <strong>${formatEpsPercent(qoq)}</strong>
-          <small>跟上一季比較</small>
-        </div>
-        <div class="revenue-hero-card ${getEpsToneClass(yoy)}">
-          <span>年增率</span>
-          <strong>${formatEpsPercent(yoy)}</strong>
-          <small>跟去年同季比較</small>
-        </div>
-      </div>
-
-      <div class="info-grid revenue-info-grid eps-info-grid">
-        ${createInfoItem("近四季 EPS 合計", formatEpsValue(pick(quarterlyEps, ["trailing_four_quarter_eps"], null)))}
-        ${createInfoItem("近四季平均 EPS", formatEpsValue(averageEps))}
-        ${createInfoItem("單位", escapeHtml(pick(quarterlyEps, ["unit"], "元")))}
-        ${createInfoItem("資料來源", escapeHtml(pick(quarterlyEps, ["source"], "Yahoo 股市 EPS 表")))}
-      </div>
-
-      <div class="chart-title-row revenue-chart-title eps-chart-title">
-        <h3>近季 EPS 表格</h3>
-        <span>單位：元</span>
-      </div>
-      ${renderEpsRows(quarterlyEps.rows)}
-
-      <p class="chart-note">EPS 用來觀察公司獲利是否支撐股價；單季 EPS 可能受一次性因素影響，建議搭配營收、法人與股價趨勢一起看。</p>
-    </section>
-  `;
-}
-
-function hasStockCalendar(calendar) {
-  return calendar && !calendar.error && Array.isArray(calendar.events) && calendar.events.length > 0;
-}
-
-function getCalendarTypeClass(type) {
-  const eventType = String(type || "");
-
-  if (["ex_dividend", "ex_right", "dividend"].includes(eventType)) return "good";
-  if (["shareholders_meeting", "investor_conference"].includes(eventType)) return "warn";
-  if (["book_closure", "earnings"].includes(eventType)) return "score-mid";
-  return "score-low";
-}
-
-function getCalendarImportanceText(value) {
-  if (value === "high") return "重要";
-  if (value === "medium") return "留意";
-  return "一般";
-}
-
-function getRelativeEventText(eventDate, today) {
-  if (!eventDate) return "日期未定";
-  if (!today) return formatDate(eventDate);
-
-  const eventTime = new Date(`${eventDate}T00:00:00+08:00`).getTime();
-  const todayTime = new Date(`${today}T00:00:00+08:00`).getTime();
-
-  if (!Number.isFinite(eventTime) || !Number.isFinite(todayTime)) return formatDate(eventDate);
-
-  const diffDays = Math.round((eventTime - todayTime) / 86400000);
-  if (diffDays === 0) return "今天";
-  if (diffDays === 1) return "明天";
-  if (diffDays > 1) return `${diffDays} 天後`;
-  if (diffDays === -1) return "昨天";
-  return `${Math.abs(diffDays)} 天前`;
-}
-
-function renderCalendarRows(events = [], today = "") {
-  if (!Array.isArray(events) || events.length === 0) {
-    return `<div class="result-note">目前沒有個股行事曆資料。</div>`;
-  }
-
-  return `
-    <div class="calendar-event-list" aria-label="個股行事曆事件列表">
-      ${events.slice(0, 12).map((event) => {
-        const eventDate = pick(event, ["event_date"], "");
-        const type = pick(event, ["event_type"], "other");
-        const typeName = pick(event, ["event_type_name"], "事件");
-        const title = pick(event, ["title"], typeName);
-        const importance = pick(event, ["importance"], "normal");
-
-        return `
-          <div class="calendar-event-row">
-            <div class="calendar-event-date">
-              <strong>${escapeHtml(formatDate(eventDate))}</strong>
-              <small>${escapeHtml(getRelativeEventText(eventDate, today))}</small>
-            </div>
-            <div class="calendar-event-main">
-              <div class="calendar-event-title-row">
-                <span class="summary-pill ${getCalendarTypeClass(type)}">${escapeHtml(typeName)}</span>
-                <span class="calendar-importance">${escapeHtml(getCalendarImportanceText(importance))}</span>
-              </div>
-              <strong>${escapeHtml(title)}</strong>
-              ${pick(event, ["description"], "") ? `<p>${escapeHtml(pick(event, ["description"], ""))}</p>` : ""}
-            </div>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
-}
-
-function renderStockCalendarPanel(calendar) {
-  const stockCalendar = calendar || {};
-
-  if (!hasStockCalendar(stockCalendar)) {
-    return `
-      <section class="detail-section calendar-section calendar-empty-section">
-        <h3>個股行事曆</h3>
-        <div class="result-note error-note">
-          <strong>個股行事曆暫時讀不到：</strong>${escapeHtml(stockCalendar.error || "資料來源目前沒有回傳行事曆資料。")}
-        </div>
-      </section>
-    `;
-  }
-
-  const nextEvent = stockCalendar.next_event || {};
-  const today = pick(stockCalendar, ["today"], "");
-  const nextType = pick(nextEvent, ["event_type"], "other");
-  const nextDate = pick(nextEvent, ["event_date"], "");
-
-  return `
-    <section class="detail-section calendar-section">
-      <div class="realtime-title-row">
-        <div>
-          <p class="eyebrow">V1.2 第 5 項</p>
-          <h3>個股行事曆</h3>
-        </div>
-        <span class="summary-date-chip">更新：${escapeHtml(pick(stockCalendar, ["updated_at"], "即時查詢"))}</span>
-      </div>
-
-      <div class="quick-summary calendar-summary">
-        <span class="summary-pill ${getCalendarTypeClass(nextType)}">${escapeHtml(pick(nextEvent, ["event_type_name"], "近期事件"))}</span>
-        <span class="summary-text">下一個事件：<strong>${escapeHtml(pick(nextEvent, ["title"], "暫無未來事件"))}</strong>${nextDate ? `，${escapeHtml(getRelativeEventText(nextDate, today))}` : ""}</span>
-      </div>
-
-      <div class="revenue-hero-grid calendar-hero-grid">
-        <div class="revenue-hero-card highlight">
-          <span>下一個日期</span>
-          <strong>${escapeHtml(nextDate ? formatDate(nextDate) : "-")}</strong>
-          <small>${escapeHtml(getRelativeEventText(nextDate, today))}</small>
-        </div>
-        <div class="revenue-hero-card warn">
-          <span>未來事件</span>
-          <strong>${formatNumber(pick(stockCalendar, ["upcoming_count"], 0))}</strong>
-          <small>含配息、股東會、法說會等</small>
-        </div>
-        <div class="revenue-hero-card good">
-          <span>資料筆數</span>
-          <strong>${formatNumber(Array.isArray(stockCalendar.events) ? stockCalendar.events.length : 0)}</strong>
-          <small>${escapeHtml(pick(stockCalendar, ["source"], "Yahoo 股市行事曆"))}</small>
-        </div>
-      </div>
-
-      <div class="info-grid calendar-info-grid">
-        ${createInfoItem("配息 / 除息", formatNumber((stockCalendar.event_type_count?.dividend || 0) + (stockCalendar.event_type_count?.ex_dividend || 0)))}
-        ${createInfoItem("股東會", formatNumber(stockCalendar.event_type_count?.shareholders_meeting || 0))}
-        ${createInfoItem("法說會", formatNumber(stockCalendar.event_type_count?.investor_conference || 0))}
-        ${createInfoItem("資料來源", escapeHtml(pick(stockCalendar, ["source"], "Yahoo 股市行事曆")))}
-      </div>
-
-      <div class="chart-title-row calendar-chart-title">
-        <h3>近期事件</h3>
-        <span>今天：${escapeHtml(formatDate(today))}</span>
-      </div>
-      ${renderCalendarRows(stockCalendar.events, today)}
-
-      <p class="chart-note">個股行事曆用來掌握配息、除權息、股東會與法說會等時間點；遇到除權息或法說會前後，短線波動通常要多留意。</p>
-    </section>
-  `;
-}
-
-
-function renderRealtimeLevelRows(quote) {
-  const bids = Array.isArray(quote?.bid_levels) ? quote.bid_levels : [];
-  const asks = Array.isArray(quote?.ask_levels) ? quote.ask_levels : [];
-  const length = Math.max(bids.length, asks.length, 5);
-
-  if (length === 0) {
-    return `<div class="result-note">目前沒有五檔委買委賣資料。</div>`;
-  }
-
-  const rows = Array.from({ length }).map((_, index) => {
-    const bid = bids[index] || {};
-    const ask = asks[index] || {};
-
-    return `
-      <div class="quote-level-row">
-        <span class="quote-level-name">${index + 1}</span>
-        <span class="quote-bid-price">${formatPrice(bid.price)}</span>
-        <span>${formatLotsWithUnit(bid.volume_lots, "-")}</span>
-        <span>${formatPrice(ask.price)}</span>
-        <span class="quote-ask-volume">${formatLotsWithUnit(ask.volume_lots, "-")}</span>
-      </div>
-    `;
-  }).join("");
-
-  return `
-    <div class="quote-level-table" aria-label="五檔委買委賣">
-      <div class="quote-level-row quote-level-head">
-        <span>檔</span>
-        <span>委買價</span>
-        <span>委買量</span>
-        <span>委賣價</span>
-        <span>委賣量</span>
-      </div>
-      ${rows}
-    </div>
-  `;
-}
-
-function renderRealtimeQuotePanel(quote, fallback = {}) {
-  const realtimeQuote = quote || {};
-
-  if (!hasRealtimeQuote(realtimeQuote)) {
-    return `
-      <section class="detail-section realtime-quote-section quote-empty-section">
-        <h3>盤中即時行情</h3>
-        <div class="result-note error-note">
-          <strong>即時行情暫時讀不到：</strong>${escapeHtml(realtimeQuote.error || "資料來源目前沒有回傳個股即時行情。")}
-        </div>
-      </section>
-    `;
-  }
-
-  const currentPrice = pick(realtimeQuote, ["current_price"], pick(fallback, ["close_price", "closing_price", "close"], "-"));
-  const change = pick(realtimeQuote, ["price_change"], pick(fallback, ["price_change", "change", "change_price"], "-"));
-  const changeClass = getChangeClass(change);
-  const latestTime = [formatDate(pick(realtimeQuote, ["trade_date"], "")), pick(realtimeQuote, ["latest_time"], "")]
-    .filter((item) => item && item !== "-")
-    .join(" ");
-  const tradeSide = pick(realtimeQuote, ["trade_side"], "來源未提供");
-  const tradeSideClass = tradeSide.includes("外盤") ? "good" : tradeSide.includes("內盤") ? "bad" : "warn";
-
-  return `
-    <section class="detail-section realtime-quote-section">
-      <div class="realtime-title-row">
-        <div>
-          <p class="eyebrow">V1.2 第 2 項</p>
-          <h3>盤中即時行情</h3>
-        </div>
-        <span class="summary-date-chip">${escapeHtml(latestTime || "盤中資料")}</span>
-      </div>
-
-      <div class="realtime-hero-row">
-        <div>
-          <span class="realtime-label">現價</span>
-          <strong class="realtime-price ${changeClass}">${formatPrice(currentPrice)}</strong>
-        </div>
-        <div class="realtime-change-box ${changeClass}">
-          <span>漲跌</span>
-          <strong>${formatSignedPrice(change)}</strong>
-          <small>${formatRealtimePercent(pick(realtimeQuote, ["change_percent"], null))}</small>
-        </div>
-      </div>
-
-      <div class="info-grid realtime-info-grid">
-        ${createInfoItem("開盤", formatPrice(pick(realtimeQuote, ["open_price"], null)))}
-        ${createInfoItem("最高", formatPrice(pick(realtimeQuote, ["high_price"], null)))}
-        ${createInfoItem("最低", formatPrice(pick(realtimeQuote, ["low_price"], null)))}
-        ${createInfoItem("昨收", formatPrice(pick(realtimeQuote, ["previous_close"], null)))}
-        ${createInfoItem("成交量", formatLotsWithUnit(pick(realtimeQuote, ["volume_lots"], null)))}
-        ${createInfoItem("單筆量", formatLotsWithUnit(pick(realtimeQuote, ["latest_volume_lots"], null)))}
-        ${createInfoItem("成交金額", formatRealtimeAmount(pick(realtimeQuote, ["total_trade_amount"], null)))}
-        ${createInfoItem("資料來源", escapeHtml(pick(realtimeQuote, ["source"], "即時行情")))}
-      </div>
-
-      <div class="quote-side-panel">
-        <div class="quote-side-card ${tradeSideClass}">
-          <span>內外盤參考</span>
-          <strong>${escapeHtml(tradeSide)}</strong>
-          <small>${escapeHtml(pick(realtimeQuote, ["trade_side_note"], ""))}</small>
-        </div>
-        <div class="quote-side-card">
-          <span>內盤量</span>
-          <strong>${formatLotsWithUnit(pick(realtimeQuote, ["inner_volume_lots"], null))}</strong>
-        </div>
-        <div class="quote-side-card">
-          <span>外盤量</span>
-          <strong>${formatLotsWithUnit(pick(realtimeQuote, ["outer_volume_lots"], null))}</strong>
-        </div>
-      </div>
-
-      <div class="quote-level-block">
-        <div class="chart-title-row">
-          <h3>五檔委買委賣</h3>
-          <span>${escapeHtml(pick(realtimeQuote, ["symbol", "channel"], ""))}</span>
-        </div>
-        ${renderRealtimeLevelRows(realtimeQuote)}
-      </div>
-
-      <p class="chart-note">內盤 / 外盤總量若來源未提供，會先顯示最新成交價相對五檔委買委賣的參考方向。</p>
-    </section>
-  `;
-}
-
 function renderSearchResult(summaryData) {
   const code = pick(summaryData, ["stock_code", "code"], state.lastSearchCode || "-");
   const name = pick(summaryData, ["stock_name", "name"], "股票");
@@ -3019,19 +2032,10 @@ function renderSearchResult(summaryData) {
   const tradeDate = pick(summaryData, ["trade_date", "date"], "-");
   const score = pick(summaryData, ["chip_score", "total_score", "score"], "-");
   const scoreClass = getScoreClass(score);
-  const scoreText = isEtfRow(summaryData) ? "ETF 即時追蹤" : getScoreText(score);
-  const realtimeQuote = summaryData.realtime_quote || {};
-  const monthlyRevenue = summaryData.monthly_revenue || {};
-  const quarterlyEps = summaryData.quarterly_eps || {};
-  const stockCalendar = summaryData.stock_calendar || {};
-  const isEtf = isEtfRow(summaryData) || isEtfRow(realtimeQuote);
-  const hasRealtime = hasRealtimeQuote(realtimeQuote);
+  const scoreText = getScoreText(score);
   const closePrice = pick(summaryData, ["close_price", "closing_price", "close"], "-");
   const change = pick(summaryData, ["price_change", "change", "change_price"], "-");
-  const displayPrice = hasRealtime ? pick(realtimeQuote, ["current_price"], closePrice) : closePrice;
-  const displayChange = hasRealtime ? pick(realtimeQuote, ["price_change"], change) : change;
-  const changeClass = getChangeClass(displayChange);
-  const priceLabel = hasRealtime ? "現價" : "收盤";
+  const changeClass = getChangeClass(change);
   const foreignNet = pick(summaryData, ["foreign_net", "foreign_buy_sell", "foreign_net_buy", "foreign_net_buy_sell"], "-");
   const trustNet = pick(summaryData, ["investment_trust_net", "investment_trust_buy_sell", "trust_net_buy", "investment_trust_net_buy_sell"], "-");
   const dealerNet = pick(summaryData, ["dealer_net", "dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"], "-");
@@ -3047,26 +2051,18 @@ function renderSearchResult(summaryData) {
             <span class="stock-code">${escapeHtml(code)}</span>
             <span class="badge">${escapeHtml(market)}</span>
             <span class="badge">${escapeHtml(industry)}</span>
-            <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
           </div>
         </div>
-        ${renderScoreBox(summaryData, score, scoreClass)}
+        <div class="score-box ${scoreClass}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">籌碼分數</span>
+        </div>
       </div>
 
       <div class="quick-summary search-summary">
         <span class="summary-pill ${scoreClass}">${escapeHtml(scoreText)}</span>
-        <span class="summary-text">${priceLabel} ${formatDirectionalClosePrice(displayPrice, displayChange)}，漲跌 <strong class="${changeClass}">${formatSignedPrice(displayChange)}</strong></span>
+        <span class="summary-text">收盤 ${formatDirectionalClosePrice(closePrice, change)}，漲跌 <strong class="${changeClass}">${formatPrice(change)}</strong></span>
       </div>
-
-      ${renderRealtimeQuotePanel(realtimeQuote, summaryData)}
-
-      ${renderEtfInfoPanel(summaryData, realtimeQuote)}
-
-      ${isEtf ? "" : renderMonthlyRevenuePanel(monthlyRevenue)}
-
-      ${isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps)}
-
-      ${renderStockCalendarPanel(stockCalendar)}
 
       ${renderDetailSection("最新行情", [
         createInfoItem("資料日", formatDate(tradeDate)),
@@ -3079,14 +2075,14 @@ function renderSearchResult(summaryData) {
         createInfoItem("成交金額", formatNumber(pick(summaryData, ["transaction_amount"]))),
       ])}
 
-      ${isEtf ? "" : renderDetailSection("三大法人", [
+      ${renderDetailSection("三大法人", [
         createInfoItem("外資買超", formatNumber(foreignNet), getChangeClass(foreignNet)),
         createInfoItem("投信買超", formatNumber(trustNet), getChangeClass(trustNet)),
         createInfoItem("自營商", formatNumber(dealerNet), getChangeClass(dealerNet)),
         createInfoItem("法人合計", formatNumber(totalNet), getChangeClass(totalNet)),
       ])}
 
-      ${isEtf ? "" : renderDetailSection("籌碼狀態", [
+      ${renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(summaryData, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(summaryData, ["investment_trust_status", "trust_status"])),
         createStatusItem("自營商", pick(summaryData, ["dealer_status"])),
@@ -3095,7 +2091,7 @@ function renderSearchResult(summaryData) {
         createStatusItem("股價位置", pick(summaryData, ["price_position", "price_position_status"])),
       ])}
 
-      ${isEtf ? "" : renderDetailSection("分數拆解", [
+      ${renderDetailSection("分數拆解", [
         createInfoItem("外資分數", formatNumber(pick(summaryData, ["foreign_score"]))),
         createInfoItem("投信分數", formatNumber(pick(summaryData, ["investment_trust_score", "trust_score"]))),
         createInfoItem("自營商分數", formatNumber(pick(summaryData, ["dealer_score"]))),
@@ -3105,7 +2101,7 @@ function renderSearchResult(summaryData) {
       ])}
 
       <div class="result-note">
-        <strong>提醒：</strong>${isEtf ? "ETF 屬於指數型商品，這裡先以即時價格、成交量與漲跌幅作為觀察重點。" : "籌碼分數是觀察工具，不代表一定會上漲；建議搭配趨勢、成交量與風險控管一起看。"}
+        <strong>提醒：</strong>籌碼分數是觀察工具，不代表一定會上漲；建議搭配趨勢、成交量與風險控管一起看。
       </div>
 
       <div class="card-actions search-actions">
@@ -3128,74 +2124,6 @@ function normalizeStockCode(value) {
 
 function isValidStockCode(stockCode) {
   return /^[0-9A-Z]{2,10}$/.test(stockCode);
-}
-
-function isLikelyEtfCode(stockCode) {
-  return /^00\d{2,4}[A-Z]?$/.test(normalizeStockCode(stockCode));
-}
-
-function getSecurityType(row = {}) {
-  const securityType = String(pick(row, ["security_type", "instrument_type"], "")).toUpperCase();
-  const industry = String(pick(row, ["industry"], "")).toUpperCase();
-  const market = String(pick(row, ["market_type", "market"], "")).toUpperCase();
-  const code = pick(row, ["stock_code", "code"], "");
-
-  if (securityType === "ETF" || industry === "ETF" || market.includes("ETF") || isLikelyEtfCode(code)) {
-    return "ETF";
-  }
-
-  return "STOCK";
-}
-
-function isEtfRow(row = {}) {
-  return getSecurityType(row) === "ETF";
-}
-
-function getInstrumentBadge(row = {}) {
-  return isEtfRow(row) ? "ETF" : "股票";
-}
-
-function renderScoreBox(row, score, scoreClass) {
-  if (isEtfRow(row)) {
-    return `
-      <div class="score-box etf-score-box">
-        <span class="score-value">ETF</span>
-        <span class="score-label">指數型商品</span>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="score-box ${scoreClass}">
-      <span class="score-value">${formatNumber(score)}</span>
-      <span class="score-label">籌碼分數</span>
-    </div>
-  `;
-}
-
-function renderEtfInfoPanel(row = {}, realtimeQuote = {}) {
-  if (!isEtfRow(row) && !isEtfRow(realtimeQuote)) return "";
-
-  const quote = realtimeQuote && !realtimeQuote.error ? realtimeQuote : {};
-  const currentPrice = pick(quote, ["current_price", "close_price"], pick(row, ["close_price", "current_price"], "-"));
-  const change = pick(quote, ["price_change"], pick(row, ["price_change"], "-"));
-  const changePercent = pick(quote, ["change_percent"], pick(row, ["change_percent"], null));
-  const volumeLots = pick(quote, ["volume_lots"], pick(row, ["volume"], "-"));
-
-  return `
-    <section class="detail-section etf-info-panel">
-      <h3>ETF 資料</h3>
-      <div class="info-grid">
-        ${createInfoItem("商品類型", "ETF")}
-        ${createInfoItem("現價", formatPrice(currentPrice), getChangeClass(change))}
-        ${createInfoItem("漲跌", formatPrice(change), getChangeClass(change))}
-        ${createInfoItem("漲跌幅", changePercent === null || changePercent === undefined || changePercent === "-" ? "-" : formatPercent(changePercent), getChangeClass(changePercent))}
-        ${createInfoItem("成交量", `${formatNumber(volumeLots)} 張`)}
-        ${createInfoItem("資料來源", escapeHtml(pick(quote, ["source"], "即時行情")))}
-      </div>
-      <p class="panel-note">ETF 已支援查詢、加入自選、看明細與即時行情；公司營收與 EPS 屬個股資料，ETF 不適用。</p>
-    </section>
-  `;
 }
 
 function getRecentSearches() {
@@ -3234,13 +2162,13 @@ async function searchStock(codeFromButton = "") {
   const stockCode = normalizeStockCode(codeFromButton || stockSearchInput.value);
 
   if (!stockCode) {
-    showStatus("請先輸入股票或 ETF 代號，例如 2330、0050。", "error");
+    showStatus("請先輸入股票代號，例如 2330。", "error");
     stockSearchInput.focus();
     return;
   }
 
   if (!isValidStockCode(stockCode)) {
-    showStatus("股票或 ETF 代號格式不正確，請輸入 2 到 10 碼的數字或英文字。", "error");
+    showStatus("股票代號格式不正確，請輸入 2 到 10 碼的數字或英文字。", "error");
     stockSearchInput.focus();
     return;
   }
@@ -3261,36 +2189,12 @@ async function searchStock(codeFromButton = "") {
   `;
 
   try {
-    const [summaryResult, realtimeResult, revenueResult, epsResult, calendarResult] = await Promise.allSettled([
-      fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`),
-      fetchJson(`/stock/${encodeURIComponent(stockCode)}/realtime`),
-      fetchJson(`/stock/${encodeURIComponent(stockCode)}/revenue?limit=24`),
-      fetchJson(`/stock/${encodeURIComponent(stockCode)}/eps?limit=20`),
-      fetchJson(`/stock/${encodeURIComponent(stockCode)}/calendar?limit=40`),
-    ]);
-
-    if (summaryResult.status !== "fulfilled") {
-      throw summaryResult.reason;
-    }
-
-    const summaryData = getFirstArrayItem(summaryResult.value);
+    const result = await fetchJson(`/stock/${encodeURIComponent(stockCode)}/summary`);
+    const summaryData = getFirstArrayItem(result);
 
     if (!summaryData || !pick(summaryData, ["stock_code", "code"], "")) {
-      throw new Error("查不到這檔股票或 ETF，請確認代號是否正確。");
+      throw new Error("查不到這檔股票，請確認股票代號是否正確。");
     }
-
-    summaryData.realtime_quote = realtimeResult.status === "fulfilled"
-      ? realtimeResult.value
-      : { error: realtimeResult.reason?.message || "即時行情讀取失敗" };
-    summaryData.monthly_revenue = revenueResult.status === "fulfilled"
-      ? revenueResult.value
-      : { error: revenueResult.reason?.message || "每月營收讀取失敗" };
-    summaryData.quarterly_eps = epsResult.status === "fulfilled"
-      ? epsResult.value
-      : { error: epsResult.reason?.message || "EPS 讀取失敗" };
-    summaryData.stock_calendar = calendarResult.status === "fulfilled"
-      ? calendarResult.value
-      : { error: calendarResult.reason?.message || "個股行事曆讀取失敗" };
 
     state.lastSearchCode = stockCode;
     state.lastSearchData = summaryData;
@@ -3303,11 +2207,11 @@ async function searchStock(codeFromButton = "") {
       <article class="search-intro-card error-card">
         <div class="intro-icon">⚠️</div>
         <h3>查不到這檔股票</h3>
-        <p>${isNotFound ? "請確認股票或 ETF 代號是否正確。ETF 會在首次查詢時自動建立基本資料。" : escapeHtml(error.message)}</p>
+        <p>${isNotFound ? "請確認股票代號是否正確，或確認資料庫是否已匯入這檔股票。" : escapeHtml(error.message)}</p>
         <button class="retry-btn" type="button" data-focus-search="true">重新輸入</button>
       </article>
     `;
-    showStatus(isNotFound ? "查不到這檔股票或 ETF，請確認代號是否正確。" : escapeHtml(error.message), "error");
+    showStatus(isNotFound ? "查不到這檔股票，請確認股票代號是否正確。" : escapeHtml(error.message), "error");
   } finally {
     setSearchLoading(false);
   }
@@ -3330,16 +2234,6 @@ async function loadList() {
     } else {
       renderSearchIntro();
     }
-    return;
-  }
-
-  if (state.page === "marketIndex") {
-    await loadMarketIndexPage();
-    return;
-  }
-
-  if (state.page === "institutionalOverview") {
-    await loadInstitutionalOverviewPage();
     return;
   }
 
@@ -3425,37 +2319,34 @@ async function openDetail(stockCode) {
   detailContent.innerHTML = `<div class="status-box">股票明細讀取中...</div>`;
 
   try {
-    const [summary, realtime, revenue, eps, calendar, prices, trades, scores, holders] = await Promise.allSettled([
+    const [summary, prices, trades, scores, holders, calendar, etfProfile] = await Promise.allSettled([
       fetchJson(`/stock/${stockCode}/summary`),
-      fetchJson(`/stock/${stockCode}/realtime`),
-      fetchJson(`/stock/${stockCode}/revenue?limit=24`),
-      fetchJson(`/stock/${stockCode}/eps?limit=20`),
-      fetchJson(`/stock/${stockCode}/calendar?limit=40`),
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
       fetchJson(`/major-holders/${stockCode}?limit=12`),
+      fetchJson(`/calendar-events/${stockCode}?limit=30`),
+      fetchJson(`/etf-profiles/${stockCode}`),
     ]);
 
     const summaryData = summary.status === "fulfilled" ? getFirstArrayItem(summary.value) : {};
-    const realtimeQuote = realtime.status === "fulfilled" ? realtime.value : { error: realtime.reason?.message || "即時行情讀取失敗" };
-    const monthlyRevenue = revenue.status === "fulfilled" ? revenue.value : { error: revenue.reason?.message || "每月營收讀取失敗" };
-    const quarterlyEps = eps.status === "fulfilled" ? eps.value : { error: eps.reason?.message || "EPS 讀取失敗" };
-    const stockCalendar = calendar.status === "fulfilled" ? calendar.value : { error: calendar.reason?.message || "個股行事曆讀取失敗" };
     const priceRows = prices.status === "fulfilled" && Array.isArray(prices.value) ? prices.value : [];
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
     const scoreRows = scores.status === "fulfilled" && Array.isArray(scores.value) ? scores.value : [];
     const holderRows = holders.status === "fulfilled" && Array.isArray(holders.value) ? holders.value : [];
+    const calendarRows = calendar.status === "fulfilled" && Array.isArray(calendar.value) ? calendar.value : [];
+    const etfProfileData = etfProfile.status === "fulfilled" ? getFirstArrayItem(etfProfile.value) : {};
 
     const latestPrice = priceRows[0] || summaryData || {};
     const latestTrade = tradeRows[0] || summaryData || {};
     const latestScore = scoreRows[0] || summaryData || {};
 
     const stockName = pick(summaryData, ["stock_name", "name"], pick(latestScore, ["stock_name", "name"], "股票"));
-    const isEtf = isEtfRow(summaryData) || isEtfRow(realtimeQuote);
     const market = pick(summaryData, ["market_type", "market"], pick(latestScore, ["market_type", "market"]));
     const industry = pick(summaryData, ["industry"], "-");
+    const securityType = pick(summaryData, ["security_type"], "STOCK");
+    const securityTypeLabel = String(securityType).toUpperCase() === "ETF" ? "ETF" : "個股";
     const totalScore = pick(latestScore, ["total_score", "chip_score", "score"], pick(summaryData, ["total_score", "chip_score", "score"], "-"));
     const closePrice = pick(latestPrice, ["close_price", "closing_price", "close"], pick(summaryData, ["close_price", "closing_price", "close"], "-"));
     const change = pick(latestPrice, ["price_change", "change", "change_price"], pick(summaryData, ["price_change", "change", "change_price"], "-"));
@@ -3474,40 +2365,40 @@ async function openDetail(stockCode) {
             <div class="detail-meta-row">
               <span class="stock-code">${escapeHtml(stockCode)}</span>
               <span class="badge">${escapeHtml(market)}</span>
+              <span class="badge">${escapeHtml(securityTypeLabel)}</span>
               <span class="badge">${escapeHtml(industry)}</span>
-              <span class="badge etf-badge">${escapeHtml(getInstrumentBadge(summaryData))}</span>
             </div>
           </div>
-          ${renderScoreBox(summaryData, totalScore, getScoreClass(totalScore))}
+          <div class="score-box ${getScoreClass(totalScore)}">
+            <span class="score-value">${formatNumber(totalScore)}</span>
+            <span class="score-label">籌碼分數</span>
+          </div>
         </section>
       `,
-      renderRealtimeQuotePanel(realtimeQuote, summaryData),
-      renderEtfInfoPanel(summaryData, realtimeQuote),
-      isEtf ? "" : renderMonthlyRevenuePanel(monthlyRevenue),
-      isEtf ? "" : renderQuarterlyEpsPanel(quarterlyEps),
-      renderStockCalendarPanel(stockCalendar),
+      renderEtfProfileDetailSection(etfProfileData, summaryData),
+      renderCalendarDetailSection(calendarRows),
       renderDetailSection("最新行情", [
         createInfoItem("日期", formatDate(pick(latestPrice, ["trade_date", "date"]))),
-        createInfoItem(isEtf ? "現價" : "收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
+        createInfoItem("收盤價", formatPrice(closePrice), getPriceDirectionClass(change, closePrice)),
         createInfoItem("漲跌", formatPrice(change), getChangeClass(change)),
         createInfoItem("成交量", formatNumber(pick(latestPrice, ["trade_volume", "volume"]))),
       ]),
-      isEtf ? "" : renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
-      isEtf ? "" : renderTechnicalCharts(enrichedPriceRows),
-      isEtf ? "" : renderDetailSection("三大法人", [
+      renderDetailSection("均線平均價格", renderMovingAverageItems(enrichedPriceRows)),
+      renderTechnicalCharts(enrichedPriceRows),
+      renderDetailSection("三大法人", [
         createInfoItem("外資", formatNumber(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"])), getChangeClass(pick(latestTrade, ["foreign_buy_sell", "foreign_net", "foreign_net_buy", "foreign_net_buy_sell"]))),
         createInfoItem("投信", formatNumber(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"])), getChangeClass(pick(latestTrade, ["investment_trust_buy_sell", "investment_trust_net", "trust_net_buy", "investment_trust_net_buy_sell"]))),
         createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
-      isEtf ? "" : renderMajorHolderDetailSection(holderRows),
-      isEtf ? "" : renderDetailSection("籌碼狀態", [
+      renderMajorHolderDetailSection(holderRows),
+      renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),
         createStatusItem("成交量", pick(latestScore, ["volume_status"])),
         createStatusItem("股價位置", pick(latestScore, ["price_position_status", "price_position"])),
       ]),
-      isEtf ? "" : renderDetailSection("分數拆解", [
+      renderDetailSection("分數拆解", [
         createInfoItem("外資分數", formatNumber(pick(latestScore, ["foreign_score"]))),
         createInfoItem("投信分數", formatNumber(pick(latestScore, ["investment_trust_score", "trust_score"]))),
         createInfoItem("自營商分數", formatNumber(pick(latestScore, ["dealer_score"]))),
