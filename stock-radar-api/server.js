@@ -292,7 +292,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.4-hotfix1",
+    version: "stock-radar-api-v1.2.5",
   });
 });
 
@@ -300,7 +300,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.4-hotfix1",
+    version: "stock-radar-api-v1.2.5",
     time: new Date().toISOString(),
   });
 });
@@ -2311,6 +2311,108 @@ app.get("/calendar-events/:stockCode", async (req, res) => {
 });
 
 // ==============================
+// ETF 主檔列表
+// GET /etf-profiles
+// ==============================
+app.get("/etf-profiles", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 50, 500);
+    const market = parseMarket(req.query.market);
+    const keyword = String(req.query.keyword || "").trim();
+
+    const conditions = [];
+    const params = [];
+
+    if (market) {
+      conditions.push("e.market_type = ?");
+      params.push(market);
+    }
+
+    if (keyword) {
+      conditions.push("(e.stock_code LIKE ? OR e.stock_name LIKE ? OR e.issuer LIKE ? OR e.underlying_index LIKE ?)");
+      const keywordLike = `%${keyword}%`;
+      params.push(keywordLike, keywordLike, keywordLike, keywordLike);
+    }
+
+    params.push(limit);
+
+    const rows = await query(
+      `
+      SELECT
+        e.stock_code,
+        e.stock_name,
+        e.market_type,
+        e.fund_type,
+        e.underlying_index,
+        e.issuer,
+        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
+        e.source,
+        e.source_url,
+        DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(e.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM etf_profiles e
+      ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
+      ORDER BY
+        CASE e.market_type WHEN '上市' THEN 0 WHEN '上櫃' THEN 1 ELSE 2 END,
+        e.stock_code ASC
+      LIMIT ?
+      `,
+      params,
+    );
+
+    res.json({
+      success: true,
+      count: rows.length,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢 ETF 主檔列表失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢 ETF 主檔列表失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// ETF 主檔完整度統計
+// GET /etf-profiles/stats
+// ==============================
+app.get("/etf-profiles/stats", async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN market_type = '上市' THEN 1 ELSE 0 END) AS listed_count,
+        SUM(CASE WHEN market_type = '上櫃' THEN 1 ELSE 0 END) AS otc_count,
+        SUM(CASE WHEN source <> 'stocks table sync' THEN 1 ELSE 0 END) AS official_count,
+        SUM(CASE WHEN issuer IS NOT NULL AND issuer <> '' THEN 1 ELSE 0 END) AS issuer_count,
+        SUM(CASE WHEN underlying_index IS NOT NULL AND underlying_index <> '' THEN 1 ELSE 0 END) AS index_count,
+        SUM(CASE WHEN listing_date IS NOT NULL THEN 1 ELSE 0 END) AS listing_date_count,
+        MAX(updated_at) AS latest_updated_at
+      FROM etf_profiles
+      `,
+    );
+
+    res.json({
+      success: true,
+      data: convertBigIntToString(rows[0] || {}),
+    });
+  } catch (error) {
+    console.error("查詢 ETF 主檔統計失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢 ETF 主檔統計失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
 // ETF 主檔資料
 // GET /etf-profiles/:stockCode
 // ==============================
@@ -2328,19 +2430,28 @@ app.get("/etf-profiles/:stockCode", async (req, res) => {
     const rows = await query(
       `
       SELECT
-        stock_code,
-        stock_name,
-        market_type,
-        fund_type,
-        underlying_index,
-        issuer,
-        DATE_FORMAT(listing_date, '%Y-%m-%d') AS listing_date,
-        source,
-        source_url,
-        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-      FROM etf_profiles
-      WHERE stock_code = ?
+        COALESCE(e.stock_code, s.stock_code) AS stock_code,
+        COALESCE(e.stock_name, s.stock_name) AS stock_name,
+        COALESCE(e.market_type, s.market_type) AS market_type,
+        e.fund_type,
+        e.underlying_index,
+        e.issuer,
+        DATE_FORMAT(e.listing_date, '%Y-%m-%d') AS listing_date,
+        e.source,
+        e.source_url,
+        s.security_type,
+        CASE
+          WHEN e.stock_code IS NULL THEN 0
+          WHEN e.issuer IS NULL OR e.underlying_index IS NULL OR e.listing_date IS NULL THEN 0
+          ELSE 1
+        END AS is_complete,
+        DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(e.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM stocks s
+      LEFT JOIN etf_profiles e
+        ON s.stock_code = e.stock_code
+      WHERE s.stock_code = ?
+        AND (s.security_type = 'ETF' OR s.industry = 'ETF' OR s.stock_code REGEXP '^00[0-9A-Z]+')
       LIMIT 1
       `,
       [stockCode],
@@ -2355,7 +2466,7 @@ app.get("/etf-profiles/:stockCode", async (req, res) => {
 
     res.json({
       success: true,
-      data: rows[0],
+      data: convertBigIntToString(rows[0]),
     });
   } catch (error) {
     console.error("查詢 ETF 主檔失敗：", error);
@@ -2811,7 +2922,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.4-hotfix1",
+    version: "stock-radar-api-v1.2.5",
   });
 });
 

@@ -188,6 +188,29 @@ async function ensureStocksSecurityType() {
   console.log("✅ stocks.security_type - 已新增");
 }
 
+async function ensureEtfProfileColumns() {
+  const requiredColumns = [
+    ["fund_type", "VARCHAR(50) DEFAULT NULL COMMENT 'ETF 類型'"],
+    ["underlying_index", "VARCHAR(100) DEFAULT NULL COMMENT '追蹤指數'"],
+    ["issuer", "VARCHAR(80) DEFAULT NULL COMMENT '投信/發行人'"],
+    ["listing_date", "DATE DEFAULT NULL COMMENT '掛牌日期'"],
+    ["source", "VARCHAR(100) NOT NULL DEFAULT 'OFFICIAL' COMMENT '資料來源'"],
+    ["source_url", "VARCHAR(500) DEFAULT NULL COMMENT '來源網址'"],
+  ];
+
+  for (const [columnName, definition] of requiredColumns) {
+    const exists = await columnExists("etf_profiles", columnName);
+
+    if (exists) {
+      console.log(`✅ etf_profiles.${columnName} - 已存在`);
+      continue;
+    }
+
+    await query(`ALTER TABLE etf_profiles ADD COLUMN ${columnName} ${definition}`);
+    console.log(`✅ etf_profiles.${columnName} - 已新增`);
+  }
+}
+
 async function main() {
   console.log("====================================");
   console.log("Stock Radar V1.2 official setup");
@@ -199,6 +222,7 @@ async function main() {
   }
 
   await ensureStocksSecurityType();
+  await ensureEtfProfileColumns();
 
   console.log("====================================");
   console.log("V1.2 official 資料表檢查完成");

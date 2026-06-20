@@ -103,6 +103,13 @@ CREATE TABLE IF NOT EXISTS etf_profiles (
   KEY idx_etf_profiles_market (`market_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ETF 主檔資料表';
 
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS fund_type varchar(50) DEFAULT NULL COMMENT 'ETF 類型';
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS underlying_index varchar(100) DEFAULT NULL COMMENT '追蹤指數';
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS issuer varchar(80) DEFAULT NULL COMMENT '投信/發行人';
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS listing_date date DEFAULT NULL COMMENT '掛牌日期';
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS source varchar(100) NOT NULL DEFAULT 'OFFICIAL' COMMENT '資料來源';
+ALTER TABLE etf_profiles ADD COLUMN IF NOT EXISTS source_url varchar(500) DEFAULT NULL COMMENT '來源網址';
+
 CREATE TABLE IF NOT EXISTS institutional_amount_summaries (
   id bigint(20) NOT NULL AUTO_INCREMENT,
   trade_date date NOT NULL COMMENT '交易日期',
