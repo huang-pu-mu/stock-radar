@@ -303,6 +303,7 @@ function buildListPath() {
 
   if (state.page === "majorHolder") {
     params.set("limit", "100");
+    params.set("sort", "trend");
     if (state.market) params.set("market", state.market);
     return `/radar/major-holder?${params.toString()}`;
   }
@@ -404,8 +405,8 @@ function updatePageText() {
 
   if (state.page === "majorHolder") {
     pageTitle.textContent = "主力籌碼分析";
-    pageDesc.textContent = `${marketText}用 TDCC 集保股權分散資料，看 400 張以上大戶持股是否增加。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>大戶比重上升、散戶比重下降，代表籌碼可能更集中；這是每週資料，不是每日即時資料。</span>`;
+    pageDesc.textContent = `${marketText}用 TDCC 集保股權分散資料，看 400 張以上大戶、千張大戶與散戶比重變化。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>優先看集中度分數、4 週大戶比重變化、散戶比重是否下降；這是每週資料，不是每日即時資料。</span>`;
     return;
   }
 
@@ -1954,6 +1955,106 @@ function getMajorHolderStrengthClass(score, ratioChange) {
   return "score-low";
 }
 
+function getMajorHolderTrendClass(direction, ratioChange) {
+  const changeValue = toNumber(ratioChange);
+  const text = String(direction || "").toLowerCase();
+
+  if (text === "up" || (changeValue !== null && changeValue >= 1)) return "score-high";
+  if (text === "down" || (changeValue !== null && changeValue <= -1)) return "score-low";
+  if (text === "mixed") return "score-mid";
+  return "score-mid";
+}
+
+function renderMajorHolderConcentrationMeter(score) {
+  const value = Math.max(0, Math.min(toNumber(score) ?? 0, 100));
+  const strengthClass = value >= 70 ? "score-high" : value >= 45 ? "score-mid" : "score-low";
+
+  return `
+    <div class="major-concentration-meter ${strengthClass}">
+      <div class="major-meter-head">
+        <span>籌碼集中度</span>
+        <strong>${formatNumber(value)}</strong>
+      </div>
+      <div class="major-meter-track">
+        <span style="width:${value}%"></span>
+      </div>
+    </div>
+  `;
+}
+
+function renderMajorHolderMiniTrendChart(rows) {
+  const chartRows = Array.isArray(rows)
+    ? rows.filter((row) => toNumber(pick(row, ["large_holder_ratio"], null)) !== null).slice().reverse().slice(-12)
+    : [];
+
+  if (chartRows.length < 2) {
+    return `<div class="chart-empty">大戶趨勢資料不足。</div>`;
+  }
+
+  const width = 640;
+  const height = 170;
+  const paddingX = 34;
+  const paddingY = 24;
+  const values = chartRows.map((row) => toNumber(pick(row, ["large_holder_ratio"], 0)) || 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = chartRows.map((row, index) => {
+    const x = paddingX + (index / Math.max(chartRows.length - 1, 1)) * (width - paddingX * 2);
+    const value = toNumber(pick(row, ["large_holder_ratio"], 0)) || 0;
+    const y = height - paddingY - ((value - min) / range) * (height - paddingY * 2);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+
+  return `
+    <div class="major-trend-chart-wrap">
+      <svg class="major-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="大戶比重趨勢圖">
+        <line class="chart-grid-line" x1="${paddingX}" y1="${paddingY}" x2="${width - paddingX}" y2="${paddingY}" />
+        <line class="chart-grid-line" x1="${paddingX}" y1="${height - paddingY}" x2="${width - paddingX}" y2="${height - paddingY}" />
+        <polyline class="major-trend-line" points="${points}" fill="none" />
+        ${chartRows.map((row, index) => {
+          const [x, y] = points.split(" ")[index].split(",");
+          return `<circle class="major-trend-dot" cx="${x}" cy="${y}" r="4"><title>${formatDate(pick(row, ["data_date"]))}：${formatPercent(pick(row, ["large_holder_ratio"]))}</title></circle>`;
+        }).join("")}
+        <text class="chart-axis-text" x="${paddingX}" y="${height - 6}">${formatDate(pick(chartRows[0], ["data_date"]))}</text>
+        <text class="chart-axis-text" x="${width - paddingX}" y="${height - 6}" text-anchor="end">${formatDate(pick(chartRows[chartRows.length - 1], ["data_date"]))}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function renderMajorHolderTrendSummary(trend, latest) {
+  const effectiveTrend = trend || {};
+  const ratio4w = pick(effectiveTrend, ["large_holder_ratio_change_4w"], pick(latest, ["large_holder_ratio_change"], "-"));
+  const ratio12w = pick(effectiveTrend, ["large_holder_ratio_change_12w"], "-");
+  const small4w = pick(effectiveTrend, ["small_holder_ratio_change_4w"], "-");
+  const share4w = pick(effectiveTrend, ["large_holder_share_change_lots_4w"], "-");
+  const trendStatus = pick(effectiveTrend, ["major_holder_trend_status"], pick(latest, ["major_holder_status"], "籌碼持平觀察"));
+  const trendClass = getMajorHolderTrendClass(pick(effectiveTrend, ["trend_direction"]), ratio4w);
+  const concentrationScore = pick(effectiveTrend, ["concentration_score"], pick(latest, ["concentration_score"], "-"));
+
+  return `
+    <section class="detail-section major-trend-summary-section">
+      <h3>主力趨勢總覽</h3>
+      <div class="major-trend-summary-card">
+        <div>
+          <span class="summary-pill ${trendClass}">${escapeHtml(trendStatus)}</span>
+          <p>4 週大戶比重 ${formatSignedPercent(ratio4w)}，12 週大戶比重 ${formatSignedPercent(ratio12w)}；散戶 4 週變化 ${formatSignedPercent(small4w)}。</p>
+        </div>
+        ${renderMajorHolderConcentrationMeter(concentrationScore)}
+      </div>
+      <div class="info-grid major-holder-grid">
+        ${createInfoItem("4週大戶比重", formatSignedPercent(ratio4w), getChangeClass(ratio4w))}
+        ${createInfoItem("12週大戶比重", formatSignedPercent(ratio12w), getChangeClass(ratio12w))}
+        ${createInfoItem("4週大戶張數", `${formatSignedLots(share4w)} 張`, getChangeClass(share4w))}
+        ${createInfoItem("4週散戶比重", formatSignedPercent(small4w), getChangeClass(-1 * (toNumber(small4w) ?? 0)))}
+        ${createInfoItem("連續增加", `${formatNumber(pick(effectiveTrend, ["trend_weeks_up"], 0))} 週`)}
+        ${createInfoItem("連續減少", `${formatNumber(pick(effectiveTrend, ["trend_weeks_down"], 0))} 週`)}
+      </div>
+    </section>
+  `;
+}
+
 function renderMajorHolderTrend(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return `<div class="major-holder-history empty">尚無大戶歷史資料。</div>`;
@@ -1980,7 +2081,7 @@ function renderMajorHolderTrend(rows) {
   `;
 }
 
-function renderMajorHolderDetailSection(rows) {
+function renderMajorHolderDetailSection(rows, trend = {}) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return `
       <section class="detail-section">
@@ -1993,19 +2094,28 @@ function renderMajorHolderDetailSection(rows) {
   const latest = rows[0];
   const score = pick(latest, ["major_holder_score", "big_holder_score"], "-");
   const ratioChange = pick(latest, ["large_holder_ratio_change"], "-");
+  const concentrationScore = pick(trend, ["concentration_score"], pick(latest, ["concentration_score"], "-"));
 
   return [
+    renderMajorHolderTrendSummary(trend, latest),
     renderDetailSection("主力 / 大戶籌碼", [
-      createStatusItem("狀態", pick(latest, ["major_holder_status", "big_holder_status"])),
+      createStatusItem("本週狀態", pick(latest, ["major_holder_status", "big_holder_status"])),
       createInfoItem("大戶分數", formatNumber(score), getMajorHolderStrengthClass(score, ratioChange)),
+      createInfoItem("集中度分數", formatNumber(concentrationScore), getScoreClass(concentrationScore)),
       createInfoItem("大戶比重", formatPercent(pick(latest, ["large_holder_ratio"])), getChangeClass(ratioChange)),
-      createInfoItem("比重變化", formatSignedPercent(ratioChange), getChangeClass(ratioChange)),
+      createInfoItem("本週比重變化", formatSignedPercent(ratioChange), getChangeClass(ratioChange)),
       createInfoItem("大戶人數", formatNumber(pick(latest, ["large_holder_count"]))),
       createInfoItem("大戶張數", `${formatNumber(pick(latest, ["large_holder_share_count_lots"]))} 張`),
       createInfoItem("散戶比重", formatPercent(pick(latest, ["small_holder_ratio"])), getChangeClass(pick(latest, ["small_holder_ratio_change"]))),
       createInfoItem("千張大戶", formatPercent(pick(latest, ["thousand_lot_ratio"]))),
       createInfoItem("資料日", formatDate(pick(latest, ["data_date"]))),
     ]),
+    `
+      <section class="detail-section">
+        <h3>大戶比重趨勢圖</h3>
+        ${renderMajorHolderMiniTrendChart(rows)}
+      </section>
+    `,
     `
       <section class="detail-section">
         <h3>大戶週變化</h3>
@@ -2026,24 +2136,32 @@ function renderMajorHolderCard(row, index) {
   const status = pick(row, ["major_holder_status", "big_holder_status"], "大戶資料累積中");
   const largeRatio = pick(row, ["large_holder_ratio"], "-");
   const largeRatioChange = pick(row, ["large_holder_ratio_change"], "-");
+  const largeRatioChange4w = pick(row, ["large_holder_ratio_change_4w"], largeRatioChange);
+  const largeRatioChange12w = pick(row, ["large_holder_ratio_change_12w"], "-");
   const largeShareLots = pick(row, ["large_holder_share_count_lots"], "-");
   const largeShareChangeLots = pick(row, ["large_holder_share_change_lots"], "-");
+  const largeShareChangeLots4w = pick(row, ["large_holder_share_change_lots_4w"], largeShareChangeLots);
   const smallRatio = pick(row, ["small_holder_ratio"], "-");
   const smallRatioChange = pick(row, ["small_holder_ratio_change"], "-");
+  const smallRatioChange4w = pick(row, ["small_holder_ratio_change_4w"], smallRatioChange);
   const thousandRatio = pick(row, ["thousand_lot_ratio"], "-");
   const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const chipScore = pick(row, ["chip_score", "total_score", "score"], "-");
-  const strengthClass = getMajorHolderStrengthClass(majorScore, largeRatioChange);
+  const concentrationScore = pick(row, ["concentration_score"], majorScore);
+  const trendStatus = pick(row, ["major_holder_trend_status"], status);
+  const strengthClass = getMajorHolderTrendClass(pick(row, ["trend_direction"]), largeRatioChange4w);
 
   const items = [
-    createInfoItem("大戶比重", formatPercent(largeRatio), getChangeClass(largeRatioChange)),
-    createInfoItem("比重變化", formatSignedPercent(largeRatioChange), getChangeClass(largeRatioChange)),
+    createInfoItem("集中度分數", formatNumber(concentrationScore), getScoreClass(concentrationScore)),
+    createInfoItem("4週大戶比重", formatSignedPercent(largeRatioChange4w), getChangeClass(largeRatioChange4w)),
+    createInfoItem("12週大戶比重", formatSignedPercent(largeRatioChange12w), getChangeClass(largeRatioChange12w)),
+    createInfoItem("大戶比重", formatPercent(largeRatio), getChangeClass(largeRatioChange4w)),
     createInfoItem("大戶張數", `${formatNumber(largeShareLots)} 張`),
-    createInfoItem("張數變化", `${formatSignedLots(largeShareChangeLots)} 張`, getChangeClass(largeShareChangeLots)),
-    createInfoItem("大戶人數", formatNumber(pick(row, ["large_holder_count"]))),
-    createInfoItem("散戶比重", formatPercent(smallRatio), getChangeClass(smallRatioChange)),
+    createInfoItem("4週張數變化", `${formatSignedLots(largeShareChangeLots4w)} 張`, getChangeClass(largeShareChangeLots4w)),
+    createInfoItem("散戶比重", formatPercent(smallRatio), getChangeClass(smallRatioChange4w)),
     createInfoItem("千張大戶", formatPercent(thousandRatio)),
+    createInfoItem("連續增加", `${formatNumber(pick(row, ["trend_weeks_up"], 0))} 週`),
     createInfoItem("籌碼分數", formatNumber(chipScore), getScoreClass(chipScore)),
   ].join("");
 
@@ -2060,14 +2178,14 @@ function renderMajorHolderCard(row, index) {
           </div>
         </div>
         <div class="score-box ${strengthClass}">
-          <span class="score-value">${formatNumber(majorScore)}</span>
-          <span class="score-label">大戶分數</span>
+          <span class="score-value">${formatNumber(concentrationScore)}</span>
+          <span class="score-label">集中度</span>
         </div>
       </div>
 
       <div class="quick-summary">
-        <span class="summary-pill ${strengthClass}">${escapeHtml(status)}</span>
-        <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange)}">${formatPercent(largeRatio)}</strong>，本週變化 <strong class="${getChangeClass(largeRatioChange)}">${formatSignedPercent(largeRatioChange)}</strong></span>
+        <span class="summary-pill ${strengthClass}">${escapeHtml(trendStatus)}</span>
+        <span class="summary-text">400張以上大戶比重 <strong class="${getChangeClass(largeRatioChange4w)}">${formatPercent(largeRatio)}</strong>，4週變化 <strong class="${getChangeClass(largeRatioChange4w)}">${formatSignedPercent(largeRatioChange4w)}</strong></span>
       </div>
 
       <div class="quick-summary secondary-summary price-summary">
@@ -2727,7 +2845,7 @@ async function openDetail(stockCode) {
       fetchJson(`/prices/${stockCode}?limit=260`),
       fetchJson(`/institutional-trades/${stockCode}`),
       fetchJson(`/radar-scores/${stockCode}`),
-      fetchJson(`/major-holders/${stockCode}?limit=12`),
+      fetchJson(`/major-holders/${stockCode}/analysis?limit=24`),
       fetchJson(`/calendar-events/${stockCode}?limit=30`),
       fetchJson(`/etf-profiles/${stockCode}`),
       fetchJson(`/quote/${stockCode}`),
@@ -2739,7 +2857,13 @@ async function openDetail(stockCode) {
     const enrichedPriceRows = enrichPriceRows(priceRows.length > 0 ? priceRows : [summaryData]);
     const tradeRows = trades.status === "fulfilled" && Array.isArray(trades.value) ? trades.value : [];
     const scoreRows = scores.status === "fulfilled" && Array.isArray(scores.value) ? scores.value : [];
-    const holderRows = holders.status === "fulfilled" && Array.isArray(holders.value) ? holders.value : [];
+    const holderAnalysisData = holders.status === "fulfilled" ? holders.value : null;
+    const holderRows = Array.isArray(holderAnalysisData)
+      ? holderAnalysisData
+      : Array.isArray(holderAnalysisData?.history)
+        ? holderAnalysisData.history
+        : [];
+    const holderTrend = holderAnalysisData && !Array.isArray(holderAnalysisData) ? holderAnalysisData.trend || {} : {};
     const calendarRows = calendar.status === "fulfilled" && Array.isArray(calendar.value) ? calendar.value : [];
     const etfProfileData = etfProfile.status === "fulfilled" ? getFirstArrayItem(etfProfile.value) : {};
     const quoteData = quote.status === "fulfilled" ? getFirstArrayItem(quote.value) : {};
@@ -2799,7 +2923,7 @@ async function openDetail(stockCode) {
         createInfoItem("自營商", formatNumber(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"])), getChangeClass(pick(latestTrade, ["dealer_buy_sell", "dealer_net", "dealer_net_buy", "dealer_net_buy_sell"]))),
         createInfoItem("日期", formatDate(pick(latestTrade, ["trade_date", "date"]))),
       ]),
-      renderMajorHolderDetailSection(holderRows),
+      renderMajorHolderDetailSection(holderRows, holderTrend),
       renderDetailSection("籌碼狀態", [
         createStatusItem("外資", pick(latestScore, ["foreign_status", "foreign_investor_status"])),
         createStatusItem("投信", pick(latestScore, ["investment_trust_status", "trust_status"])),

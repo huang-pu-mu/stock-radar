@@ -274,13 +274,152 @@ function getMajorHolderStatus(row) {
   return "大戶持股穩定";
 }
 
+function clampNumber(value, min, max) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return min;
+  return Math.min(Math.max(numberValue, min), max);
+}
+
+function roundNumber(value, digits = 4) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return 0;
+  const base = 10 ** digits;
+  return Math.round(numberValue * base) / base;
+}
+
+function sharesDiffToLotsString(currentValue, baseValue) {
+  return sharesToLotsString(toBigIntValue(currentValue) - toBigIntValue(baseValue));
+}
+
+function calculateConcentrationScoreFromTrend(latest, trend = {}) {
+  const largeRatio = toPlainNumber(latest.large_holder_ratio);
+  const thousandRatio = toPlainNumber(latest.thousand_lot_ratio);
+  const smallRatio = toPlainNumber(latest.small_holder_ratio);
+  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
+  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
+  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
+  const upWeeks = toPlainNumber(trend.trend_weeks_up);
+
+  let score = 0;
+  score += clampNumber(largeRatio, 0, 75) * 0.52;
+  score += clampNumber(thousandRatio, 0, 45) * 0.28;
+  score += clampNumber(25 - smallRatio, -10, 25) * 0.35;
+  score += clampNumber(ratioChange4w * 7, -14, 21);
+  score += clampNumber(ratioChange12w * 3, -12, 18);
+  if (smallRatioChange4w < 0 && ratioChange4w > 0) score += 8;
+  if (upWeeks >= 3) score += 6;
+
+  return Math.round(clampNumber(score, 0, 100));
+}
+
+function getMajorHolderTrendStatus(trend = {}) {
+  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
+  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
+  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
+  const shareChange4wLots = toPlainNumber(trend.large_holder_share_change_lots_4w);
+  const upWeeks = toPlainNumber(trend.trend_weeks_up);
+  const downWeeks = toPlainNumber(trend.trend_weeks_down);
+
+  if (ratioChange4w >= 1.5 && shareChange4wLots > 0 && smallRatioChange4w < 0) return "主力明顯加碼";
+  if (upWeeks >= 3 && ratioChange4w > 0) return "大戶連續增加";
+  if (ratioChange4w >= 0.5 && ratioChange12w >= 0) return "籌碼集中轉強";
+  if (ratioChange4w <= -1.5 || downWeeks >= 3) return "主力減碼警訊";
+  if (ratioChange4w < 0) return "大戶比重下降";
+  return "籌碼持平觀察";
+}
+
+function getMajorHolderTrendDirection(trend = {}) {
+  const ratioChange4w = toPlainNumber(trend.large_holder_ratio_change_4w);
+  const ratioChange12w = toPlainNumber(trend.large_holder_ratio_change_12w);
+  const smallRatioChange4w = toPlainNumber(trend.small_holder_ratio_change_4w);
+
+  if (ratioChange4w > 0.3 && ratioChange12w >= 0 && smallRatioChange4w <= 0) return "up";
+  if (ratioChange4w < -0.3 || ratioChange12w < -1) return "down";
+  if (Math.abs(ratioChange4w) <= 0.3) return "flat";
+  return "mixed";
+}
+
+function buildMajorHolderTrendSummary(rows) {
+  const safeRows = Array.isArray(rows)
+    ? rows.filter((row) => row && row.data_date).sort((a, b) => String(b.data_date).localeCompare(String(a.data_date)))
+    : [];
+
+  if (safeRows.length === 0) {
+    return {
+      data_points: 0,
+      concentration_score: 0,
+      major_holder_trend_status: "尚無大戶資料",
+      trend_direction: "flat",
+      trend_weeks_up: 0,
+      trend_weeks_down: 0,
+    };
+  }
+
+  const latest = safeRows[0];
+  const previous = safeRows[1] || latest;
+  const base4w = safeRows[Math.min(4, safeRows.length - 1)] || previous || latest;
+  const base12w = safeRows[Math.min(12, safeRows.length - 1)] || base4w || previous || latest;
+
+  let trendWeeksUp = 0;
+  let trendWeeksDown = 0;
+
+  for (let index = 0; index < safeRows.length - 1; index += 1) {
+    const currentRatio = toPlainNumber(safeRows[index].large_holder_ratio);
+    const previousRatio = toPlainNumber(safeRows[index + 1].large_holder_ratio);
+
+    if (currentRatio > previousRatio) trendWeeksUp += 1;
+    else break;
+  }
+
+  for (let index = 0; index < safeRows.length - 1; index += 1) {
+    const currentRatio = toPlainNumber(safeRows[index].large_holder_ratio);
+    const previousRatio = toPlainNumber(safeRows[index + 1].large_holder_ratio);
+
+    if (currentRatio < previousRatio) trendWeeksDown += 1;
+    else break;
+  }
+
+  const trend = {
+    data_points: safeRows.length,
+    current_data_date: latest.data_date,
+    previous_data_date: previous.data_date,
+    four_week_base_date: base4w.data_date,
+    twelve_week_base_date: base12w.data_date,
+    trend_weeks_up: trendWeeksUp,
+    trend_weeks_down: trendWeeksDown,
+    large_holder_ratio_change_1w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(previous.large_holder_ratio), 4),
+    large_holder_ratio_change_4w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(base4w.large_holder_ratio), 4),
+    large_holder_ratio_change_12w: roundNumber(toPlainNumber(latest.large_holder_ratio) - toPlainNumber(base12w.large_holder_ratio), 4),
+    small_holder_ratio_change_4w: roundNumber(toPlainNumber(latest.small_holder_ratio) - toPlainNumber(base4w.small_holder_ratio), 4),
+    small_holder_ratio_change_12w: roundNumber(toPlainNumber(latest.small_holder_ratio) - toPlainNumber(base12w.small_holder_ratio), 4),
+    thousand_lot_ratio_change_4w: roundNumber(toPlainNumber(latest.thousand_lot_ratio) - toPlainNumber(base4w.thousand_lot_ratio), 4),
+    thousand_lot_ratio_change_12w: roundNumber(toPlainNumber(latest.thousand_lot_ratio) - toPlainNumber(base12w.thousand_lot_ratio), 4),
+    large_holder_count_change_4w: String(toBigIntValue(latest.large_holder_count) - toBigIntValue(base4w.large_holder_count)),
+    large_holder_count_change_12w: String(toBigIntValue(latest.large_holder_count) - toBigIntValue(base12w.large_holder_count)),
+    large_holder_share_change_lots_4w: sharesDiffToLotsString(latest.large_holder_share_count, base4w.large_holder_share_count),
+    large_holder_share_change_lots_12w: sharesDiffToLotsString(latest.large_holder_share_count, base12w.large_holder_share_count),
+  };
+
+  trend.concentration_score = calculateConcentrationScoreFromTrend(latest, trend);
+  trend.major_holder_trend_status = getMajorHolderTrendStatus(trend);
+  trend.trend_direction = getMajorHolderTrendDirection(trend);
+
+  return trend;
+}
+
 function enrichMajorHolderRow(row) {
   const majorHolderScore = calculateMajorHolderScore(row);
+  const concentrationScore = row.concentration_score !== undefined
+    ? toPlainNumber(row.concentration_score)
+    : calculateConcentrationScoreFromTrend(row, row);
 
   return {
     ...row,
     major_holder_score: majorHolderScore,
+    concentration_score: concentrationScore,
     major_holder_status: getMajorHolderStatus(row),
+    major_holder_trend_status: row.major_holder_trend_status || getMajorHolderTrendStatus(row),
+    trend_direction: row.trend_direction || getMajorHolderTrendDirection(row),
     large_holder_share_change_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_change)),
     large_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.large_holder_share_count)),
     small_holder_share_count_lots: sharesToLotsString(toBigIntValue(row.small_holder_share_count)),
@@ -288,11 +427,99 @@ function enrichMajorHolderRow(row) {
   };
 }
 
+function enrichMajorHolderHistoryRows(rows) {
+  const safeRows = Array.isArray(rows)
+    ? rows.filter((row) => row && row.data_date).sort((a, b) => String(b.data_date).localeCompare(String(a.data_date)))
+    : [];
+
+  return safeRows.map((row, index) => {
+    const previous = safeRows[index + 1] || row;
+    return enrichMajorHolderRow({
+      ...row,
+      has_previous: safeRows[index + 1] ? 1 : 0,
+      large_holder_count_change: String(toBigIntValue(row.large_holder_count) - toBigIntValue(previous.large_holder_count)),
+      large_holder_share_change: String(toBigIntValue(row.large_holder_share_count) - toBigIntValue(previous.large_holder_share_count)),
+      large_holder_ratio_change: roundNumber(toPlainNumber(row.large_holder_ratio) - toPlainNumber(previous.large_holder_ratio), 4),
+      small_holder_ratio_change: roundNumber(toPlainNumber(row.small_holder_ratio) - toPlainNumber(previous.small_holder_ratio), 4),
+      thousand_lot_ratio_change: roundNumber(toPlainNumber(row.thousand_lot_ratio) - toPlainNumber(previous.thousand_lot_ratio), 4),
+    });
+  });
+}
+
+async function getMajorHolderHistories(stockCodes, targetDate, maxPoints = 13) {
+  const codes = Array.from(new Set((stockCodes || []).map((code) => String(code || "").trim()).filter(Boolean)));
+
+  if (codes.length === 0 || !targetDate) return new Map();
+
+  const dateRows = await query(
+    `
+    SELECT DATE_FORMAT(data_date, '%Y-%m-%d') AS data_date
+    FROM (
+      SELECT DISTINCT data_date
+      FROM major_holder_stats
+      WHERE data_date <= ?
+      ORDER BY data_date DESC
+      LIMIT ?
+    ) d
+    ORDER BY data_date DESC
+    `,
+    [targetDate, maxPoints],
+  );
+
+  const dates = dateRows.map((row) => row.data_date).filter(Boolean);
+  if (dates.length === 0) return new Map();
+
+  const codePlaceholders = codes.map(() => "?").join(",");
+  const datePlaceholders = dates.map(() => "?").join(",");
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
+      m.stock_code,
+      s.stock_name,
+      s.market_type,
+      s.industry,
+      m.total_holder_count,
+      CAST(m.total_share_count AS CHAR) AS total_share_count,
+      m.small_holder_count,
+      CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
+      m.small_holder_ratio,
+      m.mid_holder_count,
+      CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
+      m.mid_holder_ratio,
+      m.large_holder_count,
+      CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
+      m.large_holder_ratio,
+      m.thousand_lot_holder_count,
+      CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
+      m.thousand_lot_ratio,
+      m.avg_large_holder_lots,
+      m.source
+    FROM major_holder_stats m
+    LEFT JOIN stocks s
+      ON s.stock_code = m.stock_code
+    WHERE m.stock_code IN (${codePlaceholders})
+      AND m.data_date IN (${datePlaceholders})
+    ORDER BY m.stock_code ASC, m.data_date DESC
+    `,
+    [...codes, ...dates],
+  );
+
+  const map = new Map();
+  for (const row of rows) {
+    const code = String(row.stock_code || "");
+    if (!map.has(code)) map.set(code, []);
+    map.get(code).push(row);
+  }
+
+  return map;
+}
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.9",
+    version: "stock-radar-api-v1.2.10",
   });
 });
 
@@ -300,7 +527,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.9",
+    version: "stock-radar-api-v1.2.10",
     time: new Date().toISOString(),
   });
 });
@@ -2466,6 +2693,79 @@ app.get("/major-holders/status", async (req, res) => {
   }
 });
 
+app.get("/major-holders/:stockCode/analysis", async (req, res) => {
+  try {
+    const stockCode = String(req.params.stockCode || "").trim();
+    const limit = parseLimit(req.query.limit, 24, 80);
+
+    if (!stockCode) {
+      return res.status(400).json({
+        success: false,
+        message: "請輸入股票代號",
+      });
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(m.data_date, '%Y-%m-%d') AS data_date,
+        m.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        m.total_holder_count,
+        CAST(m.total_share_count AS CHAR) AS total_share_count,
+        m.small_holder_count,
+        CAST(m.small_holder_share_count AS CHAR) AS small_holder_share_count,
+        m.small_holder_ratio,
+        m.mid_holder_count,
+        CAST(m.mid_holder_share_count AS CHAR) AS mid_holder_share_count,
+        m.mid_holder_ratio,
+        m.large_holder_count,
+        CAST(m.large_holder_share_count AS CHAR) AS large_holder_share_count,
+        m.large_holder_ratio,
+        m.thousand_lot_holder_count,
+        CAST(m.thousand_lot_share_count AS CHAR) AS thousand_lot_share_count,
+        m.thousand_lot_ratio,
+        m.avg_large_holder_lots,
+        m.source
+      FROM major_holder_stats m
+      LEFT JOIN stocks s
+        ON m.stock_code = s.stock_code
+      WHERE m.stock_code = ?
+      ORDER BY m.data_date DESC
+      LIMIT ?
+      `,
+      [stockCode, limit],
+    );
+
+    const history = enrichMajorHolderHistoryRows(rows);
+    const trend = buildMajorHolderTrendSummary(rows);
+    const latest = history[0] || null;
+
+    res.json({
+      success: true,
+      data: convertBigIntToString({
+        stock_code: stockCode,
+        stock_name: latest?.stock_name || null,
+        market_type: latest?.market_type || null,
+        industry: latest?.industry || null,
+        latest,
+        trend,
+        history,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢個股主力籌碼分析失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢個股主力籌碼分析失敗，請先執行 npm run major-holders:import 匯入 TDCC 集保資料。",
+      error: error.message,
+    });
+  }
+});
+
 app.get("/major-holders/:stockCode", async (req, res) => {
   try {
     const stockCode = String(req.params.stockCode || "").trim();
@@ -2547,6 +2847,7 @@ app.get("/radar/major-holder", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const sortMode = String(req.query.sort || req.query.mode || "trend").trim();
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -2662,9 +2963,34 @@ app.get("/radar/major-holder", async (req, res) => {
       params,
     );
 
-    const data = rows
-      .map(enrichMajorHolderRow)
+    const histories = await getMajorHolderHistories(rows.map((row) => row.stock_code), targetDate, 13);
+    const enrichedRows = rows.map((row) => {
+      const trend = buildMajorHolderTrendSummary(histories.get(String(row.stock_code)) || [row]);
+      return enrichMajorHolderRow({
+        ...row,
+        ...trend,
+      });
+    });
+
+    const data = enrichedRows
       .sort((a, b) => {
+        if (sortMode === "concentration") {
+          const concentrationDiff = toPlainNumber(b.concentration_score) - toPlainNumber(a.concentration_score);
+          if (concentrationDiff !== 0) return concentrationDiff;
+        }
+
+        if (sortMode === "distribution" || sortMode === "weak") {
+          const ratioDiff = toPlainNumber(a.large_holder_ratio_change_4w) - toPlainNumber(b.large_holder_ratio_change_4w);
+          if (ratioDiff !== 0) return ratioDiff;
+          const smallDiff = toPlainNumber(b.small_holder_ratio_change_4w) - toPlainNumber(a.small_holder_ratio_change_4w);
+          if (smallDiff !== 0) return smallDiff;
+        } else {
+          const trendScoreDiff = toPlainNumber(b.concentration_score) - toPlainNumber(a.concentration_score);
+          if (trendScoreDiff !== 0) return trendScoreDiff;
+          const ratio4wDiff = toPlainNumber(b.large_holder_ratio_change_4w) - toPlainNumber(a.large_holder_ratio_change_4w);
+          if (ratio4wDiff !== 0) return ratio4wDiff;
+        }
+
         if (b.major_holder_score !== a.major_holder_score) return b.major_holder_score - a.major_holder_score;
         const ratioDiff = toPlainNumber(b.large_holder_ratio_change) - toPlainNumber(a.large_holder_ratio_change);
         if (ratioDiff !== 0) return ratioDiff;
@@ -2685,6 +3011,7 @@ app.get("/radar/major-holder", async (req, res) => {
       data_date: targetDate,
       trade_date: latestTradeDate,
       market: market || "全部",
+      sort: sortMode,
       limit,
       count: data.length,
       data: convertBigIntToString(data),
@@ -3637,7 +3964,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.9",
+    version: "stock-radar-api-v1.2.10",
   });
 });
 

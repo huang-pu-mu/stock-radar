@@ -2386,3 +2386,99 @@ body.chart-zoom-open {
     text-align: left;
   }
 }
+
+/* V1.2-10 主力籌碼分析強化 */
+.major-trend-summary-section {
+  border-color: rgba(125, 211, 252, 0.24);
+}
+
+.major-trend-summary-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.major-trend-summary-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.major-concentration-meter {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.major-meter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.major-meter-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.major-meter-head strong {
+  font-size: 26px;
+}
+
+.major-meter-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.major-meter-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.65), rgba(52, 211, 153, 0.9));
+}
+
+.major-concentration-meter.score-mid .major-meter-track span {
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.55), rgba(125, 211, 252, 0.8));
+}
+
+.major-concentration-meter.score-low .major-meter-track span {
+  background: linear-gradient(90deg, rgba(248, 113, 113, 0.55), rgba(250, 204, 21, 0.72));
+}
+
+.major-trend-chart-wrap {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.major-trend-chart {
+  min-width: 620px;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.major-trend-line {
+  stroke: rgba(52, 211, 153, 0.95);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.major-trend-dot {
+  fill: rgba(125, 211, 252, 0.95);
+  stroke: rgba(7, 17, 31, 0.95);
+  stroke-width: 2;
+}
+
+@media (max-width: 720px) {
+  .major-trend-summary-card {
+    grid-template-columns: 1fr;
+  }
+}

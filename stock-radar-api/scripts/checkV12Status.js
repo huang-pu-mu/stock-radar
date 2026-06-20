@@ -18,6 +18,8 @@ const requiredFiles = [
   "stock-radar-api/scripts/backfillInstitutionalAmountSummaries.js",
   "stock-radar-api/scripts/syncEtfProfilesFromStocks.js",
   "stock-radar-api/scripts/setupMicrostructureTables.js",
+  "stock-radar-api/scripts/importMajorHolders.js",
+  "stock-radar-api/scripts/setupMajorHolderStats.js",
 ];
 
 const requiredScripts = [
@@ -32,6 +34,8 @@ const requiredScripts = [
   "official:institutional-amounts:history",
   "official:microstructure:setup",
   "microstructure:setup",
+  "major-holders:setup",
+  "major-holders:import",
   "official:daily",
 ];
 
@@ -53,6 +57,7 @@ const requiredTables = [
   "institutional_amount_summaries",
   "realtime_quote_snapshots",
   "market_order_flow_snapshots",
+  "major_holder_stats",
 ];
 
 function okText(ok) {
