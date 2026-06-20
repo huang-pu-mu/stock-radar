@@ -400,15 +400,30 @@ function parseNullableDecimalValue(value) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function parseStrategyRiskThreshold(value, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) return fallback;
+
+  return Number(Math.max(0.1, Math.min(numberValue, 50)).toFixed(4));
+}
+
 const STRATEGY_TRACKING_STATUS_MAP = {
   strong: "轉強",
   weak: "轉弱",
   neutral: "觀察中",
   pending: "等待資料",
+  take_profit: "已達停利",
+  stop_loss: "已達停損",
+  in_range: "未觸發",
   "轉強": "轉強",
   "轉弱": "轉弱",
   "觀察中": "觀察中",
   "等待資料": "等待資料",
+  "已達停利": "已達停利",
+  "已達停損": "已達停損",
+  "未觸發": "未觸發",
 };
 
 const STRATEGY_TRACKING_SORT_OPTIONS = {
@@ -493,6 +508,7 @@ async function getStrategyTrackingRows(userId, filters = {}) {
   const params = [userId];
   const strategyKey = normalizeStrategyKeyValue(filters.strategy || filters.strategy_key);
   const stockCode = normalizeStockCodeValue(filters.stock_code || filters.stockCode);
+  const trackId = parsePositiveInteger(filters.id || filters.track_id, null, 1, Number.MAX_SAFE_INTEGER);
   const active = filters.active ?? filters.is_active;
   const search = normalizeStrategyTrackingSearchText(filters.search || filters.keyword || filters.q);
   const status = normalizeStrategyTrackingStatus(filters.status || filters.performance_status);
@@ -509,6 +525,11 @@ async function getStrategyTrackingRows(userId, filters = {}) {
   if (stockCode) {
     conditions.push("t.stock_code = ?");
     params.push(stockCode);
+  }
+
+  if (trackId) {
+    conditions.push("t.id = ?");
+    params.push(trackId);
   }
 
   if (active !== undefined && active !== null && active !== "") {
@@ -545,6 +566,8 @@ async function getStrategyTrackingRows(userId, filters = {}) {
       t.source_rank,
       t.trigger_summary,
       t.note,
+      t.take_profit_percent,
+      t.stop_loss_percent,
       t.is_active,
       DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at,
@@ -648,7 +671,7 @@ async function getStrategyTrackingRows(userId, filters = {}) {
 
   const enrichedRows = rows.map(enrichStrategyTrackingPerformance);
   const filteredRows = status
-    ? enrichedRows.filter((row) => row.performance_status === status)
+    ? enrichedRows.filter((row) => row.performance_status === status || row.risk_observation_status === status)
     : enrichedRows;
   const sortedRows = sortStrategyTrackingRows(filteredRows, sortKey);
 
@@ -707,6 +730,53 @@ function getPerformanceStatus(returnPercent) {
   return "觀察中";
 }
 
+function getStrategyRiskObservation(currentReturn, takeProfitPercent, stopLossPercent) {
+  const value = Number(currentReturn);
+  const takeProfit = parseStrategyRiskThreshold(takeProfitPercent, 5);
+  const stopLoss = parseStrategyRiskThreshold(stopLossPercent, 3);
+
+  if (!Number.isFinite(value)) {
+    return {
+      key: "pending",
+      status: "等待資料",
+      tone: "neutral",
+      distance_to_take_profit_percent: null,
+      distance_to_stop_loss_percent: null,
+    };
+  }
+
+  const distanceToTakeProfit = Number((takeProfit - value).toFixed(4));
+  const distanceToStopLoss = Number((value + stopLoss).toFixed(4));
+
+  if (value >= takeProfit) {
+    return {
+      key: "take_profit",
+      status: "已達停利",
+      tone: "positive",
+      distance_to_take_profit_percent: distanceToTakeProfit,
+      distance_to_stop_loss_percent: distanceToStopLoss,
+    };
+  }
+
+  if (value <= -stopLoss) {
+    return {
+      key: "stop_loss",
+      status: "已達停損",
+      tone: "negative",
+      distance_to_take_profit_percent: distanceToTakeProfit,
+      distance_to_stop_loss_percent: distanceToStopLoss,
+    };
+  }
+
+  return {
+    key: "in_range",
+    status: "未觸發",
+    tone: "watch",
+    distance_to_take_profit_percent: distanceToTakeProfit,
+    distance_to_stop_loss_percent: distanceToStopLoss,
+  };
+}
+
 function enrichStrategyTrackingPerformance(row) {
   const entryPrice = Number(row.entry_price);
   const currentPrice = Number(row.close_price);
@@ -714,6 +784,9 @@ function enrichStrategyTrackingPerformance(row) {
   const return3d = calculateReturnPercent(entryPrice, row.price_after_3d);
   const return5d = calculateReturnPercent(entryPrice, row.price_after_5d);
   const currentReturn = calculateReturnPercent(entryPrice, currentPrice);
+  const takeProfitPercent = parseStrategyRiskThreshold(row.take_profit_percent, 5);
+  const stopLossPercent = parseStrategyRiskThreshold(row.stop_loss_percent, 3);
+  const riskObservation = getStrategyRiskObservation(currentReturn, takeProfitPercent, stopLossPercent);
 
   return {
     ...row,
@@ -724,6 +797,13 @@ function enrichStrategyTrackingPerformance(row) {
     return_5d_percent: return5d,
     current_return_percent: currentReturn,
     performance_status: getPerformanceStatus(currentReturn),
+    take_profit_percent: takeProfitPercent,
+    stop_loss_percent: stopLossPercent,
+    risk_observation_key: riskObservation.key,
+    risk_observation_status: riskObservation.status,
+    risk_observation_tone: riskObservation.tone,
+    distance_to_take_profit_percent: riskObservation.distance_to_take_profit_percent,
+    distance_to_stop_loss_percent: riskObservation.distance_to_stop_loss_percent,
   };
 }
 
@@ -3785,6 +3865,8 @@ app.post("/strategy-watchlist", requireAuth, async (req, res) => {
     const sourceRank = parsePositiveInteger(req.body?.source_rank || req.body?.rank, null, 1, 100000);
     const triggerSummary = normalizeShortText(req.body?.trigger_summary || req.body?.title || req.body?.message, 500);
     const note = normalizeShortText(req.body?.note, 255);
+    const takeProfitPercent = parseStrategyRiskThreshold(req.body?.take_profit_percent, 5);
+    const stopLossPercent = parseStrategyRiskThreshold(req.body?.stop_loss_percent, 3);
 
     await query(
       `
@@ -3801,9 +3883,11 @@ app.post("/strategy-watchlist", requireAuth, async (req, res) => {
         source_rank,
         trigger_summary,
         note,
+        take_profit_percent,
+        stop_loss_percent,
         is_active
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
       ON DUPLICATE KEY UPDATE
         stock_name = VALUES(stock_name),
         market_type = VALUES(market_type),
@@ -3814,6 +3898,8 @@ app.post("/strategy-watchlist", requireAuth, async (req, res) => {
         source_rank = VALUES(source_rank),
         trigger_summary = VALUES(trigger_summary),
         note = COALESCE(VALUES(note), note),
+        take_profit_percent = VALUES(take_profit_percent),
+        stop_loss_percent = VALUES(stop_loss_percent),
         is_active = 1,
         updated_at = CURRENT_TIMESTAMP
       `,
@@ -3830,6 +3916,8 @@ app.post("/strategy-watchlist", requireAuth, async (req, res) => {
         sourceRank,
         triggerSummary,
         note,
+        takeProfitPercent,
+        stopLossPercent,
       ],
     );
 
@@ -3855,6 +3943,93 @@ app.post("/strategy-watchlist", requireAuth, async (req, res) => {
     });
   }
 });
+
+// ==============================
+// V1.3-2-7：策略追蹤停利停損設定
+// PATCH /strategy-watchlist/:trackId/risk-settings
+// ==============================
+async function updateStrategyRiskSettings(req, res) {
+  try {
+    const trackId = parsePositiveInteger(req.params.trackId, 0, 1, Number.MAX_SAFE_INTEGER);
+
+    if (!trackId) {
+      return res.status(400).json({
+        success: false,
+        message: "策略追蹤 ID 格式不正確。",
+      });
+    }
+
+    const takeProfitPercent = parseStrategyRiskThreshold(req.body?.take_profit_percent, null);
+    const stopLossPercent = parseStrategyRiskThreshold(req.body?.stop_loss_percent, null);
+    const note = normalizeShortText(req.body?.note, 255);
+    const fields = [];
+    const params = [];
+
+    if (takeProfitPercent !== null) {
+      fields.push("take_profit_percent = ?");
+      params.push(takeProfitPercent);
+    }
+
+    if (stopLossPercent !== null) {
+      fields.push("stop_loss_percent = ?");
+      params.push(stopLossPercent);
+    }
+
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, "note")) {
+      fields.push("note = ?");
+      params.push(note);
+    }
+
+    if (!fields.length) {
+      return res.status(400).json({
+        success: false,
+        message: "請至少提供停利百分比或停損百分比。",
+      });
+    }
+
+    fields.push("updated_at = CURRENT_TIMESTAMP");
+
+    const result = await query(
+      `
+      UPDATE strategy_watchlists
+      SET ${fields.join(", ")}
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [...params, trackId, req.user.id],
+    );
+
+    if (Number(result?.affectedRows || 0) === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "找不到這筆策略追蹤，或它不屬於目前登入者。",
+      });
+    }
+
+    const rows = await getStrategyTrackingRows(req.user.id, {
+      id: trackId,
+      active: "",
+      limit: 1,
+    });
+
+    res.json({
+      success: true,
+      message: "已更新停利停損觀察設定",
+      data: convertBigIntToString(rows[0] || { id: trackId }),
+    });
+  } catch (error) {
+    console.error("更新策略追蹤停利停損設定失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "更新策略追蹤停利停損設定失敗",
+      error: error.message,
+    });
+  }
+}
+
+app.patch("/strategy-watchlist/:trackId/risk-settings", requireAuth, updateStrategyRiskSettings);
+app.post("/strategy-watchlist/:trackId/risk-settings", requireAuth, updateStrategyRiskSettings);
 
 // ==============================
 // V1.3-2-3：移除策略追蹤

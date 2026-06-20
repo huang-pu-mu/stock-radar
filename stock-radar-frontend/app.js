@@ -333,6 +333,9 @@ const STRATEGY_PERFORMANCE_METRICS = [
 
 const STRATEGY_TRACK_STATUS_OPTIONS = [
   { key: "", label: "全部狀態" },
+  { key: "take_profit", label: "只看已達停利" },
+  { key: "stop_loss", label: "只看已達停損" },
+  { key: "in_range", label: "只看未觸發" },
   { key: "strong", label: "只看轉強" },
   { key: "neutral", label: "只看觀察中" },
   { key: "weak", label: "只看轉弱" },
@@ -340,6 +343,9 @@ const STRATEGY_TRACK_STATUS_OPTIONS = [
 ];
 
 const STRATEGY_TRACK_STATUS_TEXT = {
+  take_profit: "已達停利",
+  stop_loss: "已達停損",
+  in_range: "未觸發",
   strong: "轉強",
   neutral: "觀察中",
   weak: "轉弱",
@@ -378,6 +384,20 @@ function formatReturnPercent(value) {
   if (numberValue === null) return "待資料";
   const prefix = numberValue > 0 ? "+" : "";
   return `${prefix}${numberValue.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function formatRiskThreshold(value, fallback) {
+  const numberValue = toNumber(value);
+  const safeValue = numberValue === null ? fallback : numberValue;
+  return safeValue.toLocaleString("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function getRiskObservationClass(row) {
+  const key = pick(row, ["risk_observation_key"], "");
+  if (key === "take_profit") return "price-up";
+  if (key === "stop_loss") return "price-down";
+  if (key === "pending") return "price-flat";
+  return "score-mid";
 }
 
 function getStrategyPerformanceValue(row, metricKey = state.strategyPerformanceMetric) {
@@ -459,7 +479,12 @@ function getVisibleStrategyTrackingRows(rows = state.latestRows) {
   }
 
   if (state.strategyTrackFilterStatus) {
-    visibleRows = visibleRows.filter((row) => getStrategyTrackStatusKey(row) === state.strategyTrackFilterStatus);
+    visibleRows = visibleRows.filter((row) => {
+      if (["take_profit", "stop_loss", "in_range"].includes(state.strategyTrackFilterStatus)) {
+        return pick(row, ["risk_observation_key"], "") === state.strategyTrackFilterStatus;
+      }
+      return getStrategyTrackStatusKey(row) === state.strategyTrackFilterStatus;
+    });
   }
 
   if (keyword) {
@@ -554,6 +579,24 @@ function buildStrategyPerformanceByStrategy(rows, metricKey = state.strategyPerf
     avgReturn: item.available ? item.totalReturn / item.available : null,
     winRate: item.available ? (item.positive / item.available) * 100 : null,
   })).sort((a, b) => (b.avgReturn ?? -999999) - (a.avgReturn ?? -999999));
+}
+
+function buildStrategyRiskSummary(rows = []) {
+  return rows.reduce((summary, row) => {
+    const key = pick(row, ["risk_observation_key"], "pending");
+    summary.total += 1;
+    if (key === "take_profit") summary.takeProfit += 1;
+    else if (key === "stop_loss") summary.stopLoss += 1;
+    else if (key === "in_range") summary.inRange += 1;
+    else summary.pending += 1;
+    return summary;
+  }, {
+    total: 0,
+    takeProfit: 0,
+    stopLoss: 0,
+    inRange: 0,
+    pending: 0,
+  });
 }
 
 function formatPrice(value) {
@@ -1886,6 +1929,45 @@ async function handleStrategyTrackRemove(button) {
   }
 }
 
+async function handleStrategyRiskSettingSubmit(form) {
+  const trackId = form.dataset.trackId;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const originalText = submitButton?.textContent || "儲存停利停損";
+  const formData = new FormData(form);
+
+  if (!trackId) {
+    showStatus("策略追蹤 ID 遺失，無法儲存停利停損設定。", "error");
+    return;
+  }
+
+  try {
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "儲存中...";
+    }
+
+    await fetchJson(`/strategy-watchlist/${encodeURIComponent(trackId)}/risk-settings`, {
+      method: "PATCH",
+      auth: true,
+      body: {
+        take_profit_percent: formData.get("take_profit_percent"),
+        stop_loss_percent: formData.get("stop_loss_percent"),
+      },
+      raw: true,
+    });
+
+    await loadStrategyTracking();
+    showTemporaryStatus("已更新停利停損觀察設定。", "success");
+  } catch (error) {
+    showStatus(`儲存停利停損失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalText;
+    }
+  }
+}
+
 function renderStrategyTrackingLoginPrompt() {
   stockList.innerHTML = `
     <article class="search-intro-card watchlist-login-card">
@@ -1907,9 +1989,9 @@ function renderStrategyTrackingFilters(resultCount = 0) {
     <section class="strategy-dashboard-card strategy-track-filter-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.3-2-6 篩選與排序</p>
+          <p class="section-kicker">V1.3-2-7 停利停損觀察</p>
           <h3>策略追蹤篩選</h3>
-          <p>依策略、股票、狀態與報酬排序，快速找出正在轉強或需要檢查的追蹤股票。</p>
+          <p>依策略、股票、停利停損狀態與報酬排序，快速找出已達停利或已達停損的追蹤股票。</p>
         </div>
         <div class="strategy-meta-box">
           <span>${escapeHtml(buildStrategyTrackingFilterSummary(resultCount))}</span>
@@ -1997,6 +2079,7 @@ function renderStrategyTrackingSummary(rowsOverride = null) {
   const best = localSummary.best;
   const worst = localSummary.worst;
   const byStrategy = buildStrategyPerformanceByStrategy(rows, state.strategyPerformanceMetric).slice(0, 6);
+  const riskSummary = buildStrategyRiskSummary(rows);
 
   return `
     <section class="strategy-dashboard-card strategy-track-summary-card">
@@ -2031,6 +2114,21 @@ function renderStrategyTrackingSummary(rowsOverride = null) {
           <span class="stat-label">目前最佳追蹤</span>
           <strong>${best ? `${escapeHtml(best.stock_code)} ${escapeHtml(best.stock_name || "")}` : "待資料"}</strong>
           ${best ? `<small class="${getReturnClass(getStrategyPerformanceValue(best, metric.key))}">${formatReturnPercent(getStrategyPerformanceValue(best, metric.key))}</small>` : ""}
+        </div>
+      </div>
+
+      <div class="strategy-risk-stat-grid">
+        <div class="performance-stat-card risk-profit-card">
+          <span class="stat-label">已達停利</span>
+          <strong class="price-up">${formatNumber(riskSummary.takeProfit)}</strong>
+        </div>
+        <div class="performance-stat-card risk-loss-card">
+          <span class="stat-label">已達停損</span>
+          <strong class="price-down">${formatNumber(riskSummary.stopLoss)}</strong>
+        </div>
+        <div class="performance-stat-card">
+          <span class="stat-label">未觸發 / 待資料</span>
+          <strong>${formatNumber(riskSummary.inRange)} / ${formatNumber(riskSummary.pending)}</strong>
         </div>
       </div>
 
@@ -2091,6 +2189,42 @@ function renderPerformancePill(label, value, date) {
   `;
 }
 
+function renderStrategyRiskPanel(row) {
+  const trackId = pick(row, ["id"], "");
+  const takeProfit = formatRiskThreshold(pick(row, ["take_profit_percent"], 5), 5);
+  const stopLoss = formatRiskThreshold(pick(row, ["stop_loss_percent"], 3), 3);
+  const status = pick(row, ["risk_observation_status"], "等待資料");
+  const riskClass = getRiskObservationClass(row);
+  const distanceToProfit = pick(row, ["distance_to_take_profit_percent"], null);
+  const distanceToStop = pick(row, ["distance_to_stop_loss_percent"], null);
+
+  return `
+    <div class="strategy-risk-panel ${escapeHtml(pick(row, ["risk_observation_key"], "pending"))}">
+      <div class="strategy-risk-header">
+        <div>
+          <strong>停利 / 停損觀察</strong>
+          <span>目前：<b class="${riskClass}">${escapeHtml(status)}</b></span>
+        </div>
+        <div class="strategy-risk-distance">
+          <span>距停利：${formatReturnPercent(distanceToProfit)}</span>
+          <span>距停損：${formatReturnPercent(distanceToStop)}</span>
+        </div>
+      </div>
+      <form class="strategy-risk-form" data-strategy-risk-form data-track-id="${escapeHtml(trackId)}">
+        <label>
+          <span>停利 %</span>
+          <input name="take_profit_percent" type="number" step="0.1" min="0.1" max="50" value="${escapeHtml(takeProfit)}" />
+        </label>
+        <label>
+          <span>停損 %</span>
+          <input name="stop_loss_percent" type="number" step="0.1" min="0.1" max="50" value="${escapeHtml(stopLoss)}" />
+        </label>
+        <button class="watch-btn" type="submit">儲存停利停損</button>
+      </form>
+    </div>
+  `;
+}
+
 function renderStrategyTrackingCard(row, index) {
   const code = pick(row, ["stock_code"], "-");
   const name = pick(row, ["stock_name"], code);
@@ -2114,6 +2248,9 @@ function renderStrategyTrackingCard(row, index) {
     createInfoItem("加入價", `${formatPrice(pick(row, ["entry_price"], "-"))} / ${formatDate(pick(row, ["entry_price_date"], "-"))}`),
     createInfoItem("目前收盤價", formatDirectionalClosePrice(closePrice, change)),
     createInfoItem("表現狀態", escapeHtml(pick(row, ["performance_status"], "等待資料")), toneClass),
+    createInfoItem("停利門檻", `${formatRiskThreshold(pick(row, ["take_profit_percent"], 5), 5)}%`),
+    createInfoItem("停損門檻", `${formatRiskThreshold(pick(row, ["stop_loss_percent"], 3), 3)}%`),
+    createInfoItem("風控狀態", escapeHtml(pick(row, ["risk_observation_status"], "等待資料")), getRiskObservationClass(row)),
   ].join("");
 
   return `
@@ -2143,6 +2280,7 @@ function renderStrategyTrackingCard(row, index) {
         ${renderPerformancePill("5日", pick(row, ["return_5d_percent"], null), pick(row, ["price_after_5d_date"], ""))}
         ${renderPerformancePill("目前", pick(row, ["current_return_percent"], null), pick(row, ["latest_price_date"], ""))}
       </div>
+      ${renderStrategyRiskPanel(row)}
       <div class="quick-summary secondary-summary price-summary">
         <span class="price-metric">來源日：${formatDate(sourceDate)}</span>
         <span class="price-metric">追蹤時間：${escapeHtml(createdAt)}</span>
@@ -4106,6 +4244,13 @@ stockList.addEventListener("submit", (event) => {
   if (strategyTrackFilterForm) {
     event.preventDefault();
     handleStrategyTrackFilterSubmit(strategyTrackFilterForm);
+    return;
+  }
+
+  const strategyRiskForm = event.target.closest("[data-strategy-risk-form]");
+  if (strategyRiskForm) {
+    event.preventDefault();
+    handleStrategyRiskSettingSubmit(strategyRiskForm);
     return;
   }
 
