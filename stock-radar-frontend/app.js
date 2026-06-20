@@ -31,6 +31,9 @@ const state = {
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
+  alertFilter: "unread",
+  alertSummary: null,
+  alertUnreadCount: 0,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -56,6 +59,7 @@ const chartZoomContent = document.getElementById("chartZoomContent");
 const closeChartZoomBtn = document.getElementById("closeChartZoomBtn");
 const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
+const alertsTabBadge = document.getElementById("alertsTabBadge");
 
 let deferredInstallPrompt = null;
 let hideStatusTimer = null;
@@ -213,7 +217,7 @@ async function fetchJson(path, options = {}) {
     throw new Error("尚未設定正式 API 網址。請打開 config.js，把 PRODUCTION_API_BASE_URL 改成你的 Node.js API 網址。");
   }
 
-  const { auth = false, body, ...fetchOptions } = options;
+  const { auth = false, body, raw = false, ...fetchOptions } = options;
   const headers = new Headers(fetchOptions.headers || {});
 
   if (body !== undefined) {
@@ -241,6 +245,7 @@ async function fetchJson(path, options = {}) {
     throw new Error(result.message || result.error || "API 查詢失敗");
   }
 
+  if (raw) return result;
   if (Array.isArray(result)) return result;
   if (result.data) return result.data;
   return result;
@@ -287,10 +292,18 @@ function updatePageText() {
   const isSearchPage = state.page === "search";
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
+  const isAlertsPage = state.page === "alerts";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+
+  if (state.page === "alerts") {
+    pageTitle.textContent = "提醒中心";
+    pageDesc.textContent = "顯示自選股的異常提醒，包含投信連買、主力籌碼、量能、分數與行事曆。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看未讀與高重要性提醒；看完可標記已讀，避免每天重複判斷。</span>`;
+    return;
+  }
 
   if (state.page === "watchlist") {
     pageTitle.textContent = "自選股";
@@ -937,6 +950,11 @@ function rerenderCurrentContent() {
     return;
   }
 
+  if (state.page === "alerts") {
+    renderAlertsPage();
+    return;
+  }
+
   if (state.page === "account") {
     renderAccountPage();
   }
@@ -1124,6 +1142,7 @@ function clearAuthSession(showMessage = true) {
   state.watchlistLoaded = false;
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
   renderAuthHeader();
+  updateAlertsBadge();
 
   if (showMessage) {
     showTemporaryStatus("已登出。", "success");
@@ -1154,6 +1173,7 @@ async function loadCurrentUser() {
     clearAuthSession(false);
   } finally {
     renderAuthHeader();
+    await updateAlertsBadge();
   }
 }
 
@@ -1174,6 +1194,7 @@ async function handleGoogleCredential(response) {
 
     saveAuthSession(data);
     await refreshWatchlistCodes();
+    await updateAlertsBadge();
     renderAccountPage();
     showTemporaryStatus(`登入成功：${escapeHtml(getUserDisplayName())}`, "success");
   } catch (error) {
@@ -1227,6 +1248,278 @@ function renderGoogleButton() {
   }
 }
 
+
+function getAlertTypeLabel(type) {
+  const map = {
+    foreign_buy_streak: "外資連買",
+    investment_trust_buy_streak: "投信連買",
+    major_holder_increase: "主力籌碼",
+    volume_spike: "成交量放大",
+    chip_score_threshold: "籌碼分數",
+    calendar_event: "行事曆",
+  };
+
+  return map[type] || String(type || "提醒");
+}
+
+function getAlertLevelLabel(level) {
+  return String(level || "normal") === "high" ? "高重要" : "一般";
+}
+
+function getAlertLevelClass(level) {
+  return String(level || "normal") === "high" ? "high" : "normal";
+}
+
+function isUnreadAlert(row) {
+  return Number(row?.is_read || 0) === 0;
+}
+
+function getAlertFilterQuery() {
+  const params = new URLSearchParams();
+  params.set("limit", "50");
+
+  if (state.alertFilter === "unread") params.set("unread", "1");
+  if (state.alertFilter === "high") params.set("alert_level", "high");
+
+  return `/watchlist/alerts?${params.toString()}`;
+}
+
+function renderAlertsLoginPrompt() {
+  stockList.innerHTML = `
+    <article class="search-intro-card alerts-login-card">
+      <div class="intro-icon">🔔</div>
+      <h3>請先登入 Google 帳號</h3>
+      <p>提醒中心會依照你的自選股產生提醒，所以需要先登入才能讀取。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-account="true">前往登入</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderEmptyAlerts() {
+  return `
+    <article class="search-intro-card alerts-empty-card">
+      <div class="intro-icon">🔕</div>
+      <h3>目前沒有符合條件的提醒</h3>
+      <p>可以切換成「全部」查看歷史提醒，或到自選股加入更多股票。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-alert-filter="all">查看全部提醒</button>
+        <button class="example-btn" type="button" data-go-page="watchlist">看自選股</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderAlertSummaryCards(summary = {}) {
+  const totalCount = summary.total_count ?? 0;
+  const unreadCount = summary.unread_count ?? 0;
+  const highCount = summary.high_count ?? 0;
+  const latestDate = summary.latest_alert_date || "-";
+
+  return `
+    <div class="alert-summary-grid">
+      ${createInfoItem("全部提醒", `${formatNumber(totalCount)} 筆`)}
+      ${createInfoItem("未讀提醒", `${formatNumber(unreadCount)} 筆`, Number(unreadCount) > 0 ? "price-up" : "")}
+      ${createInfoItem("高重要性", `${formatNumber(highCount)} 筆`, Number(highCount) > 0 ? "price-up" : "")}
+      ${createInfoItem("最新提醒日", formatDate(latestDate))}
+    </div>
+  `;
+}
+
+function renderAlertFilterButton(filter, label) {
+  const active = state.alertFilter === filter;
+  return `
+    <button class="alert-filter-btn ${active ? "active" : ""}" type="button" data-alert-filter="${escapeHtml(filter)}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function renderAlertsToolbar(summary = {}) {
+  const unreadCount = Number(summary.unread_count || 0);
+
+  return `
+    <article class="alerts-dashboard-card">
+      <div class="alerts-dashboard-header">
+        <div>
+          <p class="eyebrow">自選股提醒</p>
+          <h3>提醒中心</h3>
+          <p>符合條件的股票會出現在這裡；未讀提醒會排在最前面。</p>
+        </div>
+        <button class="detail-btn ${unreadCount > 0 ? "" : "disabled-look"}" type="button" data-alert-read-all="true" ${unreadCount > 0 ? "" : "disabled"}>全部已讀</button>
+      </div>
+      ${renderAlertSummaryCards(summary)}
+      <div class="alert-filter-row" aria-label="提醒篩選">
+        ${renderAlertFilterButton("unread", "未讀")}
+        ${renderAlertFilterButton("all", "全部")}
+        ${renderAlertFilterButton("high", "高重要")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAlertCard(row) {
+  const unread = isUnreadAlert(row);
+  const levelClass = getAlertLevelClass(row.alert_level);
+  const stockCode = normalizeStockCode(row.stock_code);
+  const metricValue = toNumber(row.metric_value) === null ? escapeHtml(row.metric_value ?? "-") : formatNumber(row.metric_value);
+  const thresholdValue = toNumber(row.threshold_value) === null ? escapeHtml(row.threshold_value ?? "-") : formatNumber(row.threshold_value);
+
+  return `
+    <article class="stock-card alert-card ${unread ? "unread" : "read"} ${levelClass}">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge alert-status-badge ${unread ? "unread" : "read"}">${unread ? "未讀" : "已讀"}</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(row.stock_name || stockCode || "提醒")}</h3>
+            <span class="stock-code">${escapeHtml(stockCode)}</span>
+            <span class="badge alert-type-badge">${escapeHtml(getAlertTypeLabel(row.alert_type))}</span>
+            <span class="badge alert-level-badge ${levelClass}">${escapeHtml(getAlertLevelLabel(row.alert_level))}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert-title">${escapeHtml(row.title || "自選股提醒")}</div>
+      <p class="alert-message">${escapeHtml(row.message || "-")}</p>
+
+      <div class="info-grid alert-info-grid">
+        ${createInfoItem("提醒日", formatDate(row.alert_date))}
+        ${createInfoItem("參考日", formatDate(row.reference_date))}
+        ${createInfoItem(row.metric_name || "指標數值", metricValue)}
+        ${createInfoItem("設定門檻", thresholdValue)}
+      </div>
+
+      <div class="card-actions alert-actions">
+        <span class="card-note">來源：${escapeHtml(row.source_table || "-")}｜建立：${escapeHtml(row.created_at || "-")}</span>
+        <div class="action-buttons">
+          ${unread ? `<button class="watch-btn" type="button" data-alert-read="${escapeHtml(row.id)}">標記已讀</button>` : ""}
+          <button class="detail-btn" type="button" data-alert-detail="${escapeHtml(stockCode)}">看股票</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderAlertsPage(result = null) {
+  const raw = result || { data: state.latestRows, summary: state.alertSummary || {} };
+  const rows = Array.isArray(raw.data) ? raw.data : [];
+  const summary = raw.summary || {};
+
+  state.latestRows = rows;
+  state.alertSummary = summary;
+  state.alertUnreadCount = Number(summary.unread_count || state.alertUnreadCount || 0);
+
+  stockList.innerHTML = [
+    renderAlertsToolbar(summary),
+    rows.length > 0 ? rows.map(renderAlertCard).join("") : renderEmptyAlerts(),
+  ].join("");
+}
+
+async function updateAlertsBadge() {
+  if (!alertsTabBadge) return;
+
+  if (!isAuthenticated()) {
+    state.alertUnreadCount = 0;
+    alertsTabBadge.textContent = "0";
+    alertsTabBadge.classList.add("hidden");
+    return;
+  }
+
+  try {
+    const data = await fetchJson("/watchlist/alerts/unread-count", {
+      method: "GET",
+      auth: true,
+    });
+    const unreadCount = Number(data?.unread_count || 0);
+    state.alertUnreadCount = unreadCount;
+    alertsTabBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+    alertsTabBadge.classList.toggle("hidden", unreadCount <= 0);
+  } catch (error) {
+    console.warn("Update alert badge failed:", error);
+  }
+}
+
+async function loadAlerts() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    state.latestRows = [];
+    state.alertSummary = null;
+    renderAlertsLoginPrompt();
+    await updateAlertsBadge();
+    return;
+  }
+
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const result = await fetchJson(getAlertFilterQuery(), {
+      method: "GET",
+      auth: true,
+      raw: true,
+    });
+
+    renderAlertsPage(result);
+    await updateAlertsBadge();
+    showTemporaryStatus(`已更新 ${Number(result.count || 0)} 筆提醒。`, "success");
+  } catch (error) {
+    stockList.innerHTML = "";
+    showStatus(`提醒讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleAlertFilter(button) {
+  const filter = button.dataset.alertFilter || "unread";
+  state.alertFilter = filter;
+  await loadList();
+}
+
+async function handleAlertMarkRead(button) {
+  const alertId = button.dataset.alertRead;
+  if (!alertId) return;
+
+  button.disabled = true;
+  button.textContent = "處理中...";
+
+  try {
+    await fetchJson(`/watchlist/alerts/${encodeURIComponent(alertId)}/read`, {
+      method: "POST",
+      auth: true,
+    });
+    await loadAlerts();
+    showTemporaryStatus("提醒已標記為已讀。", "success");
+  } catch (error) {
+    showStatus(`標記已讀失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = "標記已讀";
+  }
+}
+
+async function handleAlertsReadAll(button) {
+  if (!isAuthenticated()) return;
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "處理中...";
+
+  try {
+    const result = await fetchJson("/watchlist/alerts/read-all", {
+      method: "POST",
+      auth: true,
+      raw: true,
+    });
+    await loadAlerts();
+    showTemporaryStatus(`已標記 ${Number(result.affected_rows || 0)} 筆提醒為已讀。`, "success");
+  } catch (error) {
+    showStatus(`全部已讀失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 function renderAccountPage() {
   hideStatus();
 
@@ -1255,6 +1548,7 @@ function renderAccountPage() {
           <strong>自選股已可使用：</strong>這個 Google 帳號會看到自己的股票清單，不會和其他使用者混在一起。
         </div>
         <div class="account-actions">
+          <button class="detail-btn secondary-action" type="button" data-go-page="alerts">提醒中心</button>
           <button class="detail-btn" type="button" data-logout="true">登出</button>
         </div>
       </article>
@@ -2097,6 +2391,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "alerts") {
+    await loadAlerts();
+    return;
+  }
+
   if (state.page === "watchlist") {
     if (!isAuthenticated()) {
       setLoading(false);
@@ -2294,6 +2593,30 @@ stockList.addEventListener("click", (event) => {
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
+    return;
+  }
+
+  const alertFilterButton = event.target.closest("[data-alert-filter]");
+  if (alertFilterButton) {
+    handleAlertFilter(alertFilterButton);
+    return;
+  }
+
+  const alertReadButton = event.target.closest("[data-alert-read]");
+  if (alertReadButton) {
+    handleAlertMarkRead(alertReadButton);
+    return;
+  }
+
+  const alertReadAllButton = event.target.closest("[data-alert-read-all]");
+  if (alertReadAllButton) {
+    handleAlertsReadAll(alertReadAllButton);
+    return;
+  }
+
+  const alertDetailButton = event.target.closest("[data-alert-detail]");
+  if (alertDetailButton) {
+    openDetail(alertDetailButton.dataset.alertDetail);
     return;
   }
 
