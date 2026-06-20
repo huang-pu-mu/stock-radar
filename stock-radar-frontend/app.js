@@ -43,6 +43,10 @@ const state = {
   strategyTrackKeys: new Set(),
   strategyTrackSummary: null,
   strategyPerformanceMetric: "current",
+  strategyTrackFilterStrategy: "",
+  strategyTrackFilterStatus: "",
+  strategyTrackSearch: "",
+  strategyTrackSort: "created_desc",
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -327,6 +331,38 @@ const STRATEGY_PERFORMANCE_METRICS = [
   { key: "5d", field: "return_5d_percent", label: "5 日報酬", shortLabel: "5日" },
 ];
 
+const STRATEGY_TRACK_STATUS_OPTIONS = [
+  { key: "", label: "全部狀態" },
+  { key: "strong", label: "只看轉強" },
+  { key: "neutral", label: "只看觀察中" },
+  { key: "weak", label: "只看轉弱" },
+  { key: "pending", label: "只看等待資料" },
+];
+
+const STRATEGY_TRACK_STATUS_TEXT = {
+  strong: "轉強",
+  neutral: "觀察中",
+  weak: "轉弱",
+  pending: "等待資料",
+};
+
+const STRATEGY_TRACK_SORT_OPTIONS = [
+  { key: "created_desc", label: "加入時間新到舊" },
+  { key: "created_asc", label: "加入時間舊到新" },
+  { key: "current_desc", label: "目前報酬高到低" },
+  { key: "current_asc", label: "目前報酬低到高" },
+  { key: "1d_desc", label: "1 日報酬高到低" },
+  { key: "1d_asc", label: "1 日報酬低到高" },
+  { key: "3d_desc", label: "3 日報酬高到低" },
+  { key: "3d_asc", label: "3 日報酬低到高" },
+  { key: "5d_desc", label: "5 日報酬高到低" },
+  { key: "5d_asc", label: "5 日報酬低到高" },
+  { key: "source_score_desc", label: "加入時分數高到低" },
+  { key: "source_score_asc", label: "加入時分數低到高" },
+  { key: "stock_code_asc", label: "股票代號小到大" },
+  { key: "stock_code_desc", label: "股票代號大到小" },
+];
+
 function getStrategyPerformanceMetric(key = state.strategyPerformanceMetric) {
   return STRATEGY_PERFORMANCE_METRICS.find((item) => item.key === key) || STRATEGY_PERFORMANCE_METRICS[0];
 }
@@ -347,6 +383,115 @@ function formatReturnPercent(value) {
 function getStrategyPerformanceValue(row, metricKey = state.strategyPerformanceMetric) {
   const metric = getStrategyPerformanceMetric(metricKey);
   return toNumber(pick(row, [metric.field], null));
+}
+
+function getStrategyTrackStatusText(key = state.strategyTrackFilterStatus) {
+  return STRATEGY_TRACK_STATUS_TEXT[key] || "";
+}
+
+function getStrategyTrackSortOption(key = state.strategyTrackSort) {
+  return STRATEGY_TRACK_SORT_OPTIONS.find((item) => item.key === key) || STRATEGY_TRACK_SORT_OPTIONS[0];
+}
+
+function hasStrategyTrackFilters() {
+  return Boolean(state.strategyTrackFilterStrategy || state.strategyTrackFilterStatus || state.strategyTrackSearch);
+}
+
+function getStrategyTrackSearchText(row) {
+  return [
+    pick(row, ["stock_code"], ""),
+    pick(row, ["stock_name"], ""),
+    pick(row, ["strategy_name"], ""),
+    pick(row, ["industry"], ""),
+    pick(row, ["trigger_summary"], ""),
+  ].join(" ").toLowerCase();
+}
+
+function getStrategyTrackStatusKey(row) {
+  const status = String(pick(row, ["performance_status"], "")).trim();
+  if (status === "轉強") return "strong";
+  if (status === "轉弱") return "weak";
+  if (status === "觀察中") return "neutral";
+  if (status === "等待資料") return "pending";
+  return "";
+}
+
+function getStrategyTrackSortValue(row, sortKey = state.strategyTrackSort) {
+  const key = String(sortKey || "created_desc");
+  if (key.startsWith("current_")) return getStrategyPerformanceValue(row, "current");
+  if (key.startsWith("1d_")) return getStrategyPerformanceValue(row, "1d");
+  if (key.startsWith("3d_")) return getStrategyPerformanceValue(row, "3d");
+  if (key.startsWith("5d_")) return getStrategyPerformanceValue(row, "5d");
+  if (key.startsWith("source_score_")) return toNumber(pick(row, ["source_score"], null));
+  if (key.startsWith("created_")) return Date.parse(pick(row, ["created_at"], ""));
+  return String(pick(row, ["stock_code"], ""));
+}
+
+function sortStrategyTrackingRows(rows, sortKey = state.strategyTrackSort) {
+  const direction = String(sortKey || "created_desc").endsWith("_asc") ? "asc" : "desc";
+  const isTextSort = String(sortKey || "").startsWith("stock_code_");
+
+  return [...rows].sort((a, b) => {
+    if (isTextSort) {
+      const result = String(getStrategyTrackSortValue(a, sortKey)).localeCompare(String(getStrategyTrackSortValue(b, sortKey)));
+      return direction === "asc" ? result : -result;
+    }
+
+    const aValue = getStrategyTrackSortValue(a, sortKey);
+    const bValue = getStrategyTrackSortValue(b, sortKey);
+    const aValid = Number.isFinite(Number(aValue));
+    const bValid = Number.isFinite(Number(bValue));
+
+    if (!aValid && !bValid) return String(pick(a, ["stock_code"], "")).localeCompare(String(pick(b, ["stock_code"], "")));
+    if (!aValid) return 1;
+    if (!bValid) return -1;
+
+    return direction === "asc" ? Number(aValue) - Number(bValue) : Number(bValue) - Number(aValue);
+  });
+}
+
+function getVisibleStrategyTrackingRows(rows = state.latestRows) {
+  const keyword = String(state.strategyTrackSearch || "").trim().toLowerCase();
+  let visibleRows = Array.isArray(rows) ? [...rows] : [];
+
+  if (state.strategyTrackFilterStrategy) {
+    visibleRows = visibleRows.filter((row) => pick(row, ["strategy_key"], "") === state.strategyTrackFilterStrategy);
+  }
+
+  if (state.strategyTrackFilterStatus) {
+    visibleRows = visibleRows.filter((row) => getStrategyTrackStatusKey(row) === state.strategyTrackFilterStatus);
+  }
+
+  if (keyword) {
+    visibleRows = visibleRows.filter((row) => getStrategyTrackSearchText(row).includes(keyword));
+  }
+
+  return sortStrategyTrackingRows(visibleRows, state.strategyTrackSort);
+}
+
+function buildStrategyTrackingQueryString() {
+  const params = new URLSearchParams();
+  params.set("active", "1");
+  params.set("limit", "300");
+  params.set("source_limit", "500");
+  params.set("metric", state.strategyPerformanceMetric);
+  params.set("sort", state.strategyTrackSort);
+
+  if (state.strategyTrackFilterStrategy) params.set("strategy", state.strategyTrackFilterStrategy);
+  if (state.strategyTrackFilterStatus) params.set("status", state.strategyTrackFilterStatus);
+  if (state.strategyTrackSearch) params.set("search", state.strategyTrackSearch);
+
+  return params.toString();
+}
+
+function buildStrategyTrackingFilterSummary(count) {
+  const filters = [];
+  const strategy = getStrategyOptions().find((item) => item.key === state.strategyTrackFilterStrategy);
+  if (strategy) filters.push(`策略：${strategy.name}`);
+  if (state.strategyTrackFilterStatus) filters.push(`狀態：${getStrategyTrackStatusText()}`);
+  if (state.strategyTrackSearch) filters.push(`搜尋：${state.strategyTrackSearch}`);
+  filters.push(`排序：${getStrategyTrackSortOption().label}`);
+  return `${formatNumber(count)} 筆結果｜${filters.join("｜")}`;
 }
 
 function buildStrategyPerformanceSummary(rows, metricKey = state.strategyPerformanceMetric) {
@@ -1642,7 +1787,30 @@ function handleStrategyPerformanceMetric(button) {
   const metric = button.dataset.strategyPerformanceMetric;
   if (!STRATEGY_PERFORMANCE_METRICS.some((item) => item.key === metric)) return;
   state.strategyPerformanceMetric = metric;
-  renderStrategyTrackingPage();
+  loadStrategyTracking();
+}
+
+function handleStrategyTrackFilterSubmit(form) {
+  const formData = new FormData(form);
+  const strategy = String(formData.get("strategy") || "").trim();
+  const status = String(formData.get("status") || "").trim();
+  const sort = String(formData.get("sort") || "created_desc").trim();
+  const search = String(formData.get("search") || "").trim().slice(0, 50);
+
+  state.strategyTrackFilterStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
+  state.strategyTrackFilterStatus = STRATEGY_TRACK_STATUS_OPTIONS.some((item) => item.key === status) ? status : "";
+  state.strategyTrackSort = STRATEGY_TRACK_SORT_OPTIONS.some((item) => item.key === sort) ? sort : "created_desc";
+  state.strategyTrackSearch = search;
+
+  loadStrategyTracking();
+}
+
+function resetStrategyTrackFilters() {
+  state.strategyTrackFilterStrategy = "";
+  state.strategyTrackFilterStatus = "";
+  state.strategyTrackSearch = "";
+  state.strategyTrackSort = "created_desc";
+  loadStrategyTracking();
 }
 
 async function handleStrategyTrackAction(button) {
@@ -1731,13 +1899,72 @@ function renderStrategyTrackingLoginPrompt() {
   `;
 }
 
+function renderStrategyTrackingFilters(resultCount = 0) {
+  const strategyOptions = getStrategyOptions();
+  const hasFilters = hasStrategyTrackFilters();
+
+  return `
+    <section class="strategy-dashboard-card strategy-track-filter-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.3-2-6 篩選與排序</p>
+          <h3>策略追蹤篩選</h3>
+          <p>依策略、股票、狀態與報酬排序，快速找出正在轉強或需要檢查的追蹤股票。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>${escapeHtml(buildStrategyTrackingFilterSummary(resultCount))}</span>
+        </div>
+      </div>
+
+      <form class="strategy-track-filter-form" data-strategy-track-filter-form>
+        <label>
+          <span>搜尋股票 / 產業</span>
+          <input name="search" type="search" value="${escapeHtml(state.strategyTrackSearch)}" placeholder="例如：2330、台積電、半導體" />
+        </label>
+        <label>
+          <span>來源策略</span>
+          <select name="strategy">
+            <option value="">全部策略</option>
+            ${strategyOptions.map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyTrackFilterStrategy ? "selected" : ""}>${escapeHtml(item.name)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          <span>表現狀態</span>
+          <select name="status">
+            ${STRATEGY_TRACK_STATUS_OPTIONS.map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyTrackFilterStatus ? "selected" : ""}>${escapeHtml(item.label)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          <span>排序方式</span>
+          <select name="sort">
+            ${STRATEGY_TRACK_SORT_OPTIONS.map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyTrackSort ? "selected" : ""}>${escapeHtml(item.label)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <div class="strategy-track-filter-actions">
+          <button class="search-btn" type="submit">套用篩選</button>
+          <button class="ghost-btn" type="button" data-strategy-track-filter-reset="true" ${hasFilters ? "" : "disabled"}>清除篩選</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
 function renderEmptyStrategyTracking() {
+  const hasFilters = hasStrategyTrackFilters();
   stockList.innerHTML = `
+    ${renderStrategyTrackingFilters(0)}
     <article class="search-intro-card strategies-empty-card">
       <div class="intro-icon">📌</div>
-      <h3>目前還沒有策略追蹤</h3>
-      <p>請先到「策略選股」，看到想觀察的股票後按「策略追蹤」。</p>
+      <h3>${hasFilters ? "目前沒有符合篩選條件的策略追蹤" : "目前還沒有策略追蹤"}</h3>
+      <p>${hasFilters ? "可以清除篩選、改用其他排序，或回到策略選股加入更多追蹤標的。" : "請先到「策略選股」，看到想觀察的股票後按「策略追蹤」。"}</p>
       <div class="example-row">
+        ${hasFilters ? `<button class="example-btn" type="button" data-strategy-track-filter-reset="true">清除篩選</button>` : ""}
         <button class="example-btn" type="button" data-go-page="strategies">去策略選股</button>
       </div>
     </article>
@@ -1756,8 +1983,8 @@ function renderStrategyPerformanceMetricButtons() {
   `;
 }
 
-function renderStrategyTrackingSummary() {
-  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+function renderStrategyTrackingSummary(rowsOverride = null) {
+  const rows = Array.isArray(rowsOverride) ? rowsOverride : getVisibleStrategyTrackingRows();
   const apiSummary = state.strategyTrackSummary || {};
   const localSummary = buildStrategyPerformanceSummary(rows, state.strategyPerformanceMetric);
   const summary = apiSummary.performance && apiSummary.performance.metric === localSummary.metric.key ? apiSummary.performance : null;
@@ -1936,7 +2163,7 @@ function renderStrategyTrackingCard(row, index) {
 }
 
 function renderStrategyTrackingPage() {
-  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+  const rows = getVisibleStrategyTrackingRows();
 
   if (rows.length === 0) {
     renderEmptyStrategyTracking();
@@ -1944,7 +2171,8 @@ function renderStrategyTrackingPage() {
   }
 
   stockList.innerHTML = `
-    ${renderStrategyTrackingSummary()}
+    ${renderStrategyTrackingFilters(rows.length)}
+    ${renderStrategyTrackingSummary(rows)}
     <div class="strategy-result-note">
       這裡只表示「追蹤後的統計結果」，不是買賣建議。樣本數少時，策略排名只能先當觀察參考。
     </div>
@@ -1963,7 +2191,7 @@ async function loadStrategyTracking() {
   renderLoadingCards();
 
   try {
-    const result = await fetchJson(`/strategy-watchlist/performance?active=1&limit=100&metric=${encodeURIComponent(state.strategyPerformanceMetric)}`, {
+    const result = await fetchJson(`/strategy-watchlist/performance?${buildStrategyTrackingQueryString()}`, {
       method: "GET",
       auth: true,
       raw: true,
@@ -3874,6 +4102,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyTrackFilterForm = event.target.closest("[data-strategy-track-filter-form]");
+  if (strategyTrackFilterForm) {
+    event.preventDefault();
+    handleStrategyTrackFilterSubmit(strategyTrackFilterForm);
+    return;
+  }
+
   const alertRuleForm = event.target.closest("[data-alert-rule-form]");
   if (alertRuleForm) {
     event.preventDefault();
@@ -3909,6 +4144,12 @@ stockList.addEventListener("click", (event) => {
   const strategyPerformanceButton = event.target.closest("[data-strategy-performance-metric]");
   if (strategyPerformanceButton) {
     handleStrategyPerformanceMetric(strategyPerformanceButton);
+    return;
+  }
+
+  const strategyTrackFilterResetButton = event.target.closest("[data-strategy-track-filter-reset]");
+  if (strategyTrackFilterResetButton) {
+    resetStrategyTrackFilters();
     return;
   }
 

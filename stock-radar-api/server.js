@@ -400,14 +400,106 @@ function parseNullableDecimalValue(value) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+const STRATEGY_TRACKING_STATUS_MAP = {
+  strong: "轉強",
+  weak: "轉弱",
+  neutral: "觀察中",
+  pending: "等待資料",
+  "轉強": "轉強",
+  "轉弱": "轉弱",
+  "觀察中": "觀察中",
+  "等待資料": "等待資料",
+};
+
+const STRATEGY_TRACKING_SORT_OPTIONS = {
+  created_desc: { key: "created_desc", field: "created_at", direction: "desc", type: "date", label: "加入時間新到舊" },
+  created_asc: { key: "created_asc", field: "created_at", direction: "asc", type: "date", label: "加入時間舊到新" },
+  current_desc: { key: "current_desc", field: "current_return_percent", direction: "desc", type: "number", label: "目前報酬高到低" },
+  current_asc: { key: "current_asc", field: "current_return_percent", direction: "asc", type: "number", label: "目前報酬低到高" },
+  "1d_desc": { key: "1d_desc", field: "return_1d_percent", direction: "desc", type: "number", label: "1 日報酬高到低" },
+  "1d_asc": { key: "1d_asc", field: "return_1d_percent", direction: "asc", type: "number", label: "1 日報酬低到高" },
+  "3d_desc": { key: "3d_desc", field: "return_3d_percent", direction: "desc", type: "number", label: "3 日報酬高到低" },
+  "3d_asc": { key: "3d_asc", field: "return_3d_percent", direction: "asc", type: "number", label: "3 日報酬低到高" },
+  "5d_desc": { key: "5d_desc", field: "return_5d_percent", direction: "desc", type: "number", label: "5 日報酬高到低" },
+  "5d_asc": { key: "5d_asc", field: "return_5d_percent", direction: "asc", type: "number", label: "5 日報酬低到高" },
+  source_score_desc: { key: "source_score_desc", field: "source_score", direction: "desc", type: "number", label: "加入時分數高到低" },
+  source_score_asc: { key: "source_score_asc", field: "source_score", direction: "asc", type: "number", label: "加入時分數低到高" },
+  stock_code_asc: { key: "stock_code_asc", field: "stock_code", direction: "asc", type: "text", label: "股票代號小到大" },
+  stock_code_desc: { key: "stock_code_desc", field: "stock_code", direction: "desc", type: "text", label: "股票代號大到小" },
+};
+
+function normalizeStrategyTrackingStatus(value) {
+  const key = String(value || "").trim();
+  return STRATEGY_TRACKING_STATUS_MAP[key] || "";
+}
+
+function normalizeStrategyTrackingSearchText(value) {
+  return String(value || "").trim().slice(0, 50);
+}
+
+function getStrategyTrackingSortOption(value) {
+  const key = String(value || "created_desc").trim();
+  return STRATEGY_TRACKING_SORT_OPTIONS[key] || STRATEGY_TRACKING_SORT_OPTIONS.created_desc;
+}
+
+function compareNullableNumbers(a, b, direction = "desc") {
+  const aNumber = Number(a);
+  const bNumber = Number(b);
+  const aValid = Number.isFinite(aNumber);
+  const bValid = Number.isFinite(bNumber);
+
+  if (!aValid && !bValid) return 0;
+  if (!aValid) return 1;
+  if (!bValid) return -1;
+
+  return direction === "asc" ? aNumber - bNumber : bNumber - aNumber;
+}
+
+function compareNullableDates(a, b, direction = "desc") {
+  const aTime = Date.parse(a || "");
+  const bTime = Date.parse(b || "");
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+
+  if (!aValid && !bValid) return 0;
+  if (!aValid) return 1;
+  if (!bValid) return -1;
+
+  return direction === "asc" ? aTime - bTime : bTime - aTime;
+}
+
+function sortStrategyTrackingRows(rows, sortKey = "created_desc") {
+  const sortOption = getStrategyTrackingSortOption(sortKey);
+
+  return [...rows].sort((a, b) => {
+    let result = 0;
+
+    if (sortOption.type === "number") {
+      result = compareNullableNumbers(a[sortOption.field], b[sortOption.field], sortOption.direction);
+    } else if (sortOption.type === "date") {
+      result = compareNullableDates(a[sortOption.field], b[sortOption.field], sortOption.direction);
+    } else {
+      result = String(a[sortOption.field] || "").localeCompare(String(b[sortOption.field] || ""), "zh-Hant");
+      if (sortOption.direction === "desc") result *= -1;
+    }
+
+    if (result !== 0) return result;
+    return String(a.stock_code || "").localeCompare(String(b.stock_code || ""));
+  });
+}
+
 async function getStrategyTrackingRows(userId, filters = {}) {
   const conditions = ["t.user_id = ?"];
   const params = [userId];
   const strategyKey = normalizeStrategyKeyValue(filters.strategy || filters.strategy_key);
   const stockCode = normalizeStockCodeValue(filters.stock_code || filters.stockCode);
   const active = filters.active ?? filters.is_active;
+  const search = normalizeStrategyTrackingSearchText(filters.search || filters.keyword || filters.q);
+  const status = normalizeStrategyTrackingStatus(filters.status || filters.performance_status);
+  const sortKey = getStrategyTrackingSortOption(filters.sort || filters.order).key;
   const limit = parsePositiveInteger(filters.limit, 100, 1, 500);
   const offset = parsePositiveInteger(filters.offset, 0, 0, 100000);
+  const sqlLimit = parsePositiveInteger(filters.source_limit || filters.sql_limit, 500, limit, 1000);
 
   if (strategyKey) {
     conditions.push("t.strategy_key = ?");
@@ -422,6 +514,19 @@ async function getStrategyTrackingRows(userId, filters = {}) {
   if (active !== undefined && active !== null && active !== "") {
     conditions.push("t.is_active = ?");
     params.push(parseBooleanFlag(active, true));
+  }
+
+  if (search) {
+    conditions.push(`(
+      t.stock_code LIKE ?
+      OR t.stock_name LIKE ?
+      OR s.stock_name LIKE ?
+      OR t.strategy_name LIKE ?
+      OR t.trigger_summary LIKE ?
+      OR s.industry LIKE ?
+    )`);
+    const keyword = `%${search}%`;
+    params.push(keyword, keyword, keyword, keyword, keyword, keyword);
   }
 
   const rows = await query(
@@ -536,12 +641,18 @@ async function getStrategyTrackingRows(userId, filters = {}) {
      )
     WHERE ${conditions.join(" AND ")}
     ORDER BY t.is_active DESC, t.created_at DESC, t.id DESC
-    LIMIT ? OFFSET ?
+    LIMIT ?
     `,
-    [...params, limit, offset],
+    [...params, sqlLimit],
   );
 
-  return rows.map(enrichStrategyTrackingPerformance);
+  const enrichedRows = rows.map(enrichStrategyTrackingPerformance);
+  const filteredRows = status
+    ? enrichedRows.filter((row) => row.performance_status === status)
+    : enrichedRows;
+  const sortedRows = sortStrategyTrackingRows(filteredRows, sortKey);
+
+  return sortedRows.slice(offset, offset + limit);
 }
 
 const STRATEGY_TRACKING_METRICS = {
@@ -3491,6 +3602,9 @@ app.get("/strategy-watchlist/rankings", requireAuth, async (req, res) => {
     const rows = await getStrategyTrackingRows(req.user.id, {
       strategy: req.query.strategy,
       stock_code: req.query.stock_code,
+      status: req.query.status,
+      search: req.query.search,
+      sort: req.query.sort || req.query.order,
       active: req.query.active ?? 1,
       limit: parsePositiveInteger(req.query.source_limit, 500, 1, 500),
       offset: 0,
@@ -3531,6 +3645,9 @@ app.get("/strategy-watchlist/performance", requireAuth, async (req, res) => {
     const rows = await getStrategyTrackingRows(req.user.id, {
       strategy: req.query.strategy,
       stock_code: req.query.stock_code,
+      status: req.query.status,
+      search: req.query.search,
+      sort: req.query.sort || req.query.order,
       active: req.query.active ?? 1,
       limit: parsePositiveInteger(req.query.limit, 100, 1, 500),
       offset: parsePositiveInteger(req.query.offset, 0, 0, 100000),
@@ -3540,6 +3657,13 @@ app.get("/strategy-watchlist/performance", requireAuth, async (req, res) => {
       success: true,
       count: rows.length,
       metric,
+      filters: {
+        strategy: req.query.strategy || "",
+        status: req.query.status || "",
+        search: req.query.search || "",
+        sort: getStrategyTrackingSortOption(req.query.sort || req.query.order).key,
+        active: req.query.active ?? 1,
+      },
       summary: convertBigIntToString(buildStrategyTrackingPerformanceSummary(rows, metric)),
       rankings: convertBigIntToString(buildStrategyTrackingRankings(rows, metric, 10)),
       data: convertBigIntToString(rows),
@@ -3588,6 +3712,13 @@ app.get("/strategy-watchlist", requireAuth, async (req, res) => {
     res.json({
       success: true,
       count: rows.length,
+      filters: {
+        strategy: req.query.strategy || "",
+        status: req.query.status || "",
+        search: req.query.search || "",
+        sort: getStrategyTrackingSortOption(req.query.sort || req.query.order).key,
+        active: req.query.active ?? 1,
+      },
       summary: convertBigIntToString({
         total_count: Number(summaryRows[0]?.total_count || 0),
         active_count: Number(summaryRows[0]?.active_count || 0),
