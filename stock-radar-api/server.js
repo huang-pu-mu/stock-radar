@@ -292,7 +292,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.4",
+    version: "stock-radar-api-v1.2.4-hotfix1",
   });
 });
 
@@ -300,7 +300,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.4",
+    version: "stock-radar-api-v1.2.4-hotfix1",
     time: new Date().toISOString(),
   });
 });
@@ -583,6 +583,101 @@ app.get("/prices/:stockCode", async (req, res) => {
     });
   }
 });
+
+
+async function getLatestQuoteFromDailyPrices(stockCode) {
+  const rows = await query(
+    `
+    SELECT
+      s.stock_code,
+      s.stock_name,
+      s.market_type,
+      s.industry,
+      DATE_FORMAT(dp.trade_date, '%Y-%m-%d') AS trade_date,
+      dp.open_price,
+      dp.high_price,
+      dp.low_price,
+      dp.close_price,
+      dp.close_price AS last_price,
+      dp.price_change,
+      dp.price_change_percent,
+      CAST(dp.volume AS CHAR) AS volume,
+      CAST(dp.transaction_amount AS CHAR) AS transaction_amount,
+      CAST(dp.transaction_count AS CHAR) AS transaction_count,
+      DATE_FORMAT(dp.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM daily_prices dp
+    LEFT JOIN stocks s ON s.stock_code = dp.stock_code
+    WHERE dp.stock_code = ?
+    ORDER BY dp.trade_date DESC
+    LIMIT 1
+    `,
+    [stockCode],
+  );
+
+  if (!rows.length) {
+    return null;
+  }
+
+  return {
+    ...rows[0],
+    source: "daily_prices",
+    is_realtime: false,
+    quote_type: "latest_close",
+    notice: "目前尚未接入即時行情資料源，先以資料庫最新收盤行情顯示。",
+  };
+}
+
+async function latestQuoteFallbackHandler(req, res) {
+  try {
+    const stockCode = req.params.stockCode;
+    const quote = await getLatestQuoteFromDailyPrices(stockCode);
+
+    if (!quote) {
+      return res.json({
+        success: true,
+        stock_code: stockCode,
+        data: null,
+        message: "目前查無最新收盤行情資料。",
+      });
+    }
+
+    return res.json({
+      success: true,
+      stock_code: stockCode,
+      data: convertBigIntToString(quote),
+    });
+  } catch (error) {
+    console.error("Get latest quote fallback failed:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "查詢最新行情失敗",
+      error: error.message,
+    });
+  }
+}
+
+app.get(
+  [
+    "/quote/:stockCode",
+    "/quotes/:stockCode",
+    "/realtime/:stockCode",
+    "/realtime-quotes/:stockCode",
+    "/stock/:stockCode/quote",
+    "/stock/:stockCode/realtime",
+    "/stocks/:stockCode/quote",
+    "/stocks/:stockCode/realtime",
+    "/api/quote/:stockCode",
+    "/api/quotes/:stockCode",
+    "/api/realtime/:stockCode",
+    "/api/realtime-quotes/:stockCode",
+    "/api/stock/:stockCode/quote",
+    "/api/stock/:stockCode/realtime",
+    "/api/stocks/:stockCode/quote",
+    "/api/stocks/:stockCode/realtime",
+  ],
+  latestQuoteFallbackHandler,
+);
 
 app.get("/institutional-trades/:stockCode", async (req, res) => {
   try {
@@ -2716,7 +2811,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.4",
+    version: "stock-radar-api-v1.2.4-hotfix1",
   });
 });
 
