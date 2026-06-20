@@ -7,6 +7,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiDir = path.resolve(__dirname, "..");
 const projectDir = path.resolve(apiDir, "..");
+const expectedApiVersion = "stock-radar-api-v1.2.11";
+const expectedPwaCacheVersion = 29;
+
 
 const requiredFiles = [
   "stock-radar-api/scripts/importQuarterlyEps.js",
@@ -20,6 +23,10 @@ const requiredFiles = [
   "stock-radar-api/scripts/setupMicrostructureTables.js",
   "stock-radar-api/scripts/importMajorHolders.js",
   "stock-radar-api/scripts/setupMajorHolderStats.js",
+  "stock-radar-frontend/index.html",
+  "stock-radar-frontend/app.js",
+  "stock-radar-frontend/style.css",
+  "stock-radar-frontend/service-worker.js",
 ];
 
 const requiredScripts = [
@@ -60,6 +67,25 @@ const requiredTables = [
   "major_holder_stats",
 ];
 
+const requiredServerSnippets = [
+  { name: expectedApiVersion, snippet: expectedApiVersion },
+  { name: "GET /v12/status", snippet: 'app.get("/v12/status"' },
+  { name: "GET /market/flow/summary", snippet: 'app.get("/market/flow/summary"' },
+  { name: "GET /microstructure/status", snippet: 'app.get("/microstructure/status"' },
+  { name: "GET /major-holders/:stockCode/analysis", snippet: 'app.get("/major-holders/:stockCode/analysis"' },
+  { name: "GET /calendar-events/:stockCode", snippet: 'app.get("/calendar-events/:stockCode"' },
+  { name: "GET /etf-profiles/:stockCode", snippet: 'app.get("/etf-profiles/:stockCode"' },
+];
+
+const requiredFrontendSnippets = [
+  { name: "PWA v29 前端版本常數", snippet: 'const FRONTEND_VERSION = "stock-radar-pwa-v29"' },
+  { name: "資金流向頁籤", snippet: 'data-page="marketFlow"' },
+  { name: "主力籌碼頁籤", snippet: 'data-page="majorHolder"' },
+  { name: "系統狀態卡片", snippet: "renderSystemStatusShell" },
+  { name: "系統狀態 API", snippet: '/v12/status' },
+  { name: "API 網址快取清除", snippet: "resetStockRadarApiUrl" },
+];
+
 function okText(ok) {
   return ok ? "OK" : "MISSING";
 }
@@ -89,9 +115,9 @@ function checkFiles() {
   const swText = fs.existsSync(swPath) ? fs.readFileSync(swPath, "utf8") : "";
   const swMatch = swText.match(/stock-radar-pwa-v(\d+)/);
   const swVersion = swMatch ? Number(swMatch[1]) : null;
-  const swOk = Number.isFinite(swVersion) && swVersion >= 23;
-  row(swOk, "stock-radar-frontend/service-worker.js", swVersion ? `目前 v${swVersion}，要求 v23 以上` : "找不到 CACHE_NAME 版本");
-  result.push({ name: "stock-radar-frontend/service-worker.js >= v23", ok: swOk });
+  const swOk = Number.isFinite(swVersion) && swVersion >= expectedPwaCacheVersion;
+  row(swOk, "stock-radar-frontend/service-worker.js", swVersion ? `目前 v${swVersion}，要求 v${expectedPwaCacheVersion} 以上` : "找不到 CACHE_NAME 版本");
+  result.push({ name: `stock-radar-frontend/service-worker.js >= v${expectedPwaCacheVersion}`, ok: swOk });
 
   return result;
 }
@@ -157,8 +183,35 @@ async function tableCount(conn, tableName) {
   }
 }
 
+
+function checkSourceConsistency() {
+  console.log("\n[4] API / 前端版本與路由檢查");
+  const result = [];
+  const serverPath = path.join(projectDir, "stock-radar-api/server.js");
+  const appPath = path.join(projectDir, "stock-radar-frontend/app.js");
+  const indexPath = path.join(projectDir, "stock-radar-frontend/index.html");
+  const serverText = fs.existsSync(serverPath) ? fs.readFileSync(serverPath, "utf8") : "";
+  const appText = fs.existsSync(appPath) ? fs.readFileSync(appPath, "utf8") : "";
+  const indexText = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
+  const frontendText = `${appText}\n${indexText}`;
+
+  for (const item of requiredServerSnippets) {
+    const ok = serverText.includes(item.snippet);
+    row(ok, item.name);
+    result.push({ name: item.name, ok });
+  }
+
+  for (const item of requiredFrontendSnippets) {
+    const ok = frontendText.includes(item.snippet);
+    row(ok, item.name);
+    result.push({ name: item.name, ok });
+  }
+
+  return result;
+}
+
 async function checkDatabase() {
-  console.log("\n[4] 資料庫表格檢查");
+  console.log("\n[5] 資料庫表格檢查");
   const result = [];
   let conn;
 
@@ -194,11 +247,12 @@ async function main() {
 
   const fileResults = checkFiles();
   const scriptResults = checkPackageScripts();
+  const sourceResults = checkSourceConsistency();
   const dbResults = await checkDatabase();
-  const allResults = [...fileResults, ...scriptResults, ...dbResults];
+  const allResults = [...fileResults, ...scriptResults, ...sourceResults, ...dbResults];
   const failed = allResults.filter((item) => !item.ok);
 
-  console.log("\n[5] 總結");
+  console.log("\n[6] 總結");
   console.log(`檢查項目：${allResults.length}`);
   console.log(`通過：${allResults.length - failed.length}`);
   console.log(`未通過：${failed.length}`);
@@ -213,7 +267,7 @@ async function main() {
     return;
   }
 
-  console.log("\n✅ V1.2 版本一致性檢查通過，可以接續做自動排程。尚未代表資料內容已完整，仍需另外確認歷史筆數與前端顯示。 ");
+  console.log("\n✅ V1.2 收尾檢查通過。API、前端、PWA 快取、官方資料表與主要指令已完成一致性檢查。");
 }
 
 main().catch(async (error) => {

@@ -10,6 +10,41 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const API_VERSION = "stock-radar-api-v1.2.11";
+const PWA_VERSION = "stock-radar-pwa-v29";
+const V12_STATUS_TABLES = [
+  { table: "market_daily_summaries", label: "市場每日成交總覽", dateColumn: "trade_date" },
+  { table: "monthly_revenues", label: "個股每月營收", dateColumn: "revenue_month" },
+  { table: "quarterly_eps", label: "每季 EPS", dateColumn: "quarter" },
+  { table: "stock_calendar_events", label: "個股 / ETF 行事曆", dateColumn: "event_date" },
+  { table: "etf_profiles", label: "ETF 官方主檔", dateColumn: "updated_at" },
+  { table: "institutional_amount_summaries", label: "三大法人官方金額", dateColumn: "trade_date" },
+  { table: "realtime_quote_snapshots", label: "內外盤 / 五檔快照", dateColumn: "snapshot_at" },
+  { table: "market_order_flow_snapshots", label: "大盤買賣力道快照", dateColumn: "snapshot_at" },
+  { table: "major_holder_stats", label: "TDCC 主力籌碼週資料", dateColumn: "data_date" },
+];
+const V12_FEATURES = [
+  { id: "v12-4", name: "ETF / 個股行事曆前端顯示", status: "done" },
+  { id: "v12-5", name: "ETF 官方主檔完整化", status: "done" },
+  { id: "v12-6", name: "股東會 / 法說會 / 停止過戶資料來源修正", status: "done" },
+  { id: "v12-7", name: "官方歷史資料回補", status: "done" },
+  { id: "v12-8", name: "內外盤 / 五檔 / 大盤買賣力道基礎框架", status: "foundation" },
+  { id: "v12-9", name: "資金流向分析強化", status: "done" },
+  { id: "v12-10", name: "主力籌碼分析強化", status: "done" },
+  { id: "v12-11", name: "V1.2 完整收尾檢查與前端細修", status: "done" },
+];
+const V12_REQUIRED_ROUTES = [
+  "/health",
+  "/v12/status",
+  "/market/flow/summary",
+  "/calendar-events/:stockCode",
+  "/etf-profiles/:stockCode",
+  "/quote/:stockCode",
+  "/order-book/:stockCode",
+  "/microstructure/status",
+  "/major-holders/:stockCode/analysis",
+  "/radar/major-holder",
+];
 const SESSION_EXPIRE_SECONDS = 60 * 60 * 24 * 7;
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -515,11 +550,68 @@ async function getMajorHolderHistories(stockCodes, targetDate, maxPoints = 13) {
   return map;
 }
 
+
+function escapeSqlIdentifier(identifier) {
+  return `\`${String(identifier).replaceAll("`", "``")}\``;
+}
+
+async function tableExists(tableName) {
+  const rows = await query(
+    `
+    SELECT COUNT(*) AS total
+    FROM information_schema.tables
+    WHERE table_schema = DATABASE()
+      AND table_name = ?
+    `,
+    [tableName],
+  );
+
+  return Number(rows[0]?.total || 0) > 0;
+}
+
+async function getTableStatus({ table, label, dateColumn }) {
+  const exists = await tableExists(table);
+
+  if (!exists) {
+    return {
+      table,
+      label,
+      exists: false,
+      total_rows: 0,
+      latest_date: null,
+      status: "missing",
+    };
+  }
+
+  const tableSql = escapeSqlIdentifier(table);
+  const dateSql = dateColumn ? escapeSqlIdentifier(dateColumn) : null;
+  const rows = await query(
+    `
+    SELECT
+      COUNT(*) AS total_rows
+      ${dateSql ? `, DATE_FORMAT(MAX(${dateSql}), '%Y-%m-%d %H:%i:%s') AS latest_date` : ", NULL AS latest_date"}
+    FROM ${tableSql}
+    `,
+  );
+
+  const totalRows = Number(rows[0]?.total_rows || 0);
+
+  return {
+    table,
+    label,
+    exists: true,
+    total_rows: totalRows,
+    latest_date: rows[0]?.latest_date || null,
+    status: totalRows > 0 ? "ready" : "empty",
+  };
+}
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Stock Radar API is running",
-    version: "stock-radar-api-v1.2.10",
+    version: API_VERSION,
+    pwa_version: PWA_VERSION,
   });
 });
 
@@ -527,9 +619,55 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "API health check OK",
-    version: "stock-radar-api-v1.2.10",
+    version: API_VERSION,
+    pwa_version: PWA_VERSION,
     time: new Date().toISOString(),
   });
+});
+
+app.get("/v12/status", async (req, res) => {
+  try {
+    const database = await testConnection();
+    const tables = [];
+
+    for (const tableConfig of V12_STATUS_TABLES) {
+      tables.push(await getTableStatus(tableConfig));
+    }
+
+    const missingTables = tables.filter((item) => item.status === "missing");
+    const emptyTables = tables.filter((item) => item.status === "empty");
+
+    res.json({
+      success: true,
+      data: convertBigIntToString({
+        api_version: API_VERSION,
+        pwa_version: PWA_VERSION,
+        checked_at: new Date().toISOString(),
+        database,
+        tables,
+        table_summary: {
+          total: tables.length,
+          ready: tables.filter((item) => item.status === "ready").length,
+          empty: emptyTables.length,
+          missing: missingTables.length,
+        },
+        features: V12_FEATURES,
+        required_routes: V12_REQUIRED_ROUTES,
+        warnings: [
+          ...missingTables.map((item) => `${item.label} 資料表不存在`),
+          ...emptyTables.map((item) => `${item.label} 目前 0 筆資料`),
+        ],
+      }),
+    });
+  } catch (error) {
+    console.error("查詢 V1.2 狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢 V1.2 狀態失敗，請確認資料庫連線與 V1.2 資料表。",
+      version: API_VERSION,
+      error: error.message,
+    });
+  }
 });
 
 
@@ -3964,7 +4102,7 @@ app.use((req, res) => {
     message: "API 路由不存在，請確認前端 API_BASE_URL 與後端部署版本是否正確。",
     path: req.originalUrl,
     method: req.method,
-    version: "stock-radar-api-v1.2.10",
+    version: API_VERSION,
   });
 });
 

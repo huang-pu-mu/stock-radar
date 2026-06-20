@@ -14,6 +14,7 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+const FRONTEND_VERSION = "stock-radar-pwa-v29";
 const RECENT_SEARCH_STORAGE_KEY = "STOCK_RADAR_RECENT_SEARCHES";
 const AUTH_TOKEN_STORAGE_KEY = "STOCK_RADAR_AUTH_TOKEN";
 
@@ -31,6 +32,8 @@ const state = {
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
+  systemStatus: null,
+  systemStatusError: "",
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -1280,6 +1283,150 @@ function renderGoogleButton() {
   }
 }
 
+
+function renderSystemStatusShell() {
+  return `
+    <article class="account-card system-status-card">
+      <div class="system-status-header">
+        <div>
+          <p class="eyebrow">V1.2 收尾檢查</p>
+          <h3>系統狀態</h3>
+          <p>檢查前端目前打到的 API、後端版本、V1.2 資料表與主要功能狀態。</p>
+        </div>
+        <span class="system-version-pill">${escapeHtml(FRONTEND_VERSION)}</span>
+      </div>
+      <div id="systemStatusCard" class="system-status-body">
+        <div class="status-box muted">系統狀態讀取中...</div>
+      </div>
+      <div class="account-actions system-actions">
+        <button class="detail-btn" type="button" data-system-refresh="true">重新檢查</button>
+        <button class="ghost-btn small-ghost" type="button" data-reset-api-url="true">清除 API 網址快取</button>
+      </div>
+    </article>
+  `;
+}
+
+function getSystemStatusClass(status) {
+  if (status === "ready" || status === "done") return "good";
+  if (status === "foundation" || status === "empty") return "warn";
+  if (status === "missing") return "bad";
+  return "warn";
+}
+
+function getSystemStatusText(status) {
+  const map = {
+    ready: "正常",
+    done: "完成",
+    foundation: "基礎版",
+    empty: "尚無資料",
+    missing: "缺少",
+  };
+  return map[status] || status || "待確認";
+}
+
+function renderSystemTableRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `<div class="result-note">目前沒有回傳資料表檢查結果。</div>`;
+  }
+
+  return `
+    <div class="system-table-list">
+      ${rows.map((row) => `
+        <div class="system-table-row">
+          <div>
+            <strong>${escapeHtml(row.label || row.table)}</strong>
+            <small>${escapeHtml(row.table)}｜最新 ${formatDate(row.latest_date)}</small>
+          </div>
+          <div class="system-table-meta">
+            <span>${formatNumber(row.total_rows || 0)} 筆</span>
+            <span class="status-chip ${getSystemStatusClass(row.status)}">${escapeHtml(getSystemStatusText(row.status))}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSystemFeatureRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return "";
+
+  return `
+    <div class="system-feature-grid">
+      ${rows.map((row) => `
+        <div class="system-feature-item">
+          <span class="status-chip ${getSystemStatusClass(row.status)}">${escapeHtml(row.id || "V1.2")}</span>
+          <strong>${escapeHtml(row.name || "功能")}</strong>
+          <small>${escapeHtml(getSystemStatusText(row.status))}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSystemStatusContent(status = {}) {
+  const tableSummary = status.table_summary || {};
+  const warnings = Array.isArray(status.warnings) ? status.warnings : [];
+  const hasWarning = warnings.length > 0;
+
+  return `
+    <div class="system-summary-grid">
+      ${createInfoItem("前端版本", escapeHtml(FRONTEND_VERSION))}
+      ${createInfoItem("API 版本", escapeHtml(status.api_version || "未知"))}
+      ${createInfoItem("API 網址", `<code>${escapeHtml(API_BASE_URL || "未設定")}</code>`)}
+      ${createInfoItem("檢查時間", escapeHtml(formatDate(status.checked_at) || "-"))}
+      ${createInfoItem("資料表正常", `${formatNumber(tableSummary.ready || 0)} / ${formatNumber(tableSummary.total || 0)}`)}
+      ${createInfoItem("警告數", `<span class="${hasWarning ? "price-down" : "price-up"}">${formatNumber(warnings.length)}</span>`)}
+    </div>
+
+    ${hasWarning ? `
+      <div class="result-note warning-note">
+        <strong>待確認：</strong>${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+    ` : `
+      <div class="result-note success-note">
+        <strong>目前狀態：</strong>V1.2 主要資料表與 API 狀態檢查完成，未發現缺表警告。
+      </div>
+    `}
+
+    <section class="system-section">
+      <h4>V1.2 功能狀態</h4>
+      ${renderSystemFeatureRows(status.features)}
+    </section>
+
+    <section class="system-section">
+      <h4>V1.2 資料表狀態</h4>
+      ${renderSystemTableRows(status.tables)}
+    </section>
+  `;
+}
+
+async function loadSystemStatus() {
+  const box = document.getElementById("systemStatusCard");
+  if (!box) return;
+
+  box.innerHTML = `<div class="status-box muted">系統狀態讀取中...</div>`;
+
+  try {
+    const status = await fetchJson("/v12/status");
+    state.systemStatus = status;
+    state.systemStatusError = "";
+    box.innerHTML = renderSystemStatusContent(status || {});
+  } catch (error) {
+    state.systemStatus = null;
+    state.systemStatusError = error.message;
+    box.innerHTML = `
+      <div class="status-box error">
+        <strong>系統狀態讀取失敗</strong><br />
+        ${escapeHtml(error.message)}
+      </div>
+      <div class="result-note">
+        <strong>目前 API 網址：</strong><code>${escapeHtml(API_BASE_URL || "未設定")}</code><br />
+        如果網址錯誤，按「清除 API 網址快取」後重新整理。
+      </div>
+    `;
+  }
+}
+
 function renderAccountPage() {
   hideStatus();
 
@@ -1311,7 +1458,9 @@ function renderAccountPage() {
           <button class="detail-btn" type="button" data-logout="true">登出</button>
         </div>
       </article>
+      ${renderSystemStatusShell()}
     `;
+    window.setTimeout(loadSystemStatus, 0);
     return;
   }
 
@@ -1326,9 +1475,11 @@ function renderAccountPage() {
         <strong>管理提醒：</strong>API 端只需要設定 <code>GOOGLE_CLIENT_ID</code> 與 <code>JWT_SECRET</code>。
       </div>
     </article>
+    ${renderSystemStatusShell()}
   `;
 
   renderGoogleButton();
+  window.setTimeout(loadSystemStatus, 0);
 }
 
 
@@ -2972,6 +3123,18 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const systemRefreshButton = event.target.closest("[data-system-refresh]");
+  if (systemRefreshButton) {
+    loadSystemStatus();
+    return;
+  }
+
+  const resetApiUrlButton = event.target.closest("[data-reset-api-url]");
+  if (resetApiUrlButton) {
+    window.resetStockRadarApiUrl();
+    return;
+  }
+
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
