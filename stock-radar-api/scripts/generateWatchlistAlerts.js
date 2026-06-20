@@ -121,7 +121,15 @@ async function resolveTradeDate(conn, requestedDate) {
   return latestTradeDate;
 }
 
-async function syncDefaultAlertRules(conn) {
+async function syncDefaultAlertRules(conn, userId = null) {
+  const params = [];
+  let userCondition = "";
+
+  if (userId) {
+    userCondition = "AND w.user_id = ?";
+    params.push(userId);
+  }
+
   const result = await conn.query(
     `
     INSERT IGNORE INTO watchlist_alert_rules (user_id, stock_code)
@@ -129,13 +137,23 @@ async function syncDefaultAlertRules(conn) {
     FROM watchlists w
     INNER JOIN users u ON u.id = w.user_id
     WHERE u.is_active = 1
+      ${userCondition}
     `,
+    params,
   );
 
   return Number(result.affectedRows || 0);
 }
 
-async function getActiveRules(conn) {
+async function getActiveRules(conn, userId = null) {
+  const params = [];
+  let userCondition = "";
+
+  if (userId) {
+    userCondition = "AND r.user_id = ?";
+    params.push(userId);
+  }
+
   return conn.query(
     `
     SELECT
@@ -148,8 +166,10 @@ async function getActiveRules(conn) {
     LEFT JOIN stocks s ON s.stock_code = r.stock_code
     LEFT JOIN etf_profiles ep ON ep.stock_code = r.stock_code
     WHERE r.is_active = 1
+      ${userCondition}
     ORDER BY r.user_id, r.stock_code
     `,
+    params,
   );
 }
 
@@ -512,30 +532,43 @@ async function buildAlertsForRule(conn, rule, tradeDate) {
   ].filter(Boolean);
 }
 
-async function main() {
-  const requestedDate = normalizeDate(process.argv[2]);
+export async function generateWatchlistAlerts(options = {}) {
+  const requestedDate = normalizeDate(options.date);
+  const userId = options.userId ? integer(options.userId) : null;
+  const logger = options.logger || console;
+  const closePool = options.closePool === true;
   let conn;
 
   try {
-    console.log("====================================");
-    console.log("開始產生 V1.3 自選股提醒");
-    console.log(`指定日期：${requestedDate}`);
-    console.log("====================================");
+    logger.log("====================================");
+    logger.log("開始產生 V1.3 自選股提醒");
+    logger.log(`指定日期：${requestedDate}`);
+    if (userId) logger.log(`指定使用者：${userId}`);
+    logger.log("====================================");
 
-    conn = await pool.getConnection();
+    conn = options.connection || await pool.getConnection();
     await ensureAlertTables(conn);
 
     const tradeDate = await resolveTradeDate(conn, requestedDate);
-    const syncedRules = await syncDefaultAlertRules(conn);
-    const rules = await getActiveRules(conn);
+    const syncedRules = await syncDefaultAlertRules(conn, userId);
+    const rules = await getActiveRules(conn, userId);
 
-    console.log(`最近可用交易日：${tradeDate}`);
-    console.log(`新增預設提醒規則：${syncedRules} 筆`);
-    console.log(`啟用提醒規則：${rules.length} 筆`);
+    logger.log(`最近可用交易日：${tradeDate}`);
+    logger.log(`新增預設提醒規則：${syncedRules} 筆`);
+    logger.log(`啟用提醒規則：${rules.length} 筆`);
 
     if (!rules.length) {
-      console.log("目前沒有自選股或啟用的提醒規則，略過提醒產生。");
-      return;
+      logger.log("目前沒有自選股或啟用的提醒規則，略過提醒產生。");
+      return {
+        success: true,
+        requested_date: requestedDate,
+        trade_date: tradeDate,
+        user_id: userId,
+        synced_rules: syncedRules,
+        active_rules: 0,
+        generated_count: 0,
+        by_type: [],
+      };
     }
 
     let generatedCount = 0;
@@ -551,26 +584,54 @@ async function main() {
       }
     }
 
-    console.log("提醒產生完成");
-    console.log(`本次符合條件提醒：${generatedCount} 筆`);
+    const byType = Array.from(typeCounter.entries()).map(([alertType, count]) => ({
+      alert_type: alertType,
+      count,
+    }));
+
+    logger.log("提醒產生完成");
+    logger.log(`本次符合條件提醒：${generatedCount} 筆`);
 
     if (typeCounter.size) {
-      console.log("提醒類型統計：");
+      logger.log("提醒類型統計：");
       for (const [type, count] of typeCounter.entries()) {
-        console.log(`- ${type}：${count} 筆`);
+        logger.log(`- ${type}：${count} 筆`);
       }
     }
 
-    console.log("可用 SQL 檢查：");
-    console.log("SELECT * FROM watchlist_alerts ORDER BY created_at DESC LIMIT 20;");
+    logger.log("可用 SQL 檢查：");
+    logger.log("SELECT * FROM watchlist_alerts ORDER BY created_at DESC LIMIT 20;");
+
+    return {
+      success: true,
+      requested_date: requestedDate,
+      trade_date: tradeDate,
+      user_id: userId,
+      synced_rules: syncedRules,
+      active_rules: rules.length,
+      generated_count: generatedCount,
+      by_type: byType,
+    };
+  } finally {
+    if (conn && !options.connection) conn.release();
+    if (closePool) await pool.end();
+  }
+}
+
+async function main() {
+  try {
+    await generateWatchlistAlerts({
+      date: process.argv[2],
+      closePool: true,
+      logger: console,
+    });
   } catch (error) {
     console.error("產生 V1.3 自選股提醒失敗");
     console.error(error.message);
     process.exitCode = 1;
-  } finally {
-    if (conn) conn.release();
-    await pool.end();
   }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main();
+}

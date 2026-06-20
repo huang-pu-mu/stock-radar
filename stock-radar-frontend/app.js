@@ -36,6 +36,7 @@ const state = {
   alertSummary: null,
   alertUnreadCount: 0,
   alertRules: [],
+  alertLastGenerateResult: null,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -1345,6 +1346,20 @@ function renderAlertFilterButton(filter, label) {
   `;
 }
 
+function renderAlertGenerateNotice() {
+  const result = state.alertLastGenerateResult;
+  if (!result) return "";
+
+  return `
+    <div class="alert-generate-note">
+      <strong>剛剛已重新分析</strong>
+      <span>交易日：${escapeHtml(formatDate(result.trade_date))}</span>
+      <span>符合提醒：${escapeHtml(formatNumber(result.generated_count || 0))} 筆</span>
+      <span>啟用規則：${escapeHtml(formatNumber(result.active_rules || 0))} 筆</span>
+    </div>
+  `;
+}
+
 function renderAlertsToolbar(summary = {}) {
   const unreadCount = Number(summary.unread_count || 0);
 
@@ -1357,11 +1372,13 @@ function renderAlertsToolbar(summary = {}) {
           <p>符合條件的股票會出現在這裡；未讀提醒會排在最前面。</p>
         </div>
         <div class="alerts-toolbar-actions">
+          <button class="detail-btn secondary-action" type="button" data-alert-generate="true">立即重新分析</button>
           <button class="detail-btn secondary-action" type="button" data-alert-mode="rules">提醒設定</button>
           <button class="detail-btn ${unreadCount > 0 ? "" : "disabled-look"}" type="button" data-alert-read-all="true" ${unreadCount > 0 ? "" : "disabled"}>全部已讀</button>
         </div>
       </div>
       ${renderAlertSummaryCards(summary)}
+      ${renderAlertGenerateNotice()}
       <div class="alert-filter-row" aria-label="提醒篩選">
         ${renderAlertFilterButton("unread", "未讀")}
         ${renderAlertFilterButton("read", "已讀")}
@@ -1707,6 +1724,41 @@ async function handleAlertsReadAll(button) {
 }
 
 
+async function handleAlertsGenerate(button) {
+  if (!isAuthenticated()) {
+    switchPage("account");
+    return;
+  }
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "分析中...";
+  showTemporaryStatus("正在重新分析自選股提醒，請稍候。", "success", 1800);
+
+  try {
+    const result = await fetchJson("/watchlist/alerts/generate", {
+      method: "POST",
+      auth: true,
+      raw: true,
+    });
+
+    const data = result.data || result;
+    state.alertLastGenerateResult = data;
+    state.alertFilter = "unread";
+    state.alertMode = "list";
+    await loadAlerts();
+    showTemporaryStatus(
+      `重新分析完成：交易日 ${formatDate(data.trade_date)}，符合條件 ${formatNumber(data.generated_count || 0)} 筆提醒。`,
+      "success",
+      2600,
+    );
+  } catch (error) {
+    showStatus(`重新分析提醒失敗：${escapeHtml(error.message)}`, "error");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 async function loadAlertRules() {
   if (!isAuthenticated()) {
     setLoading(false);
@@ -1759,7 +1811,7 @@ async function handleAlertRuleSubmit(form) {
       body: payload,
     });
     await loadAlertRules();
-    showTemporaryStatus(`${payload.stock_code} 提醒設定已更新。`, "success");
+    showTemporaryStatus(`${payload.stock_code} 提醒設定已更新。可回提醒中心按「立即重新分析」套用新條件。`, "success", 2600);
   } catch (error) {
     showStatus(`提醒設定儲存失敗：${escapeHtml(error.message)}`, "error");
     if (submitButton) {
@@ -2877,6 +2929,12 @@ stockList.addEventListener("click", (event) => {
   const alertReadButton = event.target.closest("[data-alert-read]");
   if (alertReadButton) {
     handleAlertMarkRead(alertReadButton);
+    return;
+  }
+
+  const alertGenerateButton = event.target.closest("[data-alert-generate]");
+  if (alertGenerateButton) {
+    handleAlertsGenerate(alertGenerateButton);
     return;
   }
 

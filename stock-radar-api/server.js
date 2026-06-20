@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import pool from "./db.js";
 import { query, testConnection } from "./db.js";
+import { generateWatchlistAlerts } from "./scripts/generateWatchlistAlerts.js";
 
 dotenv.config();
 
@@ -2828,6 +2829,54 @@ app.get("/watchlist/alerts/unread-count", requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "查詢未讀提醒數失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.3-1-5：立即重新分析自選股提醒
+// POST /watchlist/alerts/generate
+// body/query 可選：{ date: "YYYY-MM-DD" }
+// ==============================
+app.post("/watchlist/alerts/generate", requireAuth, async (req, res) => {
+  try {
+    const requestedDate = req.body?.date || req.query?.date;
+    const result = await generateWatchlistAlerts({
+      date: requestedDate,
+      userId: req.user.id,
+      logger: console,
+    });
+
+    const unreadRows = await query(
+      `
+      SELECT
+        COUNT(*) AS unread_count,
+        SUM(CASE WHEN alert_level = 'high' THEN 1 ELSE 0 END) AS high_unread_count,
+        MAX(DATE_FORMAT(alert_date, '%Y-%m-%d')) AS latest_alert_date
+      FROM watchlist_alerts
+      WHERE user_id = ?
+        AND is_read = 0
+      `,
+      [req.user.id],
+    );
+
+    res.json({
+      success: true,
+      message: "自選股提醒已重新分析",
+      data: convertBigIntToString({
+        ...result,
+        unread_count: Number(unreadRows[0]?.unread_count || 0),
+        high_unread_count: Number(unreadRows[0]?.high_unread_count || 0),
+        latest_alert_date: unreadRows[0]?.latest_alert_date || null,
+      }),
+    });
+  } catch (error) {
+    console.error("重新分析自選股提醒失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "重新分析自選股提醒失敗",
       error: error.message,
     });
   }
