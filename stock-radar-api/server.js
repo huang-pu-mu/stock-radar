@@ -3671,6 +3671,557 @@ app.get("/strategies", async (req, res) => {
 
 
 
+
+// ==============================
+// V1.3-3-2 / V1.3-3-3：策略回測查詢 API
+// ==============================
+const BACKTEST_METRIC_OPTIONS = {
+  "1d": { key: "1d", field: "return_1d_percent", label: "1 日報酬" },
+  "3d": { key: "3d", field: "return_3d_percent", label: "3 日報酬" },
+  "5d": { key: "5d", field: "return_5d_percent", label: "5 日報酬" },
+  latest: { key: "latest", field: "latest_return_percent", label: "目前報酬" },
+};
+
+const BACKTEST_RESULT_SORT_OPTIONS = {
+  signal_desc: "r.signal_trade_date DESC, r.strategy_score DESC, r.id DESC",
+  signal_asc: "r.signal_trade_date ASC, r.strategy_score DESC, r.id DESC",
+  score_desc: "r.strategy_score DESC, r.signal_trade_date DESC, r.id DESC",
+  score_asc: "r.strategy_score ASC, r.signal_trade_date DESC, r.id DESC",
+  "1d_desc": "r.return_1d_percent IS NULL ASC, r.return_1d_percent DESC, r.id DESC",
+  "1d_asc": "r.return_1d_percent IS NULL ASC, r.return_1d_percent ASC, r.id DESC",
+  "3d_desc": "r.return_3d_percent IS NULL ASC, r.return_3d_percent DESC, r.id DESC",
+  "3d_asc": "r.return_3d_percent IS NULL ASC, r.return_3d_percent ASC, r.id DESC",
+  "5d_desc": "r.return_5d_percent IS NULL ASC, r.return_5d_percent DESC, r.id DESC",
+  "5d_asc": "r.return_5d_percent IS NULL ASC, r.return_5d_percent ASC, r.id DESC",
+  latest_desc: "r.latest_return_percent IS NULL ASC, r.latest_return_percent DESC, r.id DESC",
+  latest_asc: "r.latest_return_percent IS NULL ASC, r.latest_return_percent ASC, r.id DESC",
+};
+
+function getBacktestMetric(value) {
+  const key = String(value || "5d").trim().toLowerCase();
+  return BACKTEST_METRIC_OPTIONS[key] || BACKTEST_METRIC_OPTIONS["5d"];
+}
+
+function getBacktestResultSort(value) {
+  const key = String(value || "5d_desc").trim().toLowerCase();
+  return BACKTEST_RESULT_SORT_OPTIONS[key] || BACKTEST_RESULT_SORT_OPTIONS["5d_desc"];
+}
+
+function normalizeBacktestOutcome(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return ["success", "neutral", "fail", "pending"].includes(text) ? text : "";
+}
+
+async function resolveBacktestRunId(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+
+  const rows = await query(
+    `
+    SELECT id
+    FROM strategy_backtest_runs
+    WHERE status = 'completed'
+    ORDER BY completed_at DESC, id DESC
+    LIMIT 1
+    `,
+  );
+
+  return rows[0]?.id || null;
+}
+
+function buildBacktestResultWhere(queryParams = {}) {
+  const conditions = [];
+  const params = [];
+
+  if (queryParams.run_id) {
+    conditions.push("r.run_id = ?");
+    params.push(queryParams.run_id);
+  }
+
+  const strategy = normalizeStrategyKeyValue(queryParams.strategy);
+  if (strategy) {
+    conditions.push("r.strategy_key = ?");
+    params.push(strategy);
+  }
+
+  const market = parseMarket(queryParams.market);
+  if (market) {
+    conditions.push("r.market_type = ?");
+    params.push(market);
+  }
+
+  const stockCode = String(queryParams.stock_code || "").trim();
+  if (stockCode) {
+    conditions.push("r.stock_code = ?");
+    params.push(stockCode);
+  }
+
+  const outcome = normalizeBacktestOutcome(queryParams.outcome || queryParams.status);
+  if (outcome) {
+    conditions.push("r.outcome_label = ?");
+    params.push(outcome);
+  }
+
+  const search = String(queryParams.search || "").trim();
+  if (search) {
+    conditions.push("(r.stock_code LIKE ? OR r.stock_name LIKE ? OR r.industry LIKE ? OR r.strategy_name LIKE ? OR r.trigger_summary LIKE ?)");
+    const keyword = `%${search}%`;
+    params.push(keyword, keyword, keyword, keyword, keyword);
+  }
+
+  return {
+    whereSql: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
+app.get("/strategy-backtests/runs", async (req, res) => {
+  try {
+    const limit = parsePositiveInteger(req.query.limit, 20, 1, 100);
+    const offset = Math.max(Number.parseInt(String(req.query.offset || "0"), 10) || 0, 0);
+    const status = String(req.query.status || "").trim().toLowerCase();
+    const strategy = normalizeStrategyKeyValue(req.query.strategy);
+    const conditions = [];
+    const params = [];
+
+    if (status) {
+      conditions.push("status = ?");
+      params.push(status);
+    }
+
+    if (strategy) {
+      conditions.push("strategy_key = ?");
+      params.push(strategy);
+    }
+
+    const whereSql = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = await query(
+      `
+      SELECT
+        id,
+        run_name,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+        market_type,
+        strategy_key,
+        limit_per_strategy,
+        trading_days_count,
+        signal_count,
+        success_count,
+        neutral_count,
+        fail_count,
+        pending_count,
+        avg_return_1d,
+        avg_return_3d,
+        avg_return_5d,
+        win_rate_1d,
+        win_rate_3d,
+        win_rate_5d,
+        status,
+        error_message,
+        DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+        DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM strategy_backtest_runs
+      ${whereSql}
+      ORDER BY id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...params, limit, offset],
+    );
+
+    res.json({
+      success: true,
+      count: rows.length,
+      limit,
+      offset,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢策略回測任務清單失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢策略回測任務清單失敗，請確認是否已執行 npm run strategy-backtests:setup。",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/strategy-backtests/runs/:runId", async (req, res) => {
+  try {
+    const runId = Number.parseInt(String(req.params.runId || ""), 10);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: "Run ID 格式不正確。" });
+    }
+
+    const runs = await query(
+      `
+      SELECT
+        id,
+        run_name,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+        market_type,
+        strategy_key,
+        limit_per_strategy,
+        trading_days_count,
+        signal_count,
+        success_count,
+        neutral_count,
+        fail_count,
+        pending_count,
+        avg_return_1d,
+        avg_return_3d,
+        avg_return_5d,
+        win_rate_1d,
+        win_rate_3d,
+        win_rate_5d,
+        params_json,
+        summary_json,
+        status,
+        error_message,
+        DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+        DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM strategy_backtest_runs
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [runId],
+    );
+
+    if (runs.length === 0) {
+      return res.status(404).json({ success: false, message: "找不到這次策略回測任務。" });
+    }
+
+    const strategyStats = await query(
+      `
+      SELECT
+        strategy_key,
+        strategy_name,
+        COUNT(*) AS signal_count,
+        AVG(return_1d_percent) AS avg_return_1d,
+        AVG(return_3d_percent) AS avg_return_3d,
+        AVG(return_5d_percent) AS avg_return_5d,
+        AVG(CASE WHEN return_1d_percent IS NULL THEN NULL WHEN return_1d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_1d,
+        AVG(CASE WHEN return_3d_percent IS NULL THEN NULL WHEN return_3d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_3d,
+        AVG(CASE WHEN return_5d_percent IS NULL THEN NULL WHEN return_5d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_5d,
+        SUM(outcome_label = 'success') AS success_count,
+        SUM(outcome_label = 'neutral') AS neutral_count,
+        SUM(outcome_label = 'fail') AS fail_count,
+        SUM(outcome_label = 'pending') AS pending_count
+      FROM strategy_backtest_results
+      WHERE run_id = ?
+      GROUP BY strategy_key, strategy_name
+      ORDER BY avg_return_5d DESC
+      `,
+      [runId],
+    );
+
+    const outcomeStats = await query(
+      `
+      SELECT outcome_label, COUNT(*) AS count
+      FROM strategy_backtest_results
+      WHERE run_id = ?
+      GROUP BY outcome_label
+      `,
+      [runId],
+    );
+
+    const bestStocks = await query(
+      `
+      SELECT strategy_key, strategy_name, stock_code, stock_name, market_type, industry,
+             DATE_FORMAT(signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+             strategy_score, entry_price, return_1d_percent, return_3d_percent, return_5d_percent, latest_return_percent, outcome_label
+      FROM strategy_backtest_results
+      WHERE run_id = ? AND return_5d_percent IS NOT NULL
+      ORDER BY return_5d_percent DESC
+      LIMIT 10
+      `,
+      [runId],
+    );
+
+    const weakestStocks = await query(
+      `
+      SELECT strategy_key, strategy_name, stock_code, stock_name, market_type, industry,
+             DATE_FORMAT(signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+             strategy_score, entry_price, return_1d_percent, return_3d_percent, return_5d_percent, latest_return_percent, outcome_label
+      FROM strategy_backtest_results
+      WHERE run_id = ? AND return_5d_percent IS NOT NULL
+      ORDER BY return_5d_percent ASC
+      LIMIT 10
+      `,
+      [runId],
+    );
+
+    res.json({
+      success: true,
+      data: convertBigIntToString({
+        run: runs[0],
+        strategy_stats: strategyStats,
+        outcome_stats: outcomeStats,
+        best_stocks: bestStocks,
+        weakest_stocks: weakestStocks,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢策略回測任務明細失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略回測任務明細失敗", error: error.message });
+  }
+});
+
+app.get("/strategy-backtests/results", async (req, res) => {
+  try {
+    const runId = await resolveBacktestRunId(req.query.run_id);
+    if (!runId) {
+      return res.json({ success: true, run_id: null, count: 0, data: [] });
+    }
+
+    const limit = parsePositiveInteger(req.query.limit, 50, 1, 200);
+    const offset = Math.max(Number.parseInt(String(req.query.offset || "0"), 10) || 0, 0);
+    const { whereSql, params } = buildBacktestResultWhere({ ...req.query, run_id: runId });
+    const sortSql = getBacktestResultSort(req.query.sort || req.query.order);
+
+    const rows = await query(
+      `
+      SELECT
+        r.id,
+        r.run_id,
+        r.strategy_key,
+        r.strategy_name,
+        r.stock_code,
+        r.stock_name,
+        r.market_type,
+        r.industry,
+        DATE_FORMAT(r.signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+        r.source_rank,
+        r.strategy_score,
+        r.trigger_summary,
+        r.entry_price,
+        DATE_FORMAT(r.entry_price_date, '%Y-%m-%d') AS entry_price_date,
+        r.price_after_1d,
+        DATE_FORMAT(r.price_after_1d_date, '%Y-%m-%d') AS price_after_1d_date,
+        r.return_1d_percent,
+        r.price_after_3d,
+        DATE_FORMAT(r.price_after_3d_date, '%Y-%m-%d') AS price_after_3d_date,
+        r.return_3d_percent,
+        r.price_after_5d,
+        DATE_FORMAT(r.price_after_5d_date, '%Y-%m-%d') AS price_after_5d_date,
+        r.return_5d_percent,
+        r.latest_price,
+        DATE_FORMAT(r.latest_price_date, '%Y-%m-%d') AS latest_price_date,
+        r.latest_return_percent,
+        r.outcome_label,
+        r.outcome_description,
+        r.is_success,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM strategy_backtest_results r
+      ${whereSql}
+      ORDER BY ${sortSql}
+      LIMIT ? OFFSET ?
+      `,
+      [...params, limit, offset],
+    );
+
+    res.json({
+      success: true,
+      run_id: runId,
+      count: rows.length,
+      limit,
+      offset,
+      data: convertBigIntToString(rows),
+    });
+  } catch (error) {
+    console.error("查詢策略回測結果失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略回測結果失敗", error: error.message });
+  }
+});
+
+app.get("/strategy-backtests/summary", async (req, res) => {
+  try {
+    const runId = await resolveBacktestRunId(req.query.run_id);
+    if (!runId) {
+      return res.json({ success: true, run_id: null, data: null, message: "尚無已完成的策略回測資料。" });
+    }
+
+    const runs = await query(
+      `
+      SELECT
+        id,
+        run_name,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+        market_type,
+        strategy_key,
+        limit_per_strategy,
+        trading_days_count,
+        signal_count,
+        success_count,
+        neutral_count,
+        fail_count,
+        pending_count,
+        avg_return_1d,
+        avg_return_3d,
+        avg_return_5d,
+        win_rate_1d,
+        win_rate_3d,
+        win_rate_5d,
+        status,
+        DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+        DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at
+      FROM strategy_backtest_runs
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [runId],
+    );
+
+    const strategyStats = await query(
+      `
+      SELECT
+        strategy_key,
+        strategy_name,
+        COUNT(*) AS signal_count,
+        AVG(return_1d_percent) AS avg_return_1d,
+        AVG(return_3d_percent) AS avg_return_3d,
+        AVG(return_5d_percent) AS avg_return_5d,
+        AVG(latest_return_percent) AS avg_latest_return,
+        AVG(CASE WHEN return_1d_percent IS NULL THEN NULL WHEN return_1d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_1d,
+        AVG(CASE WHEN return_3d_percent IS NULL THEN NULL WHEN return_3d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_3d,
+        AVG(CASE WHEN return_5d_percent IS NULL THEN NULL WHEN return_5d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_5d,
+        SUM(outcome_label = 'success') AS success_count,
+        SUM(outcome_label = 'neutral') AS neutral_count,
+        SUM(outcome_label = 'fail') AS fail_count,
+        SUM(outcome_label = 'pending') AS pending_count
+      FROM strategy_backtest_results
+      WHERE run_id = ?
+      GROUP BY strategy_key, strategy_name
+      ORDER BY avg_return_5d DESC
+      `,
+      [runId],
+    );
+
+    const outcomeStats = await query(
+      `
+      SELECT outcome_label, COUNT(*) AS count
+      FROM strategy_backtest_results
+      WHERE run_id = ?
+      GROUP BY outcome_label
+      `,
+      [runId],
+    );
+
+    res.json({
+      success: true,
+      run_id: runId,
+      data: convertBigIntToString({
+        run: runs[0] || null,
+        strategy_stats: strategyStats,
+        outcome_stats: outcomeStats,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢策略回測摘要失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略回測摘要失敗", error: error.message });
+  }
+});
+
+app.get("/strategy-backtests/rankings", async (req, res) => {
+  try {
+    const runId = await resolveBacktestRunId(req.query.run_id);
+    if (!runId) {
+      return res.json({ success: true, run_id: null, metric: "5d", data: null, message: "尚無已完成的策略回測資料。" });
+    }
+
+    const metric = getBacktestMetric(req.query.metric);
+    const limit = parsePositiveInteger(req.query.limit, 20, 1, 100);
+    const { whereSql, params } = buildBacktestResultWhere({ ...req.query, run_id: runId });
+    const field = metric.field;
+
+    const overallRows = await query(
+      `
+      SELECT
+        COUNT(*) AS signal_count,
+        AVG(${field}) AS avg_return,
+        AVG(CASE WHEN ${field} IS NULL THEN NULL WHEN ${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+        SUM(${field} IS NOT NULL) AS available_count,
+        SUM(${field} > 0) AS positive_count,
+        SUM(${field} < 0) AS negative_count,
+        SUM(${field} IS NULL) AS pending_count
+      FROM strategy_backtest_results r
+      ${whereSql}
+      `,
+      params,
+    );
+
+    const strategyRankings = await query(
+      `
+      SELECT
+        r.strategy_key,
+        r.strategy_name,
+        COUNT(*) AS signal_count,
+        AVG(${field}) AS avg_return,
+        AVG(CASE WHEN ${field} IS NULL THEN NULL WHEN ${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+        SUM(${field} IS NOT NULL) AS available_count,
+        SUM(${field} > 0) AS positive_count,
+        SUM(${field} < 0) AS negative_count,
+        SUM(${field} IS NULL) AS pending_count
+      FROM strategy_backtest_results r
+      ${whereSql}
+      GROUP BY r.strategy_key, r.strategy_name
+      ORDER BY avg_return DESC
+      `,
+      params,
+    );
+
+    const bestStocks = await query(
+      `
+      SELECT r.strategy_key, r.strategy_name, r.stock_code, r.stock_name, r.market_type, r.industry,
+             DATE_FORMAT(r.signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+             r.strategy_score, r.entry_price, r.return_1d_percent, r.return_3d_percent, r.return_5d_percent, r.latest_return_percent, r.outcome_label,
+             ${field} AS selected_return_percent
+      FROM strategy_backtest_results r
+      ${whereSql}${whereSql ? " AND" : "WHERE"} ${field} IS NOT NULL
+      ORDER BY ${field} DESC
+      LIMIT ?
+      `,
+      [...params, limit],
+    );
+
+    const weakestStocks = await query(
+      `
+      SELECT r.strategy_key, r.strategy_name, r.stock_code, r.stock_name, r.market_type, r.industry,
+             DATE_FORMAT(r.signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+             r.strategy_score, r.entry_price, r.return_1d_percent, r.return_3d_percent, r.return_5d_percent, r.latest_return_percent, r.outcome_label,
+             ${field} AS selected_return_percent
+      FROM strategy_backtest_results r
+      ${whereSql}${whereSql ? " AND" : "WHERE"} ${field} IS NOT NULL
+      ORDER BY ${field} ASC
+      LIMIT ?
+      `,
+      [...params, limit],
+    );
+
+    res.json({
+      success: true,
+      run_id: runId,
+      metric: metric.key,
+      metric_label: metric.label,
+      data: convertBigIntToString({
+        summary: overallRows[0] || {},
+        strategy_rankings: strategyRankings,
+        best_stocks: bestStocks,
+        weakest_stocks: weakestStocks,
+      }),
+    });
+  } catch (error) {
+    console.error("查詢策略回測排行榜失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略回測排行榜失敗", error: error.message });
+  }
+});
+
 // ==============================
 // V1.3-2-5：策略追蹤績效排行榜
 // GET /strategy-watchlist/rankings?metric=current&limit=10
@@ -4067,778 +4618,6 @@ app.delete("/strategy-watchlist/:trackId", requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "移除策略追蹤失敗",
-      error: error.message,
-    });
-  }
-});
-
-
-const BACKTEST_OUTCOME_LABELS = {
-  success: "成功",
-  neutral: "觀察",
-  fail: "失敗",
-  pending: "待資料",
-};
-
-const BACKTEST_METRICS = {
-  "1d": {
-    key: "1d",
-    field: "return_1d_percent",
-    price_field: "price_after_1d",
-    date_field: "price_after_1d_date",
-    label: "1 日報酬",
-    description: "訊號日後第 1 個交易日收盤價相對進場價的報酬率。",
-  },
-  "3d": {
-    key: "3d",
-    field: "return_3d_percent",
-    price_field: "price_after_3d",
-    date_field: "price_after_3d_date",
-    label: "3 日報酬",
-    description: "訊號日後第 3 個交易日收盤價相對進場價的報酬率。",
-  },
-  "5d": {
-    key: "5d",
-    field: "return_5d_percent",
-    price_field: "price_after_5d",
-    date_field: "price_after_5d_date",
-    label: "5 日報酬",
-    description: "訊號日後第 5 個交易日收盤價相對進場價的報酬率。",
-  },
-  latest: {
-    key: "latest",
-    field: "latest_return_percent",
-    price_field: "latest_price",
-    date_field: "latest_price_date",
-    label: "目前報酬",
-    description: "最新收盤價相對進場價的報酬率。",
-  },
-};
-
-const BACKTEST_RESULT_SORT_OPTIONS = {
-  signal_desc: "r.signal_trade_date DESC, r.source_rank ASC, r.stock_code ASC",
-  signal_asc: "r.signal_trade_date ASC, r.source_rank ASC, r.stock_code ASC",
-  score_desc: "r.strategy_score DESC, r.signal_trade_date DESC, r.stock_code ASC",
-  score_asc: "r.strategy_score ASC, r.signal_trade_date DESC, r.stock_code ASC",
-  "1d_desc": "r.return_1d_percent DESC, r.signal_trade_date DESC, r.stock_code ASC",
-  "1d_asc": "r.return_1d_percent ASC, r.signal_trade_date DESC, r.stock_code ASC",
-  "3d_desc": "r.return_3d_percent DESC, r.signal_trade_date DESC, r.stock_code ASC",
-  "3d_asc": "r.return_3d_percent ASC, r.signal_trade_date DESC, r.stock_code ASC",
-  "5d_desc": "r.return_5d_percent DESC, r.signal_trade_date DESC, r.stock_code ASC",
-  "5d_asc": "r.return_5d_percent ASC, r.signal_trade_date DESC, r.stock_code ASC",
-  latest_desc: "r.latest_return_percent DESC, r.signal_trade_date DESC, r.stock_code ASC",
-  latest_asc: "r.latest_return_percent ASC, r.signal_trade_date DESC, r.stock_code ASC",
-  stock_code_asc: "r.stock_code ASC, r.signal_trade_date DESC",
-  stock_code_desc: "r.stock_code DESC, r.signal_trade_date DESC",
-};
-
-function normalizeBacktestStatus(value) {
-  const status = String(value || "").trim().toLowerCase();
-  return ["running", "completed", "failed"].includes(status) ? status : "";
-}
-
-function normalizeBacktestOutcome(value) {
-  const text = String(value || "").trim().toLowerCase();
-  const map = {
-    success: "success",
-    "成功": "success",
-    neutral: "neutral",
-    observe: "neutral",
-    observation: "neutral",
-    "觀察": "neutral",
-    fail: "fail",
-    failed: "fail",
-    "失敗": "fail",
-    pending: "pending",
-    "待資料": "pending",
-  };
-
-  return map[text] || "";
-}
-
-function getBacktestMetric(value) {
-  const key = String(value || "5d").trim().toLowerCase();
-  return BACKTEST_METRICS[key] || BACKTEST_METRICS["5d"];
-}
-
-function getBacktestResultSort(value) {
-  const key = String(value || "5d_desc").trim().toLowerCase();
-  return BACKTEST_RESULT_SORT_OPTIONS[key] ? key : "5d_desc";
-}
-
-function parseMaybeJson(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "object") return value;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-function enrichBacktestRun(row) {
-  if (!row) return null;
-
-  return {
-    ...row,
-    params_json: parseMaybeJson(row.params_json),
-    summary_json: parseMaybeJson(row.summary_json),
-  };
-}
-
-function getBacktestRunSelectSql() {
-  return `
-    SELECT
-      id,
-      run_name,
-      DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
-      DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
-      market_type,
-      strategy_key,
-      limit_per_strategy,
-      trading_days_count,
-      signal_count,
-      success_count,
-      neutral_count,
-      fail_count,
-      pending_count,
-      avg_return_1d,
-      avg_return_3d,
-      avg_return_5d,
-      win_rate_1d,
-      win_rate_3d,
-      win_rate_5d,
-      params_json,
-      summary_json,
-      status,
-      error_message,
-      DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
-      DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM strategy_backtest_runs
-  `;
-}
-
-async function getLatestCompletedBacktestRunId() {
-  const rows = await query(
-    `
-    SELECT id
-    FROM strategy_backtest_runs
-    WHERE status = 'completed'
-    ORDER BY completed_at DESC, id DESC
-    LIMIT 1
-    `,
-  );
-
-  return rows[0]?.id ? Number(rows[0].id) : null;
-}
-
-async function resolveBacktestRunId(value) {
-  const requestedId = parsePositiveInteger(value, null, 1, Number.MAX_SAFE_INTEGER);
-
-  if (requestedId) return requestedId;
-
-  return getLatestCompletedBacktestRunId();
-}
-
-async function getBacktestRunById(runId) {
-  const rows = await query(
-    `
-    ${getBacktestRunSelectSql()}
-    WHERE id = ?
-    LIMIT 1
-    `,
-    [runId],
-  );
-
-  return enrichBacktestRun(rows[0]);
-}
-
-function buildBacktestResultWhere(filters = {}) {
-  const conditions = [];
-  const params = [];
-  const strategyKey = normalizeStrategyKeyValue(filters.strategy || filters.strategy_key);
-  const market = parseMarket(filters.market || filters.market_type);
-  const stockCode = normalizeStockCodeValue(filters.stock_code || filters.stockCode);
-  const outcome = normalizeBacktestOutcome(filters.outcome || filters.status || filters.result_status);
-  const search = normalizeStrategyTrackingSearchText(filters.search || filters.keyword || filters.q);
-
-  if (filters.run_id) {
-    conditions.push("r.run_id = ?");
-    params.push(filters.run_id);
-  }
-
-  if (strategyKey) {
-    conditions.push("r.strategy_key = ?");
-    params.push(strategyKey);
-  }
-
-  if (market) {
-    conditions.push("r.market_type = ?");
-    params.push(market);
-  }
-
-  if (stockCode) {
-    conditions.push("r.stock_code = ?");
-    params.push(stockCode);
-  }
-
-  if (outcome) {
-    conditions.push("r.outcome_label = ?");
-    params.push(outcome);
-  }
-
-  if (search) {
-    conditions.push(`
-      (
-        r.stock_code LIKE ?
-        OR r.stock_name LIKE ?
-        OR r.industry LIKE ?
-        OR r.strategy_name LIKE ?
-        OR r.trigger_summary LIKE ?
-      )
-    `);
-    const keyword = `%${search}%`;
-    params.push(keyword, keyword, keyword, keyword, keyword);
-  }
-
-  return {
-    whereSql: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
-    params,
-    filters: {
-      strategy: strategyKey,
-      market: market || "",
-      stock_code: stockCode,
-      outcome,
-      search,
-    },
-  };
-}
-
-function getBacktestResultSelectSql() {
-  return `
-    SELECT
-      r.id,
-      r.run_id,
-      r.strategy_key,
-      r.strategy_name,
-      r.stock_code,
-      r.stock_name,
-      r.market_type,
-      r.industry,
-      DATE_FORMAT(r.signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
-      r.source_rank,
-      r.strategy_score,
-      r.trigger_summary,
-      r.entry_price,
-      DATE_FORMAT(r.entry_price_date, '%Y-%m-%d') AS entry_price_date,
-      r.price_after_1d,
-      DATE_FORMAT(r.price_after_1d_date, '%Y-%m-%d') AS price_after_1d_date,
-      r.return_1d_percent,
-      r.price_after_3d,
-      DATE_FORMAT(r.price_after_3d_date, '%Y-%m-%d') AS price_after_3d_date,
-      r.return_3d_percent,
-      r.price_after_5d,
-      DATE_FORMAT(r.price_after_5d_date, '%Y-%m-%d') AS price_after_5d_date,
-      r.return_5d_percent,
-      r.latest_price,
-      DATE_FORMAT(r.latest_price_date, '%Y-%m-%d') AS latest_price_date,
-      r.latest_return_percent,
-      r.outcome_label,
-      CASE r.outcome_label
-        WHEN 'success' THEN '成功'
-        WHEN 'neutral' THEN '觀察'
-        WHEN 'fail' THEN '失敗'
-        WHEN 'pending' THEN '待資料'
-        ELSE r.outcome_label
-      END AS outcome_name,
-      r.outcome_description,
-      r.is_success,
-      DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
-    FROM strategy_backtest_results r
-  `;
-}
-
-async function getBacktestStrategySummary(runId) {
-  return query(
-    `
-    SELECT
-      strategy_key,
-      strategy_name,
-      COUNT(*) AS signal_count,
-      SUM(CASE WHEN outcome_label = 'success' THEN 1 ELSE 0 END) AS success_count,
-      SUM(CASE WHEN outcome_label = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
-      SUM(CASE WHEN outcome_label = 'fail' THEN 1 ELSE 0 END) AS fail_count,
-      SUM(CASE WHEN outcome_label = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-      AVG(return_1d_percent) AS avg_return_1d,
-      AVG(return_3d_percent) AS avg_return_3d,
-      AVG(return_5d_percent) AS avg_return_5d,
-      AVG(latest_return_percent) AS avg_latest_return,
-      AVG(CASE WHEN return_1d_percent > 0 THEN 1 WHEN return_1d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_1d,
-      AVG(CASE WHEN return_3d_percent > 0 THEN 1 WHEN return_3d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_3d,
-      AVG(CASE WHEN return_5d_percent > 0 THEN 1 WHEN return_5d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_5d,
-      AVG(CASE WHEN latest_return_percent > 0 THEN 1 WHEN latest_return_percent IS NULL THEN NULL ELSE 0 END) * 100 AS latest_win_rate
-    FROM strategy_backtest_results
-    WHERE run_id = ?
-    GROUP BY strategy_key, strategy_name
-    ORDER BY avg_return_5d DESC, signal_count DESC, strategy_key ASC
-    `,
-    [runId],
-  );
-}
-
-async function getBacktestOutcomeSummary(runId) {
-  return query(
-    `
-    SELECT
-      outcome_label,
-      CASE outcome_label
-        WHEN 'success' THEN '成功'
-        WHEN 'neutral' THEN '觀察'
-        WHEN 'fail' THEN '失敗'
-        WHEN 'pending' THEN '待資料'
-        ELSE outcome_label
-      END AS outcome_name,
-      COUNT(*) AS count
-    FROM strategy_backtest_results
-    WHERE run_id = ?
-    GROUP BY outcome_label
-    ORDER BY FIELD(outcome_label, 'success', 'neutral', 'fail', 'pending')
-    `,
-    [runId],
-  );
-}
-
-async function getBacktestOverallMetricSummary(runId) {
-  const rows = await query(
-    `
-    SELECT
-      COUNT(*) AS signal_count,
-      AVG(return_1d_percent) AS avg_return_1d,
-      AVG(return_3d_percent) AS avg_return_3d,
-      AVG(return_5d_percent) AS avg_return_5d,
-      AVG(latest_return_percent) AS avg_latest_return,
-      AVG(CASE WHEN return_1d_percent > 0 THEN 1 WHEN return_1d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_1d,
-      AVG(CASE WHEN return_3d_percent > 0 THEN 1 WHEN return_3d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_3d,
-      AVG(CASE WHEN return_5d_percent > 0 THEN 1 WHEN return_5d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_5d,
-      AVG(CASE WHEN latest_return_percent > 0 THEN 1 WHEN latest_return_percent IS NULL THEN NULL ELSE 0 END) * 100 AS latest_win_rate
-    FROM strategy_backtest_results
-    WHERE run_id = ?
-    `,
-    [runId],
-  );
-
-  return rows[0] || {};
-}
-
-// ==============================
-// V1.3-3-2：策略回測任務清單
-// GET /strategy-backtests/runs
-// ==============================
-app.get("/strategy-backtests/runs", async (req, res) => {
-  try {
-    const conditions = [];
-    const params = [];
-    const status = normalizeBacktestStatus(req.query.status);
-    const strategyKey = normalizeStrategyKeyValue(req.query.strategy || req.query.strategy_key);
-    const market = parseMarket(req.query.market || req.query.market_type);
-    const limit = parsePositiveInteger(req.query.limit, 20, 1, 100);
-    const offset = parsePositiveInteger(req.query.offset, 0, 0, 100000);
-
-    if (status) {
-      conditions.push("status = ?");
-      params.push(status);
-    }
-
-    if (strategyKey) {
-      conditions.push("strategy_key = ?");
-      params.push(strategyKey);
-    }
-
-    if (market) {
-      conditions.push("market_type = ?");
-      params.push(market);
-    }
-
-    const whereSql = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = await query(
-      `
-      ${getBacktestRunSelectSql()}
-      ${whereSql}
-      ORDER BY id DESC
-      LIMIT ? OFFSET ?
-      `,
-      [...params, limit, offset],
-    );
-    const countRows = await query(
-      `
-      SELECT COUNT(*) AS total_count
-      FROM strategy_backtest_runs
-      ${whereSql}
-      `,
-      params,
-    );
-    const summaryRows = await query(
-      `
-      SELECT
-        COUNT(*) AS total_runs,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_runs,
-        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_runs,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_runs,
-        MAX(id) AS latest_run_id,
-        MAX(completed_at) AS latest_completed_at
-      FROM strategy_backtest_runs
-      `,
-    );
-
-    res.json({
-      success: true,
-      count: rows.length,
-      total_count: Number(countRows[0]?.total_count || 0),
-      filters: {
-        status,
-        strategy: strategyKey,
-        market: market || "",
-        limit,
-        offset,
-      },
-      summary: convertBigIntToString(summaryRows[0] || {}),
-      data: convertBigIntToString(rows.map(enrichBacktestRun)),
-    });
-  } catch (error) {
-    console.error("查詢策略回測任務清單失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢策略回測任務清單失敗，請確認是否已執行 npm run strategy-backtests:setup。",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// V1.3-3-2：策略回測任務明細
-// GET /strategy-backtests/runs/:runId
-// ==============================
-app.get("/strategy-backtests/runs/:runId", async (req, res) => {
-  try {
-    const runId = parsePositiveInteger(req.params.runId, 0, 1, Number.MAX_SAFE_INTEGER);
-
-    if (!runId) {
-      return res.status(400).json({
-        success: false,
-        message: "回測任務 ID 格式不正確。",
-      });
-    }
-
-    const run = await getBacktestRunById(runId);
-
-    if (!run) {
-      return res.status(404).json({
-        success: false,
-        message: "找不到這筆策略回測任務。",
-      });
-    }
-
-    const [strategySummary, outcomeSummary, metricSummary, bestResults, worstResults] = await Promise.all([
-      getBacktestStrategySummary(runId),
-      getBacktestOutcomeSummary(runId),
-      getBacktestOverallMetricSummary(runId),
-      query(
-        `
-        ${getBacktestResultSelectSql()}
-        WHERE r.run_id = ?
-          AND r.return_5d_percent IS NOT NULL
-        ORDER BY r.return_5d_percent DESC, r.signal_trade_date DESC
-        LIMIT 10
-        `,
-        [runId],
-      ),
-      query(
-        `
-        ${getBacktestResultSelectSql()}
-        WHERE r.run_id = ?
-          AND r.return_5d_percent IS NOT NULL
-        ORDER BY r.return_5d_percent ASC, r.signal_trade_date DESC
-        LIMIT 10
-        `,
-        [runId],
-      ),
-    ]);
-
-    res.json({
-      success: true,
-      data: convertBigIntToString(run),
-      summary: convertBigIntToString({
-        metrics: metricSummary,
-        by_strategy: strategySummary,
-        by_outcome: outcomeSummary,
-      }),
-      rankings: convertBigIntToString({
-        metric: BACKTEST_METRICS["5d"],
-        best: bestResults,
-        worst: worstResults,
-      }),
-    });
-  } catch (error) {
-    console.error("查詢策略回測任務明細失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢策略回測任務明細失敗",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// V1.3-3-2：策略回測結果清單
-// GET /strategy-backtests/results?run_id=3&strategy=legal_strength&sort=5d_desc
-// ==============================
-app.get("/strategy-backtests/results", async (req, res) => {
-  try {
-    const runId = await resolveBacktestRunId(req.query.run_id || req.query.runId);
-
-    if (!runId) {
-      return res.status(404).json({
-        success: false,
-        message: "目前沒有可查詢的已完成策略回測任務，請先執行 npm run strategy-backtests:generate。",
-      });
-    }
-
-    const run = await getBacktestRunById(runId);
-
-    if (!run) {
-      return res.status(404).json({
-        success: false,
-        message: "找不到這筆策略回測任務。",
-      });
-    }
-
-    const limit = parsePositiveInteger(req.query.limit, 50, 1, 300);
-    const offset = parsePositiveInteger(req.query.offset, 0, 0, 100000);
-    const sortKey = getBacktestResultSort(req.query.sort || req.query.order);
-    const { whereSql, params, filters } = buildBacktestResultWhere({
-      ...req.query,
-      run_id: runId,
-    });
-    const rows = await query(
-      `
-      ${getBacktestResultSelectSql()}
-      ${whereSql}
-      ORDER BY ${BACKTEST_RESULT_SORT_OPTIONS[sortKey]}
-      LIMIT ? OFFSET ?
-      `,
-      [...params, limit, offset],
-    );
-    const countRows = await query(
-      `
-      SELECT COUNT(*) AS total_count
-      FROM strategy_backtest_results r
-      ${whereSql}
-      `,
-      params,
-    );
-    const metricRows = await query(
-      `
-      SELECT
-        COUNT(*) AS signal_count,
-        AVG(r.return_1d_percent) AS avg_return_1d,
-        AVG(r.return_3d_percent) AS avg_return_3d,
-        AVG(r.return_5d_percent) AS avg_return_5d,
-        AVG(r.latest_return_percent) AS avg_latest_return,
-        AVG(CASE WHEN r.return_1d_percent > 0 THEN 1 WHEN r.return_1d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_1d,
-        AVG(CASE WHEN r.return_3d_percent > 0 THEN 1 WHEN r.return_3d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_3d,
-        AVG(CASE WHEN r.return_5d_percent > 0 THEN 1 WHEN r.return_5d_percent IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate_5d,
-        AVG(CASE WHEN r.latest_return_percent > 0 THEN 1 WHEN r.latest_return_percent IS NULL THEN NULL ELSE 0 END) * 100 AS latest_win_rate
-      FROM strategy_backtest_results r
-      ${whereSql}
-      `,
-      params,
-    );
-
-    res.json({
-      success: true,
-      run: convertBigIntToString(run),
-      count: rows.length,
-      total_count: Number(countRows[0]?.total_count || 0),
-      filters: {
-        ...filters,
-        run_id: runId,
-        sort: sortKey,
-        limit,
-        offset,
-      },
-      summary: convertBigIntToString(metricRows[0] || {}),
-      data: convertBigIntToString(rows),
-    });
-  } catch (error) {
-    console.error("查詢策略回測結果清單失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢策略回測結果清單失敗，請確認是否已執行 npm run strategy-backtests:setup。",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// V1.3-3-2：策略回測摘要
-// GET /strategy-backtests/summary?run_id=3
-// ==============================
-app.get("/strategy-backtests/summary", async (req, res) => {
-  try {
-    const runId = await resolveBacktestRunId(req.query.run_id || req.query.runId);
-
-    if (!runId) {
-      return res.status(404).json({
-        success: false,
-        message: "目前沒有可查詢的已完成策略回測任務，請先執行 npm run strategy-backtests:generate。",
-      });
-    }
-
-    const run = await getBacktestRunById(runId);
-
-    if (!run) {
-      return res.status(404).json({
-        success: false,
-        message: "找不到這筆策略回測任務。",
-      });
-    }
-
-    const [strategySummary, outcomeSummary, metricSummary] = await Promise.all([
-      getBacktestStrategySummary(runId),
-      getBacktestOutcomeSummary(runId),
-      getBacktestOverallMetricSummary(runId),
-    ]);
-
-    res.json({
-      success: true,
-      run: convertBigIntToString(run),
-      metrics: convertBigIntToString(metricSummary),
-      by_strategy: convertBigIntToString(strategySummary),
-      by_outcome: convertBigIntToString(outcomeSummary),
-      strategies: STRATEGY_DEFINITIONS,
-      outcomes: BACKTEST_OUTCOME_LABELS,
-    });
-  } catch (error) {
-    console.error("查詢策略回測摘要失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢策略回測摘要失敗",
-      error: error.message,
-    });
-  }
-});
-
-// ==============================
-// V1.3-3-2：策略回測排行榜
-// GET /strategy-backtests/rankings?run_id=3&metric=5d&limit=20
-// ==============================
-app.get("/strategy-backtests/rankings", async (req, res) => {
-  try {
-    const runId = await resolveBacktestRunId(req.query.run_id || req.query.runId);
-
-    if (!runId) {
-      return res.status(404).json({
-        success: false,
-        message: "目前沒有可查詢的已完成策略回測任務，請先執行 npm run strategy-backtests:generate。",
-      });
-    }
-
-    const run = await getBacktestRunById(runId);
-
-    if (!run) {
-      return res.status(404).json({
-        success: false,
-        message: "找不到這筆策略回測任務。",
-      });
-    }
-
-    const metric = getBacktestMetric(req.query.metric);
-    const limit = parsePositiveInteger(req.query.limit, 20, 1, 100);
-    const { whereSql, params, filters } = buildBacktestResultWhere({
-      ...req.query,
-      run_id: runId,
-    });
-    const field = metric.field;
-    const bestRows = await query(
-      `
-      ${getBacktestResultSelectSql()}
-      ${whereSql}
-        AND r.${field} IS NOT NULL
-      ORDER BY r.${field} DESC, r.signal_trade_date DESC, r.stock_code ASC
-      LIMIT ?
-      `,
-      [...params, limit],
-    );
-    const worstRows = await query(
-      `
-      ${getBacktestResultSelectSql()}
-      ${whereSql}
-        AND r.${field} IS NOT NULL
-      ORDER BY r.${field} ASC, r.signal_trade_date DESC, r.stock_code ASC
-      LIMIT ?
-      `,
-      [...params, limit],
-    );
-    const strategyRows = await query(
-      `
-      SELECT
-        r.strategy_key,
-        r.strategy_name,
-        COUNT(*) AS signal_count,
-        AVG(r.${field}) AS avg_return,
-        MAX(r.${field}) AS best_return,
-        MIN(r.${field}) AS worst_return,
-        AVG(CASE WHEN r.${field} > 0 THEN 1 WHEN r.${field} IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate
-      FROM strategy_backtest_results r
-      ${whereSql}
-      GROUP BY r.strategy_key, r.strategy_name
-      ORDER BY avg_return DESC, win_rate DESC, signal_count DESC
-      `,
-      params,
-    );
-    const overallRows = await query(
-      `
-      SELECT
-        COUNT(*) AS signal_count,
-        AVG(r.${field}) AS avg_return,
-        MAX(r.${field}) AS best_return,
-        MIN(r.${field}) AS worst_return,
-        AVG(CASE WHEN r.${field} > 0 THEN 1 WHEN r.${field} IS NULL THEN NULL ELSE 0 END) * 100 AS win_rate
-      FROM strategy_backtest_results r
-      ${whereSql}
-      `,
-      params,
-    );
-
-    res.json({
-      success: true,
-      run: convertBigIntToString(run),
-      metric,
-      filters: {
-        ...filters,
-        run_id: runId,
-        metric: metric.key,
-        limit,
-      },
-      overall: convertBigIntToString(overallRows[0] || {}),
-      by_strategy: convertBigIntToString(strategyRows),
-      best: convertBigIntToString(bestRows),
-      worst: convertBigIntToString(worstRows),
-    });
-  } catch (error) {
-    console.error("查詢策略回測排行榜失敗：", error);
-
-    res.status(500).json({
-      success: false,
-      message: "查詢策略回測排行榜失敗",
       error: error.message,
     });
   }

@@ -47,6 +47,15 @@ const state = {
   strategyTrackFilterStatus: "",
   strategyTrackSearch: "",
   strategyTrackSort: "created_desc",
+  strategyBacktestRunId: "",
+  strategyBacktestMetric: "5d",
+  strategyBacktestFilterStrategy: "",
+  strategyBacktestFilterOutcome: "",
+  strategyBacktestSearch: "",
+  strategyBacktestSort: "5d_desc",
+  strategyBacktestRuns: [],
+  strategyBacktestSummary: null,
+  strategyBacktestRankings: null,
 };
 
 const pageTitle = document.getElementById("pageTitle");
@@ -368,6 +377,59 @@ const STRATEGY_TRACK_SORT_OPTIONS = [
   { key: "stock_code_asc", label: "股票代號小到大" },
   { key: "stock_code_desc", label: "股票代號大到小" },
 ];
+
+const STRATEGY_BACKTEST_METRICS = [
+  { key: "1d", field: "return_1d_percent", label: "1 日報酬", shortLabel: "1日" },
+  { key: "3d", field: "return_3d_percent", label: "3 日報酬", shortLabel: "3日" },
+  { key: "5d", field: "return_5d_percent", label: "5 日報酬", shortLabel: "5日" },
+  { key: "latest", field: "latest_return_percent", label: "目前報酬", shortLabel: "目前" },
+];
+
+const STRATEGY_BACKTEST_OUTCOME_OPTIONS = [
+  { key: "", label: "全部結果" },
+  { key: "success", label: "只看成功" },
+  { key: "neutral", label: "只看觀察" },
+  { key: "fail", label: "只看失敗" },
+  { key: "pending", label: "只看待資料" },
+];
+
+const STRATEGY_BACKTEST_OUTCOME_TEXT = {
+  success: "成功",
+  neutral: "觀察",
+  fail: "失敗",
+  pending: "待資料",
+};
+
+const STRATEGY_BACKTEST_SORT_OPTIONS = [
+  { key: "5d_desc", label: "5 日報酬高到低" },
+  { key: "5d_asc", label: "5 日報酬低到高" },
+  { key: "3d_desc", label: "3 日報酬高到低" },
+  { key: "3d_asc", label: "3 日報酬低到高" },
+  { key: "1d_desc", label: "1 日報酬高到低" },
+  { key: "1d_asc", label: "1 日報酬低到高" },
+  { key: "latest_desc", label: "目前報酬高到低" },
+  { key: "latest_asc", label: "目前報酬低到高" },
+  { key: "score_desc", label: "策略分數高到低" },
+  { key: "score_asc", label: "策略分數低到高" },
+  { key: "signal_desc", label: "訊號日新到舊" },
+  { key: "signal_asc", label: "訊號日舊到新" },
+];
+
+function getBacktestMetric(key = state.strategyBacktestMetric) {
+  return STRATEGY_BACKTEST_METRICS.find((item) => item.key === key) || STRATEGY_BACKTEST_METRICS[2];
+}
+
+function getBacktestOutcomeText(key) {
+  return STRATEGY_BACKTEST_OUTCOME_TEXT[key] || "-";
+}
+
+function getBacktestOutcomeClass(key) {
+  if (key === "success") return "price-up";
+  if (key === "fail") return "price-down";
+  if (key === "pending") return "price-flat";
+  return "score-mid";
+}
+
 
 function getStrategyPerformanceMetric(key = state.strategyPerformanceMetric) {
   return STRATEGY_PERFORMANCE_METRICS.find((item) => item.key === key) || STRATEGY_PERFORMANCE_METRICS[0];
@@ -773,12 +835,22 @@ function updatePageText() {
   const isAlertsPage = state.page === "alerts";
   const isStrategiesPage = state.page === "strategies";
   const isStrategyTracksPage = state.page === "strategyTracks";
+  const isStrategyBacktestsPage = state.page === "strategyBacktests";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isStrategyTracksPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
 
+
+
+  if (state.page === "strategyBacktests") {
+    const metric = getBacktestMetric();
+    pageTitle.textContent = "策略回測";
+    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
+    return;
+  }
 
   if (state.page === "strategyTracks") {
     pageTitle.textContent = "策略追蹤";
@@ -1451,8 +1523,22 @@ function rerenderCurrentContent() {
     return;
   }
 
+
+  if (state.page === "strategyBacktests") {
+    const metric = getBacktestMetric();
+    pageTitle.textContent = "策略回測";
+    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
+    return;
+  }
+
   if (state.page === "strategyTracks") {
     renderStrategyTrackingPage();
+    return;
+  }
+
+  if (state.page === "strategyBacktests") {
+    renderStrategyBacktestPage();
     return;
   }
 
@@ -4002,6 +4088,353 @@ async function searchStock(codeFromButton = "") {
   }
 }
 
+
+function buildStrategyBacktestQueryString() {
+  const params = new URLSearchParams();
+  const runId = String(state.strategyBacktestRunId || "").trim();
+
+  if (runId) params.set("run_id", runId);
+  if (state.strategyBacktestFilterStrategy) params.set("strategy", state.strategyBacktestFilterStrategy);
+  if (state.strategyBacktestFilterOutcome) params.set("outcome", state.strategyBacktestFilterOutcome);
+  if (state.strategyBacktestSearch) params.set("search", state.strategyBacktestSearch);
+  params.set("sort", state.strategyBacktestSort || "5d_desc");
+  params.set("limit", "50");
+
+  return params.toString();
+}
+
+function getBacktestRunOptions() {
+  return Array.isArray(state.strategyBacktestRuns) ? state.strategyBacktestRuns : [];
+}
+
+function renderStrategyBacktestFilters() {
+  return `
+    <section class="strategy-track-filter-panel strategy-backtest-filter-panel">
+      <div class="strategy-filter-title">
+        <div>
+          <p class="section-kicker">V1.3-3 策略回測</p>
+          <h3>回測條件</h3>
+          <p>選擇 Run ID、策略、結果與排序方式，檢查歷史策略訊號後續表現。</p>
+        </div>
+      </div>
+      <form class="strategy-track-filter-form" data-strategy-backtest-filter-form>
+        <label>
+          <span>回測任務</span>
+          <select name="run_id">
+            ${getBacktestRunOptions().map((run) => `
+              <option value="${escapeHtml(run.id)}" ${String(run.id) === String(state.strategyBacktestRunId) ? "selected" : ""}>
+                Run ${escapeHtml(run.id)}｜${formatDate(run.start_date)} ~ ${formatDate(run.end_date)}｜${formatNumber(run.signal_count)} 筆
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          <span>策略</span>
+          <select name="strategy">
+            <option value="">全部策略</option>
+            ${getStrategyOptions().map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyBacktestFilterStrategy ? "selected" : ""}>${escapeHtml(item.name)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          <span>結果</span>
+          <select name="outcome">
+            ${STRATEGY_BACKTEST_OUTCOME_OPTIONS.map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyBacktestFilterOutcome ? "selected" : ""}>${escapeHtml(item.label)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select name="sort">
+            ${STRATEGY_BACKTEST_SORT_OPTIONS.map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyBacktestSort ? "selected" : ""}>${escapeHtml(item.label)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="wide-field">
+          <span>搜尋</span>
+          <input name="search" type="search" value="${escapeHtml(state.strategyBacktestSearch)}" placeholder="例如：2330、台積電、半導體、法人" />
+        </label>
+        <div class="filter-actions">
+          <button class="watch-btn" type="submit">套用篩選</button>
+          <button class="ghost-btn compact" type="button" data-strategy-backtest-reset>清除篩選</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderStrategyBacktestMetricTabs() {
+  return `
+    <div class="strategy-performance-metric-row">
+      ${STRATEGY_BACKTEST_METRICS.map((metric) => `
+        <button
+          class="metric-switch-btn ${state.strategyBacktestMetric === metric.key ? "active" : ""}"
+          type="button"
+          data-strategy-backtest-metric="${escapeHtml(metric.key)}"
+        >${escapeHtml(metric.label)}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStrategyBacktestSummary() {
+  const summary = state.strategyBacktestSummary || {};
+  const run = summary.run || {};
+  const strategies = Array.isArray(summary.strategy_stats) ? summary.strategy_stats : [];
+  const metric = getBacktestMetric();
+  const metricAvgField = metric.key === "1d" ? "avg_return_1d" : metric.key === "3d" ? "avg_return_3d" : metric.key === "latest" ? "avg_latest_return" : "avg_return_5d";
+  const metricWinField = metric.key === "1d" ? "win_rate_1d" : metric.key === "3d" ? "win_rate_3d" : metric.key === "latest" ? "win_rate_5d" : "win_rate_5d";
+  const rankings = state.strategyBacktestRankings?.data || state.strategyBacktestRankings || {};
+  const rankingSummary = rankings.summary || {};
+
+  return `
+    <section class="strategy-tracking-summary strategy-backtest-summary">
+      <div class="strategy-summary-head">
+        <div>
+          <p class="section-kicker">Run ${escapeHtml(run.id || state.strategyBacktestRunId || "-")}</p>
+          <h3>策略回測總覽</h3>
+          <p>${formatDate(run.start_date)} ~ ${formatDate(run.end_date)}，共 ${formatNumber(run.trading_days_count)} 個交易日。</p>
+        </div>
+        <span class="summary-pill score-high">${escapeHtml(metric.label)}</span>
+      </div>
+      ${renderStrategyBacktestMetricTabs()}
+      <div class="tracking-metric-grid">
+        <article><span>總訊號</span><strong>${formatNumber(run.signal_count)}</strong></article>
+        <article><span>${escapeHtml(metric.label)}平均</span><strong class="${getReturnClass(rankingSummary.avg_return || run[metricAvgField])}">${formatReturnPercent(rankingSummary.avg_return || run[metricAvgField])}</strong></article>
+        <article><span>5 日勝率</span><strong>${formatPercent(run.win_rate_5d)}</strong></article>
+        <article><span>成功 / 失敗</span><strong>${formatNumber(run.success_count)} / ${formatNumber(run.fail_count)}</strong></article>
+        <article><span>待資料</span><strong>${formatNumber(run.pending_count)}</strong></article>
+      </div>
+      ${strategies.length ? `
+        <div class="strategy-rank-table">
+          <h4>各策略回測表現</h4>
+          ${strategies.map((item, index) => `
+            <div class="strategy-rank-row">
+              <span>${index + 1}. ${escapeHtml(item.strategy_name || item.strategy_key)}</span>
+              <strong class="${getReturnClass(item[metricAvgField])}">平均 ${formatReturnPercent(item[metricAvgField])}</strong>
+              <small>5 日勝率 ${formatPercent(item.win_rate_5d)}</small>
+              <small>樣本 ${formatNumber(item.signal_count)}</small>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderStrategyBacktestRankingPanel() {
+  const payload = state.strategyBacktestRankings?.data || state.strategyBacktestRankings || {};
+  const bestStocks = Array.isArray(payload.best_stocks) ? payload.best_stocks : [];
+  const weakestStocks = Array.isArray(payload.weakest_stocks) ? payload.weakest_stocks : [];
+  const strategyRankings = Array.isArray(payload.strategy_rankings) ? payload.strategy_rankings : [];
+  const metric = getBacktestMetric();
+
+  return `
+    <section class="strategy-ranking-section strategy-backtest-ranking-section">
+      <div class="strategy-ranking-grid">
+        <article class="strategy-ranking-card best-ranking-card">
+          <h4>最佳股票排行</h4>
+          ${bestStocks.slice(0, 8).map((row, index) => `
+            <div class="ranking-row">
+              <span>${index + 1}. ${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</span>
+              <strong class="${getReturnClass(row.selected_return_percent)}">${formatReturnPercent(row.selected_return_percent)}</strong>
+            </div>
+          `).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
+        </article>
+        <article class="strategy-ranking-card weak-ranking-card">
+          <h4>最弱股票排行</h4>
+          ${weakestStocks.slice(0, 8).map((row, index) => `
+            <div class="ranking-row">
+              <span>${index + 1}. ${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</span>
+              <strong class="${getReturnClass(row.selected_return_percent)}">${formatReturnPercent(row.selected_return_percent)}</strong>
+            </div>
+          `).join("") || `<p class="muted-text">目前沒有足夠資料。</p>`}
+        </article>
+      </div>
+      ${strategyRankings.length ? `
+        <div class="strategy-rank-table">
+          <h4>依 ${escapeHtml(metric.label)} 排名的策略</h4>
+          ${strategyRankings.map((item, index) => `
+            <div class="strategy-rank-row">
+              <span>${index + 1}. ${escapeHtml(item.strategy_name || item.strategy_key)}</span>
+              <strong class="${getReturnClass(item.avg_return)}">平均 ${formatReturnPercent(item.avg_return)}</strong>
+              <small>勝率 ${formatPercent(item.win_rate)}</small>
+              <small>樣本 ${formatNumber(item.available_count)} / ${formatNumber(item.signal_count)}</small>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderStrategyBacktestResultCard(row, index) {
+  const metric = getBacktestMetric();
+  const selectedReturn = pick(row, [metric.field], null);
+  const code = pick(row, ["stock_code"], "-");
+  const name = pick(row, ["stock_name"], code);
+  const outcome = pick(row, ["outcome_label"], "pending");
+
+  return `
+    <article class="stock-card strategy-backtest-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">回測 ${index + 1}</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(name)}</h3>
+            <span class="stock-code">${escapeHtml(code)}</span>
+            <span class="badge">${escapeHtml(pick(row, ["market_type"], "-"))}</span>
+            <span class="badge">${escapeHtml(pick(row, ["industry"], "-"))}</span>
+          </div>
+        </div>
+        <div class="score-box ${getReturnClass(selectedReturn)}">
+          <span class="score-value">${formatReturnPercent(selectedReturn)}</span>
+          <span class="score-label">${escapeHtml(metric.shortLabel)}</span>
+        </div>
+      </div>
+      <div class="quick-summary">
+        <span class="summary-pill score-mid">${escapeHtml(pick(row, ["strategy_name"], "策略"))}</span>
+        <span class="summary-pill ${getBacktestOutcomeClass(outcome)}">${escapeHtml(getBacktestOutcomeText(outcome))}</span>
+        <span class="summary-text">${escapeHtml(pick(row, ["trigger_summary"], "符合策略條件"))}</span>
+      </div>
+      <div class="strategy-performance-pills">
+        ${renderPerformancePill("1日", pick(row, ["return_1d_percent"], null), pick(row, ["price_after_1d_date"], ""))}
+        ${renderPerformancePill("3日", pick(row, ["return_3d_percent"], null), pick(row, ["price_after_3d_date"], ""))}
+        ${renderPerformancePill("5日", pick(row, ["return_5d_percent"], null), pick(row, ["price_after_5d_date"], ""))}
+        ${renderPerformancePill("目前", pick(row, ["latest_return_percent"], null), pick(row, ["latest_price_date"], ""))}
+      </div>
+      <div class="info-grid strategy-info-grid">
+        ${createInfoItem("訊號日", formatDate(pick(row, ["signal_trade_date"], "-")))}
+        ${createInfoItem("策略分數", formatNumber(pick(row, ["strategy_score"], "-")))}
+        ${createInfoItem("進場價", `${formatPrice(pick(row, ["entry_price"], "-"))} / ${formatDate(pick(row, ["entry_price_date"], "-"))}`)}
+        ${createInfoItem("目前價", `${formatPrice(pick(row, ["latest_price"], "-"))} / ${formatDate(pick(row, ["latest_price_date"], "-"))}`)}
+        ${createInfoItem("結果", escapeHtml(pick(row, ["outcome_description"], getBacktestOutcomeText(outcome))), getBacktestOutcomeClass(outcome))}
+      </div>
+      <div class="card-actions">
+        <span class="card-note">Run ID：${escapeHtml(pick(row, ["run_id"], state.strategyBacktestRunId || "-"))}</span>
+        <div class="action-buttons">
+          <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyBacktestEmpty() {
+  stockList.innerHTML = `
+    ${renderStrategyBacktestFilters()}
+    <article class="search-intro-card">
+      <div class="intro-icon">📊</div>
+      <h3>目前沒有符合條件的回測資料</h3>
+      <p>可以改用其他策略、清除搜尋條件，或先執行 npm run strategy-backtests:generate 產生回測結果。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-strategy-backtest-reset>清除篩選</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyBacktestPage() {
+  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+
+  if (!state.strategyBacktestSummary && rows.length === 0) {
+    renderStrategyBacktestEmpty();
+    return;
+  }
+
+  stockList.innerHTML = `
+    ${renderStrategyBacktestFilters()}
+    ${renderStrategyBacktestSummary()}
+    ${renderStrategyBacktestRankingPanel()}
+    <div class="strategy-result-note">
+      回測是用歷史資料檢查策略訊號，不是保證未來績效。樣本數越多，統計才越有參考價值。
+    </div>
+    ${rows.length ? rows.map(renderStrategyBacktestResultCard).join("") : `<article class="search-intro-card"><h3>沒有符合篩選條件的回測結果</h3><p>請調整策略、結果或搜尋關鍵字。</p></article>`}
+  `;
+}
+
+function handleStrategyBacktestFilterSubmit(form) {
+  const formData = new FormData(form);
+  const runId = String(formData.get("run_id") || "").trim();
+  const strategy = String(formData.get("strategy") || "").trim();
+  const outcome = String(formData.get("outcome") || "").trim();
+  const sort = String(formData.get("sort") || "5d_desc").trim();
+  const search = String(formData.get("search") || "").trim();
+
+  state.strategyBacktestRunId = runId;
+  state.strategyBacktestFilterStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
+  state.strategyBacktestFilterOutcome = STRATEGY_BACKTEST_OUTCOME_OPTIONS.some((item) => item.key === outcome) ? outcome : "";
+  state.strategyBacktestSort = STRATEGY_BACKTEST_SORT_OPTIONS.some((item) => item.key === sort) ? sort : "5d_desc";
+  state.strategyBacktestSearch = search;
+  loadStrategyBacktests();
+}
+
+function resetStrategyBacktestFilters() {
+  state.strategyBacktestFilterStrategy = "";
+  state.strategyBacktestFilterOutcome = "";
+  state.strategyBacktestSearch = "";
+  state.strategyBacktestSort = "5d_desc";
+  loadStrategyBacktests();
+}
+
+function handleStrategyBacktestMetric(button) {
+  const metric = button.dataset.strategyBacktestMetric;
+  if (!STRATEGY_BACKTEST_METRICS.some((item) => item.key === metric)) return;
+  state.strategyBacktestMetric = metric;
+  if (!["1d", "3d", "5d", "latest"].includes(metric)) state.strategyBacktestMetric = "5d";
+  if (["1d", "3d", "5d"].includes(metric)) {
+    state.strategyBacktestSort = `${metric}_desc`;
+  } else {
+    state.strategyBacktestSort = "latest_desc";
+  }
+  loadStrategyBacktests();
+}
+
+async function loadStrategyBacktests() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const runsResponse = await fetchJson("/strategy-backtests/runs?status=completed&limit=20", { method: "GET", raw: true });
+    state.strategyBacktestRuns = Array.isArray(runsResponse.data) ? runsResponse.data : [];
+
+    if (!state.strategyBacktestRunId && state.strategyBacktestRuns.length > 0) {
+      state.strategyBacktestRunId = String(state.strategyBacktestRuns[0].id);
+    }
+
+    const runQuery = state.strategyBacktestRunId ? `?run_id=${encodeURIComponent(state.strategyBacktestRunId)}` : "";
+    const [summaryResponse, rankingResponse, resultsResponse] = await Promise.all([
+      fetchJson(`/strategy-backtests/summary${runQuery}`, { method: "GET", raw: true }),
+      fetchJson(`/strategy-backtests/rankings?metric=${encodeURIComponent(state.strategyBacktestMetric)}${state.strategyBacktestRunId ? `&run_id=${encodeURIComponent(state.strategyBacktestRunId)}` : ""}&limit=10`, { method: "GET", raw: true }),
+      fetchJson(`/strategy-backtests/results?${buildStrategyBacktestQueryString()}`, { method: "GET", raw: true }),
+    ]);
+
+    state.strategyBacktestSummary = summaryResponse.data || null;
+    state.strategyBacktestRankings = rankingResponse.data ? { data: rankingResponse.data } : null;
+    state.latestRows = Array.isArray(resultsResponse.data) ? resultsResponse.data : [];
+    renderStrategyBacktestPage();
+    showTemporaryStatus(`已更新 ${state.latestRows.length} 筆回測結果。`, "success");
+  } catch (error) {
+    state.latestRows = [];
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>策略回測讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+      </article>
+    `;
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+    showStatus(`策略回測讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function loadList() {
   updatePageText();
   hideStatus();
@@ -4032,8 +4465,22 @@ async function loadList() {
     return;
   }
 
+
+  if (state.page === "strategyBacktests") {
+    const metric = getBacktestMetric();
+    pageTitle.textContent = "策略回測";
+    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
+    return;
+  }
+
   if (state.page === "strategyTracks") {
     await loadStrategyTracking();
+    return;
+  }
+
+  if (state.page === "strategyBacktests") {
+    await loadStrategyBacktests();
     return;
   }
 
@@ -4221,6 +4668,10 @@ function switchPage(page) {
   if (page === "strategyTracks") {
     state.strategyTrackSummary = null;
   }
+  if (page === "strategyBacktests") {
+    state.strategyBacktestSummary = null;
+    state.strategyBacktestRankings = null;
+  }
   loadList();
 }
 
@@ -4240,6 +4691,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyBacktestFilterForm = event.target.closest("[data-strategy-backtest-filter-form]");
+  if (strategyBacktestFilterForm) {
+    event.preventDefault();
+    handleStrategyBacktestFilterSubmit(strategyBacktestFilterForm);
+    return;
+  }
+
   const strategyTrackFilterForm = event.target.closest("[data-strategy-track-filter-form]");
   if (strategyTrackFilterForm) {
     event.preventDefault();
@@ -4289,6 +4747,18 @@ stockList.addEventListener("click", (event) => {
   const strategyPerformanceButton = event.target.closest("[data-strategy-performance-metric]");
   if (strategyPerformanceButton) {
     handleStrategyPerformanceMetric(strategyPerformanceButton);
+    return;
+  }
+
+  const strategyBacktestMetricButton = event.target.closest("[data-strategy-backtest-metric]");
+  if (strategyBacktestMetricButton) {
+    handleStrategyBacktestMetric(strategyBacktestMetricButton);
+    return;
+  }
+
+  const strategyBacktestResetButton = event.target.closest("[data-strategy-backtest-reset]");
+  if (strategyBacktestResetButton) {
+    resetStrategyBacktestFilters();
     return;
   }
 

@@ -3024,3 +3024,53 @@ body.chart-zoom-open {
     flex-direction: column;
   }
 }
+
+/* V1.3-3-3：前端策略回測頁 */
+.strategy-backtest-filter-panel,
+.strategy-backtest-summary,
+.strategy-backtest-ranking-section {
+  border-color: rgba(56, 189, 248, 0.22);
+}
+
+.strategy-backtest-filter-panel .wide-field {
+  grid-column: span 2;
+}
+
+.strategy-backtest-summary .strategy-summary-head {
+  margin-bottom: 14px;
+}
+
+.strategy-backtest-ranking-section {
+  margin: 16px 0;
+}
+
+.strategy-backtest-card {
+  border-color: rgba(56, 189, 248, 0.18);
+}
+
+.strategy-backtest-card .summary-pill.price-up,
+.strategy-backtest-card .summary-pill.price-down,
+.strategy-backtest-card .summary-pill.price-flat {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.strategy-backtest-card .summary-pill.price-up {
+  background: rgba(22, 163, 74, 0.14);
+  color: #86efac;
+}
+
+.strategy-backtest-card .summary-pill.price-down {
+  background: rgba(220, 38, 38, 0.14);
+  color: #fca5a5;
+}
+
+.strategy-backtest-card .summary-pill.price-flat {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+}
+
+@media (max-width: 760px) {
+  .strategy-backtest-filter-panel .wide-field {
+    grid-column: span 1;
+  }
+}
