@@ -424,9 +424,408 @@ async function insertNotificationSendLog({ userId, channelId, channelType = "lin
   );
 }
 
+function normalizeReportLimit(value, defaultLimit = 10) {
+  return parseLimit(value, defaultLimit, 30);
+}
 
-const API_VERSION = "stock-radar-api-v1.4.4.1";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v50";
+function formatReportNumber(value, digits = 0) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return "-";
+  return numberValue.toLocaleString("zh-TW", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatReportPercent(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return "-";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatReportLots(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return "-";
+  return `${Math.round(numberValue).toLocaleString("zh-TW")} 張`;
+}
+
+function pickReportDate(value) {
+  const text = String(value || "").trim();
+  return isValidDateText(text) ? text : null;
+}
+
+async function getLatestReportTradeDate(market = null, queryDate = null) {
+  const marketCondition = market ? "AND s.market_type = ?" : "";
+  const params = queryDate ? [queryDate] : [];
+  if (market) params.push(market);
+
+  const rows = await safeQuery(
+    `
+    SELECT DATE_FORMAT(MAX(c.trade_date), '%Y-%m-%d') AS trade_date
+    FROM chip_scores c
+    LEFT JOIN stocks s
+      ON s.stock_code = c.stock_code
+    WHERE 1 = 1
+      ${queryDate ? "AND c.trade_date <= ?" : ""}
+      ${marketCondition}
+    `,
+    params,
+    [{ trade_date: null }],
+  );
+
+  return rows?.[0]?.trade_date || null;
+}
+
+function mapDailyReportSignal(row) {
+  return {
+    trade_date: row.trade_date || row.data_date || row.event_date || null,
+    strategy_key: row.strategy_key,
+    strategy_name: row.strategy_name,
+    stock_code: row.stock_code,
+    stock_name: row.stock_name,
+    market_type: row.market_type,
+    industry: row.industry || "-",
+    close_price: row.close_price,
+    price_change: row.price_change,
+    chip_score: row.chip_score,
+    strategy_score: row.strategy_score,
+    foreign_net_lots: row.foreign_net_lots,
+    investment_trust_net_lots: row.investment_trust_net_lots,
+    total_net_lots: row.total_net_lots,
+    trigger_summary: row.trigger_summary || "符合策略條件",
+  };
+}
+
+async function queryDailyReportSignals({ strategyKey, tradeDate, market, limit }) {
+  const safeLimit = normalizeReportLimit(limit, 10);
+  const marketCondition = market ? "AND s.market_type = ?" : "";
+  const params = [tradeDate];
+  if (market) params.push(market);
+
+  if (strategyKey === "legal_strength") {
+    const rows = await safeQuery(
+      `
+      SELECT
+        DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+        c.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        'legal_strength' AS strategy_key,
+        '法人轉強股' AS strategy_name,
+        c.chip_score,
+        c.foreign_score,
+        c.investment_trust_score,
+        p.close_price,
+        p.price_change,
+        CAST(ROUND(COALESCE(i.foreign_net, 0) / 1000, 0) AS CHAR) AS foreign_net_lots,
+        CAST(ROUND(COALESCE(i.investment_trust_net, 0) / 1000, 0) AS CHAR) AS investment_trust_net_lots,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
+        (COALESCE(c.foreign_score, 0) + COALESCE(c.investment_trust_score, 0) + COALESCE(c.chip_score, 0)) AS strategy_score,
+        CONCAT('法人分數 ', COALESCE(c.foreign_score, 0) + COALESCE(c.investment_trust_score, 0), '，籌碼分數 ', COALESCE(c.chip_score, 0)) AS trigger_summary
+      FROM chip_scores c
+      LEFT JOIN stocks s ON s.stock_code = c.stock_code
+      LEFT JOIN daily_prices p ON p.stock_code = c.stock_code AND p.trade_date = c.trade_date
+      LEFT JOIN institutional_trades i ON i.stock_code = c.stock_code AND i.trade_date = c.trade_date
+      WHERE c.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(s.is_active, 1) = 1
+        AND (COALESCE(i.foreign_net, 0) > 0 OR COALESCE(i.investment_trust_net, 0) > 0)
+        AND (COALESCE(c.chip_score, 0) >= 70 OR COALESCE(c.foreign_score, 0) + COALESCE(c.investment_trust_score, 0) >= 20)
+      ORDER BY strategy_score DESC, COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0) DESC, c.stock_code ASC
+      LIMIT ?
+      `,
+      [...params, safeLimit],
+    );
+    return rows.map(mapDailyReportSignal);
+  }
+
+  if (strategyKey === "capital_inflow") {
+    const rows = await safeQuery(
+      `
+      SELECT
+        DATE_FORMAT(i.trade_date, '%Y-%m-%d') AS trade_date,
+        i.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        'capital_inflow' AS strategy_key,
+        '資金流入股' AS strategy_name,
+        p.close_price,
+        p.price_change,
+        c.chip_score,
+        CAST(ROUND(COALESCE(i.foreign_net, 0) / 1000, 0) AS CHAR) AS foreign_net_lots,
+        CAST(ROUND(COALESCE(i.investment_trust_net, 0) / 1000, 0) AS CHAR) AS investment_trust_net_lots,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
+        (ROUND(COALESCE(i.total_net, 0) / 1000, 0) + COALESCE(c.chip_score, 0)) AS strategy_score,
+        CONCAT('三大法人合計買超 ', ROUND(COALESCE(i.total_net, 0) / 1000, 0), ' 張') AS trigger_summary
+      FROM institutional_trades i
+      LEFT JOIN stocks s ON s.stock_code = i.stock_code
+      LEFT JOIN daily_prices p ON p.stock_code = i.stock_code AND p.trade_date = i.trade_date
+      LEFT JOIN chip_scores c ON c.stock_code = i.stock_code AND c.trade_date = i.trade_date
+      WHERE i.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(s.is_active, 1) = 1
+        AND COALESCE(i.total_net, 0) > 0
+      ORDER BY COALESCE(i.total_net, 0) DESC, COALESCE(c.chip_score, 0) DESC, i.stock_code ASC
+      LIMIT ?
+      `,
+      [...params, safeLimit],
+    );
+    return rows.map(mapDailyReportSignal);
+  }
+
+  if (strategyKey === "volume_price_breakout") {
+    const rows = await safeQuery(
+      `
+      SELECT
+        DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+        c.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        'volume_price_breakout' AS strategy_key,
+        '量價轉強股' AS strategy_name,
+        c.chip_score,
+        c.volume_score,
+        c.price_score,
+        p.close_price,
+        p.price_change,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
+        (COALESCE(c.volume_score, 0) + COALESCE(c.price_score, 0) + COALESCE(c.chip_score, 0)) AS strategy_score,
+        CONCAT('量能分數 ', COALESCE(c.volume_score, 0), '，股價位置分數 ', COALESCE(c.price_score, 0)) AS trigger_summary
+      FROM chip_scores c
+      LEFT JOIN stocks s ON s.stock_code = c.stock_code
+      LEFT JOIN daily_prices p ON p.stock_code = c.stock_code AND p.trade_date = c.trade_date
+      LEFT JOIN institutional_trades i ON i.stock_code = c.stock_code AND i.trade_date = c.trade_date
+      WHERE c.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(s.is_active, 1) = 1
+        AND COALESCE(c.volume_score, 0) >= 12
+        AND COALESCE(c.price_score, 0) >= 8
+      ORDER BY strategy_score DESC, COALESCE(p.volume, 0) DESC, c.stock_code ASC
+      LIMIT ?
+      `,
+      [...params, safeLimit],
+    );
+    return rows.map(mapDailyReportSignal);
+  }
+
+  if (strategyKey === "short_term_strong") {
+    const rows = await safeQuery(
+      `
+      SELECT
+        DATE_FORMAT(c.trade_date, '%Y-%m-%d') AS trade_date,
+        c.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        'short_term_strong' AS strategy_key,
+        '短線強勢股' AS strategy_name,
+        c.chip_score,
+        c.volume_score,
+        c.price_score,
+        p.close_price,
+        p.price_change,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
+        (COALESCE(c.chip_score, 0) + COALESCE(c.volume_score, 0) + COALESCE(c.price_score, 0)) AS strategy_score,
+        CONCAT('籌碼分數 ', COALESCE(c.chip_score, 0), '，量價分數 ', COALESCE(c.volume_score, 0) + COALESCE(c.price_score, 0)) AS trigger_summary
+      FROM chip_scores c
+      LEFT JOIN stocks s ON s.stock_code = c.stock_code
+      LEFT JOIN daily_prices p ON p.stock_code = c.stock_code AND p.trade_date = c.trade_date
+      LEFT JOIN institutional_trades i ON i.stock_code = c.stock_code AND i.trade_date = c.trade_date
+      WHERE c.trade_date = ?
+        ${marketCondition}
+        AND COALESCE(s.is_active, 1) = 1
+        AND COALESCE(c.chip_score, 0) >= 80
+        AND (COALESCE(c.price_score, 0) >= 8 OR COALESCE(p.price_change, 0) >= 0)
+      ORDER BY strategy_score DESC, COALESCE(i.total_net, 0) DESC, c.stock_code ASC
+      LIMIT ?
+      `,
+      [...params, safeLimit],
+    );
+    return rows.map(mapDailyReportSignal);
+  }
+
+  return [];
+}
+
+async function queryDailyReportIndustryFlows(tradeDate, market, limit = 5) {
+  const marketCondition = market ? "AND s.market_type = ?" : "";
+  const params = [tradeDate];
+  if (market) params.push(market);
+
+  return safeQuery(
+    `
+    SELECT
+      COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
+      COUNT(DISTINCT i.stock_code) AS stock_count,
+      SUM(CASE WHEN COALESCE(i.total_net, 0) > 0 THEN 1 ELSE 0 END) AS net_buy_stock_count,
+      CAST(ROUND(SUM(COALESCE(i.total_net, 0)) / 1000, 0) AS CHAR) AS total_net_lots,
+      ROUND(AVG(c.chip_score), 2) AS avg_chip_score
+    FROM institutional_trades i
+    LEFT JOIN stocks s ON s.stock_code = i.stock_code
+    LEFT JOIN chip_scores c ON c.stock_code = i.stock_code AND c.trade_date = i.trade_date
+    WHERE i.trade_date = ?
+      ${marketCondition}
+      AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
+    GROUP BY COALESCE(NULLIF(s.industry, ''), '未分類')
+    ORDER BY SUM(COALESCE(i.total_net, 0)) DESC, AVG(c.chip_score) DESC
+    LIMIT ?
+    `,
+    [...params, limit],
+    [],
+  );
+}
+
+async function queryDailyReportMarketSummary(tradeDate, market) {
+  const marketCondition = market ? "AND s.market_type = ?" : "";
+  const params = [tradeDate];
+  if (market) params.push(market);
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      COUNT(DISTINCT c.stock_code) AS stock_count,
+      ROUND(AVG(c.chip_score), 2) AS avg_chip_score,
+      MAX(c.chip_score) AS max_chip_score,
+      SUM(CASE WHEN c.chip_score >= 80 THEN 1 ELSE 0 END) AS strong_chip_count,
+      SUM(CASE WHEN COALESCE(i.total_net, 0) > 0 THEN 1 ELSE 0 END) AS institutional_buy_count,
+      CAST(ROUND(SUM(COALESCE(i.foreign_net, 0)) / 1000, 0) AS CHAR) AS foreign_net_lots,
+      CAST(ROUND(SUM(COALESCE(i.investment_trust_net, 0)) / 1000, 0) AS CHAR) AS investment_trust_net_lots,
+      CAST(ROUND(SUM(COALESCE(i.total_net, 0)) / 1000, 0) AS CHAR) AS total_net_lots,
+      SUM(CASE WHEN COALESCE(p.price_change, 0) > 0 THEN 1 ELSE 0 END) AS up_count,
+      SUM(CASE WHEN COALESCE(p.price_change, 0) < 0 THEN 1 ELSE 0 END) AS down_count
+    FROM chip_scores c
+    LEFT JOIN stocks s ON s.stock_code = c.stock_code
+    LEFT JOIN institutional_trades i ON i.stock_code = c.stock_code AND i.trade_date = c.trade_date
+    LEFT JOIN daily_prices p ON p.stock_code = c.stock_code AND p.trade_date = c.trade_date
+    WHERE c.trade_date = ?
+      ${marketCondition}
+      AND COALESCE(s.is_active, 1) = 1
+    `,
+    params,
+    [{}],
+  );
+
+  return rows?.[0] || {};
+}
+
+function buildDailyReportLineMessage(report) {
+  const summary = report.summary || {};
+  const topSignals = Array.isArray(report.top_signals) ? report.top_signals.slice(0, 8) : [];
+  const strategySummary = Array.isArray(report.strategy_summary) ? report.strategy_summary.slice(0, 6) : [];
+  const industries = Array.isArray(report.industry_flows) ? report.industry_flows.slice(0, 5) : [];
+
+  const lines = [
+    `雷達之星 每日策略報告`,
+    `日期：${report.trade_date || "-"}｜市場：${report.market || "全部"}`,
+    `策略訊號：${formatReportNumber(summary.total_signal_count)} 筆｜強籌碼：${formatReportNumber(summary.strong_chip_count)} 檔`,
+    `法人合計：${formatReportLots(summary.total_net_lots)}｜平均籌碼：${formatReportNumber(summary.avg_chip_score, 2)}`,
+    "",
+    "策略分布：",
+    ...(strategySummary.length
+      ? strategySummary.map((item) => `- ${item.strategy_name}：${formatReportNumber(item.signal_count)} 筆，最高分 ${formatReportNumber(item.max_strategy_score)}`)
+      : ["- 目前沒有策略訊號"]),
+    "",
+    "高分訊號：",
+    ...(topSignals.length
+      ? topSignals.map((item, index) => `${index + 1}. ${item.stock_code} ${item.stock_name || ""}｜${item.strategy_name}｜${formatReportNumber(item.strategy_score)} 分`)
+      : ["- 今日沒有高分訊號"]),
+    "",
+    "資金流入產業：",
+    ...(industries.length
+      ? industries.map((item) => `- ${item.industry}：${formatReportLots(item.total_net_lots)}，買超 ${formatReportNumber(item.net_buy_stock_count)} 檔`)
+      : ["- 今日沒有明顯產業資料"]),
+    "",
+    "提醒：這是策略篩選摘要，不是買賣建議。",
+  ];
+
+  return lines.join("\n").slice(0, 4500);
+}
+
+async function buildDailyStrategyReport(options = {}) {
+  const market = parseMarket(options.market);
+  const queryDate = pickReportDate(options.date);
+  const limit = normalizeReportLimit(options.limit, 10);
+  const tradeDate = await getLatestReportTradeDate(market, queryDate);
+
+  if (!tradeDate) {
+    return {
+      trade_date: null,
+      requested_date: queryDate,
+      market: market || "全部",
+      summary: {
+        total_signal_count: 0,
+        top_signal_count: 0,
+        strong_chip_count: 0,
+      },
+      strategy_summary: [],
+      top_signals: [],
+      industry_flows: [],
+      line_message: "雷達之星 每日策略報告\n目前沒有可用資料。",
+    };
+  }
+
+  const strategyKeys = ["legal_strength", "capital_inflow", "volume_price_breakout", "short_term_strong"];
+  const strategyRows = await Promise.all(strategyKeys.map((key) => queryDailyReportSignals({ strategyKey: key, tradeDate, market, limit })));
+  const signals = strategyRows.flat();
+  const summary = await queryDailyReportMarketSummary(tradeDate, market);
+  const industryFlows = await queryDailyReportIndustryFlows(tradeDate, market, 5);
+
+  const strategySummary = strategyKeys.map((key, index) => {
+    const definition = getStrategyDefinition(key);
+    const rows = strategyRows[index] || [];
+    const avgScore = rows.length > 0
+      ? rows.reduce((sum, row) => sum + (Number(row.strategy_score) || 0), 0) / rows.length
+      : null;
+    const maxScore = rows.reduce((max, row) => Math.max(max, Number(row.strategy_score) || 0), 0);
+
+    return {
+      strategy_key: key,
+      strategy_name: definition.name,
+      focus: definition.focus,
+      signal_count: rows.length,
+      avg_strategy_score: avgScore === null ? null : Number(avgScore.toFixed(2)),
+      max_strategy_score: rows.length ? Number(maxScore.toFixed(2)) : null,
+      top_stock_code: rows[0]?.stock_code || null,
+      top_stock_name: rows[0]?.stock_name || null,
+    };
+  });
+
+  const topSignals = [...signals]
+    .sort((a, b) => {
+      const diff = (Number(b.strategy_score) || 0) - (Number(a.strategy_score) || 0);
+      if (diff !== 0) return diff;
+      return String(a.stock_code || "").localeCompare(String(b.stock_code || ""));
+    })
+    .slice(0, limit);
+
+  const report = {
+    trade_date: tradeDate,
+    requested_date: queryDate,
+    generated_at: nowTaipeiText(),
+    market: market || "全部",
+    limit,
+    summary: {
+      ...summary,
+      total_signal_count: signals.length,
+      top_signal_count: topSignals.length,
+      strategy_count: strategySummary.filter((item) => item.signal_count > 0).length,
+    },
+    strategy_summary: strategySummary,
+    top_signals: topSignals,
+    industry_flows: industryFlows,
+  };
+
+  report.line_message = buildDailyReportLineMessage(report);
+  return convertBigIntToString(report);
+}
+
+
+
+const API_VERSION = "stock-radar-api-v1.4.5.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v51";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -492,6 +891,15 @@ const V13_MODULES = [
     ],
   },
   {
+    key: "strategy_daily_report",
+    name: "每日策略報告",
+    required_tables: ["daily_prices", "institutional_trades", "chip_scores", "stocks"],
+    required_apis: [
+      "GET /strategy-daily-report",
+      "POST /strategy-daily-report/send-line",
+    ],
+  },
+  {
     key: "notification_delivery",
     name: "通知外送",
     required_tables: ["notification_channels", "notification_send_logs"],
@@ -511,7 +919,7 @@ const V13_FINAL_ACCEPTANCE_ITEMS = [
     items: [
       "GET /health 回傳目前 API 版本",
       "GET /v13/status 回傳 overall_status=pass 或可接受的 warn",
-      "策略選股、策略追蹤、策略回測 API 可正常回 JSON",
+      "策略選股、策略追蹤、策略回測、每日策略報告 API 可正常回 JSON",
       "Google 登入保護 API 未登入時會回請先登入",
     ],
   },
@@ -5579,6 +5987,140 @@ app.delete("/strategy-watchlist/:trackId", requireAuth, async (req, res) => {
       success: false,
       message: "移除策略追蹤失敗",
       error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4-5 每日策略報告：報告預覽
+// GET /strategy-daily-report?date=YYYY-MM-DD&market=上市&limit=10
+// ==============================
+app.get("/strategy-daily-report", async (req, res) => {
+  try {
+    const report = await buildDailyStrategyReport({
+      date: req.query.date,
+      market: req.query.market,
+      limit: req.query.limit,
+    });
+
+    res.json({
+      success: true,
+      data: report,
+    });
+  } catch (error) {
+    console.error("查詢每日策略報告失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢每日策略報告失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4-5 每日策略報告：LINE 外送
+// POST /strategy-daily-report/send-line
+// body: { channel_id, date, market, limit }
+// ==============================
+app.post("/strategy-daily-report/send-line", requireAuth, async (req, res) => {
+  const channelId = Number(req.body?.channel_id);
+
+  if (!Number.isInteger(channelId) || channelId <= 0) {
+    return res.status(400).json({ success: false, message: "請選擇要外送的 LINE 通知通道。" });
+  }
+
+  let channel = null;
+  let report = null;
+
+  try {
+    channel = await getNotificationChannelForUser(req.user.id, channelId);
+
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "查不到這個 LINE 通知通道。" });
+    }
+
+    if (channel.channel_type !== "line") {
+      return res.status(400).json({ success: false, message: "每日策略報告第一版只支援 LINE 外送。" });
+    }
+
+    if (Number(channel.is_enabled) !== 1) {
+      return res.status(400).json({ success: false, message: "這個 LINE 通知通道目前停用，請先啟用再外送。" });
+    }
+
+    report = await buildDailyStrategyReport({
+      date: req.body?.date,
+      market: req.body?.market,
+      limit: req.body?.limit,
+    });
+
+    const messageText = report.line_message || buildDailyReportLineMessage(report);
+    const result = await sendLinePushMessage(channel.destination_id, messageText);
+
+    await query(
+      `
+      UPDATE notification_channels
+      SET last_tested_at = CURRENT_TIMESTAMP,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [channelId, req.user.id],
+    );
+
+    await insertNotificationSendLog({
+      userId: req.user.id,
+      channelId,
+      channelType: "line",
+      templateKey: "daily_strategy_report",
+      title: `每日策略報告 ${report.trade_date || ""}`.trim(),
+      messageText,
+      status: "sent",
+      providerMessageId: String(result?.body?.sentMessages?.[0]?.id || ""),
+    });
+
+    const channels = await getNotificationChannels(req.user.id);
+    res.json({
+      success: true,
+      message: "每日策略報告已透過 LINE 送出。",
+      provider_status: getNotificationProviderStatus(),
+      sent_at: nowTaipeiText(),
+      report,
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("每日策略報告 LINE 外送失敗：", error);
+
+    if (channel) {
+      await query(
+        `
+        UPDATE notification_channels
+        SET last_error = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND user_id = ?
+        `,
+        [String(error.message || "每日策略報告 LINE 外送失敗").slice(0, 1000), channelId, req.user.id],
+      ).catch(() => {});
+
+      await insertNotificationSendLog({
+        userId: req.user.id,
+        channelId,
+        channelType: "line",
+        templateKey: "daily_strategy_report",
+        title: `每日策略報告 ${report?.trade_date || ""}`.trim(),
+        messageText: report?.line_message || "每日策略報告產生失敗",
+        status: "failed",
+        errorMessage: error.message,
+      }).catch(() => {});
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "每日策略報告 LINE 外送失敗",
+      error: error.message,
+      provider_status: getNotificationProviderStatus(),
     });
   }
 });

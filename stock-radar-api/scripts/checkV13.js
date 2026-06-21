@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.4.1";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v50";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.5.0";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v51";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-4-1", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v50", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v50", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-5", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v51", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v51", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -157,6 +157,8 @@ async function main() {
     ["patch", "/notification/channels/:channelId"],
     ["delete", "/notification/channels/:channelId"],
     ["post", "/notification/channels/:channelId/test"],
+    ["get", "/strategy-daily-report"],
+    ["post", "/strategy-daily-report/send-line"],
   ];
 
   for (const [method, route] of requiredRoutes) {
@@ -170,12 +172,14 @@ async function main() {
     ["策略回測頁籤", 'data-page="strategyBacktests"'],
     ["策略最佳化頁籤", 'data-page="strategyOptimize"'],
     ["通知外送頁籤", 'data-page="notifications"'],
+    ["每日報告頁籤", 'data-page="strategyReports"'],
     ["我的頁頁籤", 'data-page="account"'],
     ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
     ["策略回測 API", 'strategy-backtests'],
     ["策略最佳化 API", 'strategy-optimization'],
     ["策略追蹤停利停損", 'risk-settings'],
     ["通知外送 API", 'notification/channels'],
+    ["每日策略報告 API", 'strategy-daily-report'],
   ];
 
   for (const [label, marker] of requiredFrontendMarkers) {
@@ -208,6 +212,10 @@ async function main() {
     ["LINE 通知 API", serverSource.includes("sendLinePushMessage") && serverSource.includes("LINE_CHANNEL_ACCESS_TOKEN")],
     ["LINE 通知前端", appSource.includes("renderNotificationSettingsPage") && appSource.includes("data-line-notification-form")],
     ["LINE 通知樣式", styleSource.includes(".line-notification-form") && styleSource.includes(".notification-channel-card")],
+    ["每日策略報告 API", serverSource.includes("buildDailyStrategyReport") && serverSource.includes('app.get("/strategy-daily-report"') && serverSource.includes('app.post("/strategy-daily-report/send-line"')],
+    ["每日策略報告前端", appSource.includes("renderStrategyDailyReportPage") && appSource.includes("data-strategy-daily-report-form") && appSource.includes("data-strategy-daily-report-send-line")],
+    ["每日策略報告頁籤", indexSource.includes('data-page="strategyReports"') && indexSource.includes("每日報告")],
+    ["每日策略報告樣式", styleSource.includes(".daily-report-strategy-grid") && styleSource.includes(".daily-report-line-preview")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {

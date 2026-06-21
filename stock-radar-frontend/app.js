@@ -68,6 +68,10 @@ const state = {
   notificationChannels: [],
   notificationProviderStatus: null,
   notificationLastTestResult: null,
+  strategyDailyReport: null,
+  strategyDailyReportDate: "",
+  strategyDailyReportLimit: 10,
+  strategyDailyReportLastSendResult: null,
   strategyBacktestConditionPresetKey: "balanced",
   strategyBacktestConditionStrategy: "",
   strategyBacktestConditionMarket: "",
@@ -130,6 +134,7 @@ const PAGE_GROUP_MAP = {
   strategyTracks: "strategy",
   strategyOptimize: "strategy",
   strategyBacktests: "strategy",
+  strategyReports: "strategy",
   alerts: "alerts",
   notifications: "alerts",
   account: "account",
@@ -177,6 +182,7 @@ const PAGE_CONTENT_CONFIG = {
   strategyTracks: { groupLabel: "策略中心", filterTitle: "策略追蹤篩選", filterDesc: "依股票、策略、狀態與報酬排序追蹤後續表現。", resultTitle: "策略追蹤清單", resultDesc: "檢查加入追蹤後的報酬與停利停損狀態。" },
   strategyOptimize: { groupLabel: "策略中心", filterTitle: "策略最佳化", filterDesc: "選擇策略與參數預設，預覽不同門檻下的策略清單。", resultTitle: "策略最佳化結果", resultDesc: "比較保守、平衡、積極參數對訊號數量與分數的影響。" },
   strategyBacktests: { groupLabel: "策略中心", filterTitle: "回測條件", filterDesc: "依 Run ID、策略、結果、排序與搜尋條件查看歷史訊號。", resultTitle: "策略回測清單", resultDesc: "顯示歷史策略訊號與後續 1 / 3 / 5 日績效。" },
+  strategyReports: { groupLabel: "策略中心", filterTitle: "每日策略報告", filterDesc: "依資料日與市場產生策略摘要，並可外送到 LINE 通知通道。", resultTitle: "每日策略報告", resultDesc: "整理策略分布、高分訊號、法人資金與產業流向。" },
   account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
 };
 
@@ -1398,6 +1404,7 @@ function updatePageText() {
   const isStrategyTracksPage = state.page === "strategyTracks";
   const isStrategyOptimizePage = state.page === "strategyOptimize";
   const isStrategyBacktestsPage = state.page === "strategyBacktests";
+  const isStrategyReportsPage = state.page === "strategyReports";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
@@ -1408,6 +1415,13 @@ function updatePageText() {
   setResultHeader({ badge: "待更新" });
 
 
+
+  if (state.page === "strategyReports") {
+    pageTitle.textContent = "每日策略報告";
+    pageDesc.textContent = `${marketText}每日策略摘要，整理策略訊號、法人資金、高分股票與產業流向。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看策略訊號數量與高分清單；若 LINE 通道已設定，可直接外送每日報告。</span>`;
+    return;
+  }
 
   if (state.page === "strategyOptimize") {
     const activeStrategy = getStrategyOption(state.strategyOptimizationStrategyKey);
@@ -2141,6 +2155,11 @@ function rerenderCurrentContent() {
 
   if (state.page === "alerts") {
     renderAlertsPage();
+    return;
+  }
+
+  if (state.page === "strategyReports") {
+    renderStrategyDailyReportPage();
     return;
   }
 
@@ -6101,6 +6120,313 @@ async function handleNotificationDelete(button) {
   }
 }
 
+function getEnabledLineChannels() {
+  return (Array.isArray(state.notificationChannels) ? state.notificationChannels : [])
+    .filter((item) => item.channel_type === "line" && item.is_enabled);
+}
+
+function formatReportLots(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return `${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} 張`;
+}
+
+function renderStrategyDailyReportFilter(report = null) {
+  const channels = getEnabledLineChannels();
+  const selectedDate = state.strategyDailyReportDate || report?.trade_date || "";
+  const selectedLimit = state.strategyDailyReportLimit || 10;
+  const channelOptions = channels.map((channel) => `
+    <option value="${escapeHtml(String(channel.id))}">${escapeHtml(channel.channel_name || "LINE 通知")}｜${escapeHtml(channel.destination_type_label || "個人")}</option>
+  `).join("");
+
+  return `
+    <section class="strategy-dashboard-card daily-report-filter-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-5 每日策略報告</p>
+          <h3>報告條件</h3>
+          <p>可依資料日、市場與清單數量產生報告。日期留空時會抓最新籌碼資料日。</p>
+        </div>
+      </div>
+      <form class="strategy-track-filter-form daily-report-form" data-strategy-daily-report-form>
+        <label class="filter-field">
+          <span>資料日</span>
+          <input name="date" type="date" value="${escapeHtml(selectedDate)}" />
+        </label>
+        <label class="filter-field">
+          <span>高分清單數量</span>
+          <select name="limit">
+            ${[5, 10, 15, 20, 30].map((value) => `<option value="${value}" ${Number(selectedLimit) === value ? "selected" : ""}>前 ${value} 筆</option>`).join("")}
+          </select>
+        </label>
+        <div class="strategy-track-filter-actions">
+          <button class="search-btn" type="submit">產生報告</button>
+        </div>
+      </form>
+      <div class="daily-report-line-send-row">
+        <label class="filter-field wide-field">
+          <span>LINE 外送通道</span>
+          <select data-daily-report-channel ${channels.length ? "" : "disabled"}>
+            ${channels.length ? channelOptions : `<option value="">尚無啟用的 LINE 通道</option>`}
+          </select>
+        </label>
+        <button class="detail-btn" type="button" data-strategy-daily-report-send-line ${channels.length && report?.trade_date ? "" : "disabled"}>外送到 LINE</button>
+      </div>
+      <p class="muted-text">Email / Telegram 已依需求延後，本版只接已完成的 LINE 通道。</p>
+    </section>
+  `;
+}
+
+function renderDailyReportStrategySummary(items = []) {
+  return `
+    <section class="strategy-dashboard-card daily-report-section-card">
+      <div class="ranking-section-title">
+        <h4>策略訊號分布</h4>
+        <span>依本次報告條件統計</span>
+      </div>
+      <div class="daily-report-strategy-grid">
+        ${items.map((item) => `
+          <article class="daily-report-strategy-card">
+            <div>
+              <strong>${escapeHtml(item.strategy_name || item.strategy_key || "策略")}</strong>
+              <span>${escapeHtml(item.focus || "策略")}</span>
+            </div>
+            <b>${formatNumber(item.signal_count)} 筆</b>
+            <small>最高分 ${formatNumber(item.max_strategy_score)}｜平均 ${formatNumber(item.avg_strategy_score)}</small>
+            <small>第一名 ${escapeHtml(item.top_stock_code || "-")} ${escapeHtml(item.top_stock_name || "")}</small>
+          </article>
+        `).join("") || `<p class="muted-text">目前沒有策略訊號。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderDailyReportSignalCard(row, index) {
+  return `
+    <article class="stock-card daily-report-signal-card">
+      <div class="stock-card-header">
+        <div>
+          <p class="stock-code">#${index + 1} ${escapeHtml(row.stock_code || "-")}</p>
+          <h3>${escapeHtml(row.stock_name || "-")}</h3>
+          <p class="stock-name">${escapeHtml(row.strategy_name || "策略訊號")}｜${escapeHtml(row.market_type || "-")}｜${escapeHtml(row.industry || "-")}</p>
+        </div>
+        <span class="score-badge ${getScoreClass(row.strategy_score)}">${formatNumber(row.strategy_score)} 分</span>
+      </div>
+      <div class="info-grid">
+        ${createInfoItem("收盤價", formatPrice(row.close_price))}
+        ${createInfoItem("漲跌", `<span class="${getChangeClass(row.price_change)}">${formatPrice(row.price_change)}</span>`)}
+        ${createInfoItem("籌碼分數", formatNumber(row.chip_score))}
+        ${createInfoItem("法人合計", formatReportLots(row.total_net_lots))}
+      </div>
+      <div class="strategy-reason-box">
+        <strong>訊號原因</strong>
+        <p>${escapeHtml(row.trigger_summary || "符合策略條件")}</p>
+      </div>
+      ${getCardActionButtons(row.stock_code, "看個股", index)}
+    </article>
+  `;
+}
+
+function renderDailyReportIndustryFlows(items = []) {
+  return `
+    <section class="strategy-dashboard-card daily-report-section-card">
+      <div class="ranking-section-title">
+        <h4>法人資金流入產業</h4>
+        <span>依三大法人合計買超排序</span>
+      </div>
+      <div class="daily-report-industry-list">
+        ${items.map((item, index) => `
+          <div class="daily-report-industry-row">
+            <span class="rank-badge">${index + 1}</span>
+            <strong>${escapeHtml(item.industry || "未分類")}</strong>
+            <span>${formatReportLots(item.total_net_lots)}</span>
+            <small>買超 ${formatNumber(item.net_buy_stock_count)} 檔｜平均籌碼 ${formatNumber(item.avg_chip_score)}</small>
+          </div>
+        `).join("") || `<p class="muted-text">目前沒有產業流向資料。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderDailyReportLinePreview(report) {
+  return `
+    <section class="strategy-dashboard-card daily-report-line-preview-card">
+      <div class="ranking-section-title">
+        <h4>LINE 文字預覽</h4>
+        <span>送出前可先確認內容</span>
+      </div>
+      <pre class="daily-report-line-preview">${escapeHtml(report?.line_message || "尚未產生報告")}</pre>
+    </section>
+  `;
+}
+
+function renderStrategyDailyReportEmpty() {
+  stockList.innerHTML = `
+    ${renderStrategyDailyReportFilter(null)}
+    <article class="search-intro-card">
+      <div class="intro-icon">🗞️</div>
+      <h3>尚未產生每日策略報告</h3>
+      <p>按下「產生報告」後，系統會整理策略訊號、高分股票與產業資金流向。</p>
+    </article>
+  `;
+}
+
+function renderStrategyDailyReportPage() {
+  const report = state.strategyDailyReport;
+
+  if (!report) {
+    setContentSummary([
+      { label: "報告狀態", value: "尚未產生" },
+      { label: "LINE 外送", value: getEnabledLineChannels().length ? "可外送" : "尚無通道" },
+    ], "每日策略報告會依最新籌碼資料日產生。 ");
+    setResultHeader({ title: "每日策略報告", desc: "產生報告後可預覽，也可外送到 LINE。", badge: "V1.4-5" });
+    renderStrategyDailyReportEmpty();
+    return;
+  }
+
+  const summary = report.summary || {};
+  const signals = Array.isArray(report.top_signals) ? report.top_signals : [];
+  const strategies = Array.isArray(report.strategy_summary) ? report.strategy_summary : [];
+  const industries = Array.isArray(report.industry_flows) ? report.industry_flows : [];
+  const channels = getEnabledLineChannels();
+
+  updatePageMetaBar([
+    { label: "資料日", value: report.trade_date || "-" },
+    { label: "訊號", value: `${formatNumber(summary.total_signal_count)} 筆` },
+  ]);
+
+  setContentSummary([
+    { label: "市場", value: report.market || state.market || "全部" },
+    { label: "策略訊號", value: `${formatNumber(summary.total_signal_count)} 筆` },
+    { label: "高分清單", value: `${formatNumber(summary.top_signal_count)} 筆` },
+    { label: "強籌碼", value: `${formatNumber(summary.strong_chip_count)} 檔` },
+    { label: "法人合計", value: formatReportLots(summary.total_net_lots) },
+    { label: "平均籌碼", value: formatNumber(summary.avg_chip_score) },
+  ], state.strategyDailyReportLastSendResult || "此報告為策略摘要，不是買賣建議。 ");
+
+  setResultHeader({
+    title: `${formatDate(report.trade_date)} 每日策略報告`,
+    desc: `整理 ${report.market || "全部"} 市場策略訊號、法人資金與產業流向。`,
+    badge: "每日報告",
+    countText: `${formatNumber(summary.total_signal_count)} 策略訊號`,
+  });
+
+  const sendResult = state.strategyDailyReportLastSendResult
+    ? `<div class="status-box success notification-result-box">${escapeHtml(state.strategyDailyReportLastSendResult)}</div>`
+    : "";
+
+  stockList.innerHTML = [
+    renderStrategyDailyReportFilter(report),
+    sendResult,
+    renderDailyReportStrategySummary(strategies),
+    `<section class="strategy-ranking-section daily-report-signal-section">
+      <div class="ranking-section-title">
+        <h4>高分策略訊號</h4>
+        <span>依策略分數排序，最多顯示 ${formatNumber(report.limit)} 筆</span>
+      </div>
+      <div class="daily-report-signal-grid">
+        ${signals.length ? signals.map(renderDailyReportSignalCard).join("") : `<p class="muted-text">本次報告沒有高分策略訊號。</p>`}
+      </div>
+    </section>`,
+    renderDailyReportIndustryFlows(industries),
+    renderDailyReportLinePreview(report),
+  ].join("");
+}
+
+async function loadStrategyDailyReport() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    if (isAuthenticated()) {
+      const channelsResponse = await fetchJson("/notification/channels", { method: "GET", auth: true, raw: true }).catch(() => null);
+      if (channelsResponse) {
+        state.notificationChannels = Array.isArray(channelsResponse.data) ? channelsResponse.data : [];
+        state.notificationProviderStatus = channelsResponse.provider_status || state.notificationProviderStatus;
+      }
+    }
+
+    const params = new URLSearchParams();
+    if (state.market) params.set("market", state.market);
+    if (state.strategyDailyReportDate) params.set("date", state.strategyDailyReportDate);
+    params.set("limit", String(state.strategyDailyReportLimit || 10));
+
+    const result = await fetchJson(`/strategy-daily-report?${params.toString()}`, { method: "GET", raw: true });
+    state.strategyDailyReport = result.data || null;
+    renderStrategyDailyReportPage();
+    showTemporaryStatus("每日策略報告已更新。", "success");
+  } catch (error) {
+    state.strategyDailyReport = null;
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 已部署 V1.4-5。 ");
+    setResultHeader({ title: "每日策略報告讀取失敗", desc: "目前無法產生策略報告。", badge: "讀取失敗" });
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>每日策略報告讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+      </article>
+    `;
+    showStatus(`每日策略報告讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleStrategyDailyReportSubmit(form) {
+  const formData = new FormData(form);
+  state.strategyDailyReportDate = String(formData.get("date") || "").trim();
+  state.strategyDailyReportLimit = Number(formData.get("limit")) || 10;
+  state.strategyDailyReportLastSendResult = null;
+  loadStrategyDailyReport();
+}
+
+async function handleStrategyDailyReportSendLine(button) {
+  const select = stockList.querySelector("[data-daily-report-channel]");
+  const channelId = select?.value || "";
+
+  if (!isAuthenticated()) {
+    showStatus("請先登入 Google 帳號，才能外送每日策略報告。", "error");
+    return;
+  }
+
+  if (!channelId) {
+    showStatus("請先選擇 LINE 外送通道。", "error");
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "外送中...";
+
+  try {
+    const result = await fetchJson("/strategy-daily-report/send-line", {
+      method: "POST",
+      auth: true,
+      raw: true,
+      body: {
+        channel_id: Number(channelId),
+        date: state.strategyDailyReportDate || state.strategyDailyReport?.trade_date || "",
+        market: state.market || "",
+        limit: state.strategyDailyReportLimit || 10,
+      },
+    });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : state.notificationChannels;
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    state.strategyDailyReport = result.report || state.strategyDailyReport;
+    state.strategyDailyReportLastSendResult = result.message || "每日策略報告已透過 LINE 送出。";
+    renderStrategyDailyReportPage();
+    showTemporaryStatus(state.strategyDailyReportLastSendResult, "success");
+  } catch (error) {
+    showStatus(`每日策略報告 LINE 外送失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "外送到 LINE";
+  }
+}
+
+
 async function loadList() {
   updatePageText();
   hideStatus();
@@ -6128,6 +6454,11 @@ async function loadList() {
 
   if (state.page === "notifications") {
     await loadNotificationSettings();
+    return;
+  }
+
+  if (state.page === "strategyReports") {
+    await loadStrategyDailyReport();
     return;
   }
 
@@ -6372,6 +6703,9 @@ function switchPage(page) {
   if (page === "notifications") {
     state.notificationLastTestResult = null;
   }
+  if (page === "strategyReports") {
+    state.strategyDailyReportLastSendResult = null;
+  }
   loadList();
 }
 
@@ -6391,6 +6725,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyDailyReportForm = event.target.closest("[data-strategy-daily-report-form]");
+  if (strategyDailyReportForm) {
+    event.preventDefault();
+    handleStrategyDailyReportSubmit(strategyDailyReportForm);
+    return;
+  }
+
   const lineNotificationForm = event.target.closest("[data-line-notification-form]");
   if (lineNotificationForm) {
     event.preventDefault();
@@ -6441,6 +6782,12 @@ stockList.addEventListener("submit", (event) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const dailyReportSendLineButton = event.target.closest("[data-strategy-daily-report-send-line]");
+  if (dailyReportSendLineButton) {
+    handleStrategyDailyReportSendLine(dailyReportSendLineButton);
+    return;
+  }
+
   const notificationTestButton = event.target.closest("[data-notification-test]");
   if (notificationTestButton) {
     handleNotificationTest(notificationTestButton);
