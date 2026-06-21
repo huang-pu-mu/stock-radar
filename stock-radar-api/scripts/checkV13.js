@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.6.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v52";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.7.0";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v53";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-6", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v52", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v52", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-7", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v53", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v53", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -153,6 +153,7 @@ async function main() {
     ["get", "/strategy-backtests/summary"],
     ["get", "/strategy-backtests/rankings"],
     ["get", "/strategy-backtests/trends"],
+    ["get", "/strategy-backtests/stock-history"],
     ["get", "/notification/channels"],
     ["post", "/notification/channels/line"],
     ["patch", "/notification/channels/:channelId"],
@@ -175,6 +176,7 @@ async function main() {
     ["通知外送頁籤", 'data-page="notifications"'],
     ["每日報告頁籤", 'data-page="strategyReports"'],
     ["策略勝率趨勢頁籤", 'data-page="strategyTrends"'],
+    ["個股策略歷史頁籤", 'data-page="strategyStockHistory"'],
     ["我的頁頁籤", 'data-page="account"'],
     ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
     ["策略回測 API", 'strategy-backtests'],
@@ -183,6 +185,7 @@ async function main() {
     ["通知外送 API", 'notification/channels'],
     ["每日策略報告 API", 'strategy-daily-report'],
     ["策略勝率趨勢 API", 'strategy-backtests/trends'],
+    ["個股策略歷史 API", 'strategy-backtests/stock-history'],
   ];
 
   for (const [label, marker] of requiredFrontendMarkers) {
@@ -223,6 +226,10 @@ async function main() {
     ["策略勝率趨勢前端", appSource.includes("renderStrategyWinRateTrendPage") && appSource.includes("data-strategy-trend-form")],
     ["策略勝率趨勢頁籤", indexSource.includes('data-page="strategyTrends"') && indexSource.includes("勝率趨勢")],
     ["策略勝率趨勢樣式", styleSource.includes(".strategy-trend-run-grid") && styleSource.includes(".strategy-trend-mini-chart")],
+    ["個股策略歷史 API", serverSource.includes("buildStockStrategyHistory") && serverSource.includes('app.get("/strategy-backtests/stock-history"')],
+    ["個股策略歷史前端", appSource.includes("renderStrategyStockHistoryPage") && appSource.includes("data-strategy-stock-history-form")],
+    ["個股策略歷史頁籤", indexSource.includes('data-page="strategyStockHistory"') && indexSource.includes("個股歷史")],
+    ["個股策略歷史樣式", styleSource.includes(".strategy-stock-history-form") && styleSource.includes(".strategy-stock-history-card")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {

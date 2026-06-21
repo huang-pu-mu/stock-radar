@@ -824,8 +824,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.6.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v52";
+const API_VERSION = "stock-radar-api-v1.4.7.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v53";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -889,6 +889,15 @@ const V13_MODULES = [
       "GET /strategy-backtests/summary",
       "GET /strategy-backtests/rankings",
       "GET /strategy-backtests/trends",
+      "GET /strategy-backtests/stock-history",
+    ],
+  },
+  {
+    key: "strategy_stock_history",
+    name: "個股策略歷史紀錄",
+    required_tables: ["strategy_backtest_runs", "strategy_backtest_results", "stocks"],
+    required_apis: [
+      "GET /strategy-backtests/stock-history",
     ],
   },
   {
@@ -2515,6 +2524,7 @@ app.get("/v13/acceptance", (req, res) => {
       "/strategy-backtests/summary",
       "/strategy-backtests/rankings",
       "/strategy-backtests/trends",
+      "/strategy-backtests/stock-history",
       "/strategy-daily-report",
     ],
     checked_at: nowTaipeiText(),
@@ -5869,6 +5879,341 @@ app.get("/strategy-backtests/trends", async (req, res) => {
   } catch (error) {
     console.error("查詢策略勝率趨勢失敗：", error);
     res.status(500).json({ success: false, message: "查詢策略勝率趨勢失敗", error: error.message });
+  }
+});
+
+
+
+function normalizeBacktestHistorySort(value) {
+  const key = String(value || "signal_desc").trim().toLowerCase();
+  const options = {
+    signal_desc: "r.signal_trade_date DESC, r.run_id DESC, r.id DESC",
+    signal_asc: "r.signal_trade_date ASC, r.run_id ASC, r.id ASC",
+    score_desc: "r.strategy_score DESC, r.signal_trade_date DESC, r.id DESC",
+    score_asc: "r.strategy_score ASC, r.signal_trade_date DESC, r.id DESC",
+    metric_desc: null,
+    metric_asc: null,
+  };
+  return options[key] || options.signal_desc;
+}
+
+function buildStockHistoryWhere({ stockCode, strategy, market }) {
+  const conditions = ["r.stock_code = ?"];
+  const params = [stockCode];
+
+  if (strategy) {
+    conditions.push("r.strategy_key = ?");
+    params.push(strategy);
+  }
+
+  if (market) {
+    conditions.push("r.market_type = ?");
+    params.push(market);
+  }
+
+  return {
+    whereSql: `WHERE ${conditions.join(" AND ")}`,
+    params,
+  };
+}
+
+function normalizeHistoryAverage(value) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? Number(numberValue.toFixed(4)) : null;
+}
+
+function normalizeHistoryCount(value) {
+  const numberValue = Number(value || 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function pickBestHistoryRow(rows = [], field) {
+  return rows
+    .filter((row) => row && row[field] !== null && row[field] !== undefined)
+    .sort((a, b) => Number(b[field]) - Number(a[field]))[0] || null;
+}
+
+function pickWeakestHistoryRow(rows = [], field) {
+  return rows
+    .filter((row) => row && row[field] !== null && row[field] !== undefined)
+    .sort((a, b) => Number(a[field]) - Number(b[field]))[0] || null;
+}
+
+async function buildStockStrategyHistory({ stockCode, metricKey, strategyKey, market, limit, sort }) {
+  const code = normalizeStockCodeValue(stockCode);
+  if (!code) {
+    const error = new Error("請輸入股票代號。");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const metric = getBacktestMetric(metricKey);
+  const field = metric.field;
+  const strategy = normalizeStrategyKeyValue(strategyKey);
+  const marketType = parseMarket(market);
+  const safeLimit = parsePositiveInteger(limit, 100, 1, 300);
+  const baseSortSql = normalizeBacktestHistorySort(sort);
+  const sortSql = String(sort || "").trim().toLowerCase() === "metric_desc"
+    ? `r.${field} IS NULL ASC, r.${field} DESC, r.signal_trade_date DESC, r.id DESC`
+    : String(sort || "").trim().toLowerCase() === "metric_asc"
+      ? `r.${field} IS NULL ASC, r.${field} ASC, r.signal_trade_date DESC, r.id DESC`
+      : baseSortSql;
+  const { whereSql, params } = buildStockHistoryWhere({ stockCode: code, strategy, market: marketType });
+
+  const stockRows = await query(
+    `
+    SELECT stock_code, stock_name, market_type, industry
+    FROM stocks
+    WHERE stock_code = ?
+    LIMIT 1
+    `,
+    [code],
+  );
+
+  const signals = await query(
+    `
+    SELECT
+      r.id,
+      r.run_id,
+      br.run_name,
+      DATE_FORMAT(br.start_date, '%Y-%m-%d') AS run_start_date,
+      DATE_FORMAT(br.end_date, '%Y-%m-%d') AS run_end_date,
+      br.market_type AS run_market_type,
+      br.strategy_key AS run_strategy_key,
+      br.limit_per_strategy,
+      br.params_json,
+      DATE_FORMAT(br.completed_at, '%Y-%m-%d %H:%i:%s') AS run_completed_at,
+      r.strategy_key,
+      r.strategy_name,
+      r.stock_code,
+      r.stock_name,
+      r.market_type,
+      r.industry,
+      DATE_FORMAT(r.signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+      r.source_rank,
+      r.strategy_score,
+      r.trigger_summary,
+      r.entry_price,
+      DATE_FORMAT(r.entry_price_date, '%Y-%m-%d') AS entry_price_date,
+      r.price_after_1d,
+      DATE_FORMAT(r.price_after_1d_date, '%Y-%m-%d') AS price_after_1d_date,
+      r.return_1d_percent,
+      r.price_after_3d,
+      DATE_FORMAT(r.price_after_3d_date, '%Y-%m-%d') AS price_after_3d_date,
+      r.return_3d_percent,
+      r.price_after_5d,
+      DATE_FORMAT(r.price_after_5d_date, '%Y-%m-%d') AS price_after_5d_date,
+      r.return_5d_percent,
+      r.latest_price,
+      DATE_FORMAT(r.latest_price_date, '%Y-%m-%d') AS latest_price_date,
+      r.latest_return_percent,
+      r.outcome_label,
+      r.outcome_description,
+      r.is_success,
+      DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+    FROM strategy_backtest_results r
+    LEFT JOIN strategy_backtest_runs br ON br.id = r.run_id
+    ${whereSql}
+    ORDER BY ${sortSql}
+    LIMIT ?
+    `,
+    [...params, safeLimit],
+  );
+
+  const summaryRows = await query(
+    `
+    SELECT
+      COUNT(*) AS signal_count,
+      COUNT(DISTINCT r.run_id) AS run_count,
+      COUNT(DISTINCT r.strategy_key) AS strategy_count,
+      MIN(r.signal_trade_date) AS first_signal_date_raw,
+      DATE_FORMAT(MIN(r.signal_trade_date), '%Y-%m-%d') AS first_signal_date,
+      DATE_FORMAT(MAX(r.signal_trade_date), '%Y-%m-%d') AS latest_signal_date,
+      MAX(r.stock_name) AS stock_name,
+      MAX(r.market_type) AS market_type,
+      MAX(r.industry) AS industry,
+      AVG(r.strategy_score) AS avg_strategy_score,
+      MAX(r.strategy_score) AS max_strategy_score,
+      AVG(r.return_1d_percent) AS avg_return_1d,
+      AVG(r.return_3d_percent) AS avg_return_3d,
+      AVG(r.return_5d_percent) AS avg_return_5d,
+      AVG(r.latest_return_percent) AS avg_latest_return,
+      AVG(CASE WHEN r.return_1d_percent IS NULL THEN NULL WHEN r.return_1d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_1d,
+      AVG(CASE WHEN r.return_3d_percent IS NULL THEN NULL WHEN r.return_3d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_3d,
+      AVG(CASE WHEN r.return_5d_percent IS NULL THEN NULL WHEN r.return_5d_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_5d,
+      AVG(CASE WHEN r.latest_return_percent IS NULL THEN NULL WHEN r.latest_return_percent > 0 THEN 1 ELSE 0 END) * 100 AS win_rate_latest,
+      AVG(r.${field}) AS selected_avg_return,
+      AVG(CASE WHEN r.${field} IS NULL THEN NULL WHEN r.${field} > 0 THEN 1 ELSE 0 END) * 100 AS selected_win_rate,
+      SUM(CASE WHEN r.${field} > 0 THEN 1 ELSE 0 END) AS selected_positive_count,
+      SUM(CASE WHEN r.${field} < 0 THEN 1 ELSE 0 END) AS selected_negative_count,
+      SUM(CASE WHEN r.${field} IS NULL THEN 1 ELSE 0 END) AS selected_pending_count,
+      SUM(r.outcome_label = 'success') AS success_count,
+      SUM(r.outcome_label = 'neutral') AS neutral_count,
+      SUM(r.outcome_label = 'fail') AS fail_count,
+      SUM(r.outcome_label = 'pending') AS pending_count
+    FROM strategy_backtest_results r
+    ${whereSql}
+    `,
+    params,
+  );
+
+  const strategySummary = await query(
+    `
+    SELECT
+      r.strategy_key,
+      r.strategy_name,
+      COUNT(*) AS signal_count,
+      COUNT(DISTINCT r.run_id) AS run_count,
+      AVG(r.strategy_score) AS avg_strategy_score,
+      MAX(r.strategy_score) AS max_strategy_score,
+      AVG(r.${field}) AS avg_return,
+      AVG(CASE WHEN r.${field} IS NULL THEN NULL WHEN r.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+      SUM(CASE WHEN r.${field} > 0 THEN 1 ELSE 0 END) AS positive_count,
+      SUM(CASE WHEN r.${field} < 0 THEN 1 ELSE 0 END) AS negative_count,
+      SUM(CASE WHEN r.${field} IS NULL THEN 1 ELSE 0 END) AS pending_count,
+      DATE_FORMAT(MIN(r.signal_trade_date), '%Y-%m-%d') AS first_signal_date,
+      DATE_FORMAT(MAX(r.signal_trade_date), '%Y-%m-%d') AS latest_signal_date
+    FROM strategy_backtest_results r
+    ${whereSql}
+    GROUP BY r.strategy_key, r.strategy_name
+    ORDER BY win_rate DESC, avg_return DESC, signal_count DESC
+    `,
+    params,
+  );
+
+  const runSummary = await query(
+    `
+    SELECT
+      r.run_id,
+      br.run_name,
+      DATE_FORMAT(br.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(br.end_date, '%Y-%m-%d') AS end_date,
+      DATE_FORMAT(br.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+      br.params_json,
+      COUNT(*) AS signal_count,
+      AVG(r.${field}) AS avg_return,
+      AVG(CASE WHEN r.${field} IS NULL THEN NULL WHEN r.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+      MAX(r.strategy_score) AS max_strategy_score
+    FROM strategy_backtest_results r
+    LEFT JOIN strategy_backtest_runs br ON br.id = r.run_id
+    ${whereSql}
+    GROUP BY r.run_id, br.run_name, br.start_date, br.end_date, br.completed_at, br.params_json
+    ORDER BY MAX(COALESCE(br.completed_at, br.created_at)) DESC, r.run_id DESC
+    LIMIT 30
+    `,
+    params,
+  );
+
+  const normalizedSignals = signals.map((row) => ({
+    ...row,
+    preset_key: parseBacktestParamsPreset(row.params_json),
+  }));
+  const summary = summaryRows[0] || {};
+  const bestResult = pickBestHistoryRow(normalizedSignals, field);
+  const weakestResult = pickWeakestHistoryRow(normalizedSignals, field);
+  const latestSignal = normalizedSignals
+    .slice()
+    .sort((a, b) => String(b.signal_trade_date || "").localeCompare(String(a.signal_trade_date || "")) || Number(b.run_id || 0) - Number(a.run_id || 0))[0] || null;
+
+  return convertBigIntToString({
+    stock: stockRows[0] || {
+      stock_code: code,
+      stock_name: summary.stock_name || "",
+      market_type: summary.market_type || marketType || "",
+      industry: summary.industry || "",
+    },
+    filters: {
+      stock_code: code,
+      metric: metric.key,
+      metric_label: metric.label,
+      strategy: strategy || "",
+      market: marketType || "全部",
+      limit: safeLimit,
+      sort: sort || "signal_desc",
+    },
+    summary: {
+      stock_code: code,
+      stock_name: summary.stock_name || stockRows[0]?.stock_name || "",
+      market_type: summary.market_type || stockRows[0]?.market_type || marketType || "",
+      industry: summary.industry || stockRows[0]?.industry || "",
+      signal_count: normalizeHistoryCount(summary.signal_count),
+      run_count: normalizeHistoryCount(summary.run_count),
+      strategy_count: normalizeHistoryCount(summary.strategy_count),
+      first_signal_date: summary.first_signal_date || "",
+      latest_signal_date: summary.latest_signal_date || "",
+      avg_strategy_score: normalizeHistoryAverage(summary.avg_strategy_score),
+      max_strategy_score: normalizeHistoryAverage(summary.max_strategy_score),
+      avg_return_1d: normalizeHistoryAverage(summary.avg_return_1d),
+      avg_return_3d: normalizeHistoryAverage(summary.avg_return_3d),
+      avg_return_5d: normalizeHistoryAverage(summary.avg_return_5d),
+      avg_latest_return: normalizeHistoryAverage(summary.avg_latest_return),
+      win_rate_1d: normalizeHistoryAverage(summary.win_rate_1d),
+      win_rate_3d: normalizeHistoryAverage(summary.win_rate_3d),
+      win_rate_5d: normalizeHistoryAverage(summary.win_rate_5d),
+      win_rate_latest: normalizeHistoryAverage(summary.win_rate_latest),
+      selected_avg_return: normalizeHistoryAverage(summary.selected_avg_return),
+      selected_win_rate: normalizeHistoryAverage(summary.selected_win_rate),
+      selected_positive_count: normalizeHistoryCount(summary.selected_positive_count),
+      selected_negative_count: normalizeHistoryCount(summary.selected_negative_count),
+      selected_pending_count: normalizeHistoryCount(summary.selected_pending_count),
+      success_count: normalizeHistoryCount(summary.success_count),
+      neutral_count: normalizeHistoryCount(summary.neutral_count),
+      fail_count: normalizeHistoryCount(summary.fail_count),
+      pending_count: normalizeHistoryCount(summary.pending_count),
+      best_result: bestResult,
+      weakest_result: weakestResult,
+      latest_signal: latestSignal,
+    },
+    strategy_summary: strategySummary.map((row) => ({
+      ...row,
+      signal_count: normalizeHistoryCount(row.signal_count),
+      run_count: normalizeHistoryCount(row.run_count),
+      avg_strategy_score: normalizeHistoryAverage(row.avg_strategy_score),
+      max_strategy_score: normalizeHistoryAverage(row.max_strategy_score),
+      avg_return: normalizeHistoryAverage(row.avg_return),
+      win_rate: normalizeHistoryAverage(row.win_rate),
+      positive_count: normalizeHistoryCount(row.positive_count),
+      negative_count: normalizeHistoryCount(row.negative_count),
+      pending_count: normalizeHistoryCount(row.pending_count),
+    })),
+    run_summary: runSummary.map((row) => ({
+      ...row,
+      signal_count: normalizeHistoryCount(row.signal_count),
+      avg_return: normalizeHistoryAverage(row.avg_return),
+      win_rate: normalizeHistoryAverage(row.win_rate),
+      max_strategy_score: normalizeHistoryAverage(row.max_strategy_score),
+      preset_key: parseBacktestParamsPreset(row.params_json),
+    })),
+    signals: normalizedSignals,
+  });
+}
+
+// ==============================
+// V1.4-7：個股策略歷史紀錄
+// GET /strategy-backtests/stock-history?stock_code=2330&metric=5d
+// ==============================
+app.get("/strategy-backtests/stock-history", async (req, res) => {
+  try {
+    const history = await buildStockStrategyHistory({
+      stockCode: req.query.stock_code || req.query.code,
+      metricKey: req.query.metric,
+      strategyKey: req.query.strategy,
+      market: req.query.market,
+      limit: req.query.limit,
+      sort: req.query.sort,
+    });
+
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    console.error("查詢個股策略歷史紀錄失敗：", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "查詢個股策略歷史紀錄失敗",
+      error: error.message,
+    });
   }
 });
 

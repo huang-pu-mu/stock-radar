@@ -76,6 +76,12 @@ const state = {
   strategyTrendStrategy: "",
   strategyTrendLimit: 12,
   strategyWinRateTrend: null,
+  strategyStockHistory: null,
+  strategyStockHistoryCode: "",
+  strategyStockHistoryMetric: "5d",
+  strategyStockHistoryStrategy: "",
+  strategyStockHistoryLimit: 100,
+  strategyStockHistorySort: "signal_desc",
   strategyBacktestConditionPresetKey: "balanced",
   strategyBacktestConditionStrategy: "",
   strategyBacktestConditionMarket: "",
@@ -139,6 +145,7 @@ const PAGE_GROUP_MAP = {
   strategyOptimize: "strategy",
   strategyBacktests: "strategy",
   strategyTrends: "strategy",
+  strategyStockHistory: "strategy",
   strategyReports: "strategy",
   alerts: "alerts",
   notifications: "alerts",
@@ -188,6 +195,7 @@ const PAGE_CONTENT_CONFIG = {
   strategyOptimize: { groupLabel: "策略中心", filterTitle: "策略最佳化", filterDesc: "選擇策略與參數預設，預覽不同門檻下的策略清單。", resultTitle: "策略最佳化結果", resultDesc: "比較保守、平衡、積極參數對訊號數量與分數的影響。" },
   strategyBacktests: { groupLabel: "策略中心", filterTitle: "回測條件", filterDesc: "依 Run ID、策略、結果、排序與搜尋條件查看歷史訊號。", resultTitle: "策略回測清單", resultDesc: "顯示歷史策略訊號與後續 1 / 3 / 5 日績效。" },
   strategyTrends: { groupLabel: "策略中心", filterTitle: "勝率趨勢", filterDesc: "比較最近多次回測 Run 的勝率、平均報酬與策略排名變化。", resultTitle: "策略勝率趨勢", resultDesc: "依 1 / 3 / 5 日或目前報酬觀察策略穩定度。" },
+  strategyStockHistory: { groupLabel: "策略中心", filterTitle: "個股策略歷史", filterDesc: "輸入股票代號後，查詢它過去出現過的策略訊號與後續報酬。", resultTitle: "個股策略歷史紀錄", resultDesc: "整理單一股票在不同 Run、不同策略中的歷史訊號。" },
   strategyReports: { groupLabel: "策略中心", filterTitle: "每日策略報告", filterDesc: "依資料日與市場產生策略摘要，並可外送到 LINE 通知通道。", resultTitle: "每日策略報告", resultDesc: "整理策略分布、高分訊號、法人資金與產業流向。" },
   account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
 };
@@ -1410,6 +1418,7 @@ function updatePageText() {
   const isStrategyTracksPage = state.page === "strategyTracks";
   const isStrategyOptimizePage = state.page === "strategyOptimize";
   const isStrategyBacktestsPage = state.page === "strategyBacktests";
+  const isStrategyStockHistoryPage = state.page === "strategyStockHistory";
   const isStrategyReportsPage = state.page === "strategyReports";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
@@ -1421,6 +1430,16 @@ function updatePageText() {
   setResultHeader({ badge: "待更新" });
 
 
+
+  if (state.page === "strategyStockHistory") {
+    const code = String(state.strategyStockHistoryCode || "").trim();
+    pageTitle.textContent = "個股策略歷史";
+    pageDesc.textContent = code
+      ? `查詢 ${code} 過去出現過的策略訊號、Run ID 與後續報酬。`
+      : "輸入股票代號後，查看該股票在歷史回測中出現過哪些策略訊號。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看訊號次數、勝率與平均報酬，再看是哪幾個策略反覆出現；沒有訊號不代表股票不好，只代表本次回測條件沒有命中。</span>`;
+    return;
+  }
 
   if (state.page === "strategyReports") {
     pageTitle.textContent = "每日策略報告";
@@ -2166,6 +2185,11 @@ function rerenderCurrentContent() {
 
   if (state.page === "strategyReports") {
     renderStrategyDailyReportPage();
+    return;
+  }
+
+  if (state.page === "strategyStockHistory") {
+    renderStrategyStockHistoryPage();
     return;
   }
 
@@ -3016,6 +3040,7 @@ function renderStrategyTrackingCard(row, index) {
         <div class="action-buttons">
           <button class="watch-btn danger-action" type="button" data-strategy-track-remove="${escapeHtml(pick(row, ["id"], ""))}">移除追蹤</button>
           <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="ghost-btn compact" type="button" data-stock-history-code="${escapeHtml(code)}">策略歷史</button>
           <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
         </div>
       </div>
@@ -5421,6 +5446,7 @@ function renderBacktestStockRankingRow(row, index, rankType = "best") {
         <span class="card-note">進場價 ${formatPrice(pick(row, ["entry_price"], "-"))}</span>
         <div class="action-buttons">
           <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="ghost-btn compact" type="button" data-stock-history-code="${escapeHtml(code)}">策略歷史</button>
           <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
         </div>
       </div>
@@ -5582,6 +5608,7 @@ function renderStrategyBacktestResultCard(row, index) {
         <span class="card-note">Run ID：${escapeHtml(pick(row, ["run_id"], state.strategyBacktestRunId || "-"))}</span>
         <div class="action-buttons">
           <button class="watch-btn" type="button" data-watch-action="add" data-code="${escapeHtml(code)}">加入自選</button>
+          <button class="ghost-btn compact" type="button" data-stock-history-code="${escapeHtml(code)}">策略歷史</button>
           <button class="detail-btn" type="button" data-code="${escapeHtml(code)}">看明細</button>
         </div>
       </div>
@@ -6071,6 +6098,340 @@ function handleStrategyTrendSubmit(form) {
   state.strategyTrendStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
   state.strategyTrendLimit = Number.isFinite(limit) ? Math.max(2, Math.min(limit, 30)) : 12;
   loadStrategyWinRateTrend();
+}
+
+
+const STRATEGY_STOCK_HISTORY_SORT_OPTIONS = [
+  { key: "signal_desc", label: "訊號日新到舊" },
+  { key: "signal_asc", label: "訊號日舊到新" },
+  { key: "metric_desc", label: "所選報酬高到低" },
+  { key: "metric_asc", label: "所選報酬低到高" },
+  { key: "score_desc", label: "策略分數高到低" },
+  { key: "score_asc", label: "策略分數低到高" },
+];
+
+function getStockHistoryMetric() {
+  return STRATEGY_BACKTEST_METRICS.find((item) => item.key === state.strategyStockHistoryMetric) || STRATEGY_BACKTEST_METRICS[2];
+}
+
+function renderStrategyStockHistoryFilter() {
+  const metric = getStockHistoryMetric();
+  const code = String(state.strategyStockHistoryCode || "").trim();
+  return `
+    <section class="strategy-dashboard-card strategy-stock-history-filter-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-7 個股策略歷史紀錄</p>
+          <h3>查詢單一股票歷史策略訊號</h3>
+          <p>輸入股票代號，例如 2330，就能看到過去在哪些 Run ID、哪些策略中出現過，以及後續 ${escapeHtml(metric.label)} 表現。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>目前股票：${escapeHtml(code || "尚未輸入")}</span>
+          <span>指標：${escapeHtml(metric.label)}</span>
+          <span>市場：${escapeHtml(state.market || "全部")}</span>
+        </div>
+      </div>
+      <form class="strategy-track-filter-form strategy-stock-history-form" data-strategy-stock-history-form>
+        <label>
+          <span>股票代號</span>
+          <input name="stock_code" type="search" inputmode="text" autocomplete="off" value="${escapeHtml(code)}" placeholder="例如：2330" />
+        </label>
+        <label>
+          <span>報酬指標</span>
+          <select name="metric">
+            ${STRATEGY_BACKTEST_METRICS.map((item) => `<option value="${escapeHtml(item.key)}" ${item.key === state.strategyStockHistoryMetric ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>策略</span>
+          <select name="strategy">
+            <option value="" ${state.strategyStockHistoryStrategy ? "" : "selected"}>全部策略</option>
+            ${getStrategyOptions().map((item) => `<option value="${escapeHtml(item.key)}" ${item.key === state.strategyStockHistoryStrategy ? "selected" : ""}>${escapeHtml(item.short_name || item.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select name="sort">
+            ${STRATEGY_STOCK_HISTORY_SORT_OPTIONS.map((item) => `<option value="${escapeHtml(item.key)}" ${item.key === state.strategyStockHistorySort ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>最多筆數</span>
+          <select name="limit">
+            ${[30, 50, 100, 200, 300].map((value) => `<option value="${value}" ${Number(state.strategyStockHistoryLimit) === value ? "selected" : ""}>最多 ${value} 筆</option>`).join("")}
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button class="search-btn compact" type="submit">查詢歷史</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderHistoryResultMini(row, label) {
+  if (!row) return `<span>${escapeHtml(label)}：-</span>`;
+  const metric = getStockHistoryMetric();
+  const value = pick(row, [metric.field], null);
+  return `<span>${escapeHtml(label)}：${escapeHtml(row.stock_code || "")} ${escapeHtml(row.stock_name || "")}｜${escapeHtml(row.strategy_name || "策略")}｜<b class="${getReturnClass(value)}">${formatReturnPercent(value)}</b></span>`;
+}
+
+function renderStrategyStockHistoryStrategySummary(rows = []) {
+  return `
+    <section class="strategy-ranking-section strategy-stock-history-section">
+      <div class="ranking-section-title">
+        <h4>策略分布</h4>
+        <span>看這檔股票主要被哪些策略命中</span>
+      </div>
+      <div class="strategy-stock-history-summary-grid">
+        ${rows.length ? rows.map((row) => `
+          <article class="strategy-stock-history-summary-card">
+            <div>
+              <p class="section-kicker">${escapeHtml(row.strategy_key || "strategy")}</p>
+              <h4>${escapeHtml(row.strategy_name || "策略")}</h4>
+            </div>
+            <div class="history-summary-main">
+              <strong>${formatNumber(row.signal_count)} 筆</strong>
+              <span>勝率 ${formatTrendPercent(row.win_rate)}</span>
+              <span class="${getReturnClass(row.avg_return)}">平均 ${formatReturnPercent(row.avg_return)}</span>
+            </div>
+            <small>Run ${formatNumber(row.run_count)} 次｜期間 ${escapeHtml(row.first_signal_date || "-")} ~ ${escapeHtml(row.latest_signal_date || "-")}</small>
+          </article>
+        `).join("") : `<p class="muted-text">目前沒有策略分布資料。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderStrategyStockHistoryRunSummary(rows = []) {
+  return `
+    <section class="strategy-ranking-section strategy-stock-history-section">
+      <div class="ranking-section-title">
+        <h4>Run ID 分布</h4>
+        <span>看這檔股票在哪幾次回測中出現</span>
+      </div>
+      <div class="strategy-stock-history-run-list">
+        ${rows.length ? rows.map((row) => `
+          <article class="strategy-stock-history-run-card">
+            <div>
+              <strong>Run ${escapeHtml(row.run_id || "-")}</strong>
+              <span>${escapeHtml(row.preset_key || "未標示參數")}</span>
+            </div>
+            <div>
+              <span>${formatNumber(row.signal_count)} 筆訊號</span>
+              <span class="${getReturnClass(row.avg_return)}">平均 ${formatReturnPercent(row.avg_return)}</span>
+              <span>勝率 ${formatTrendPercent(row.win_rate)}</span>
+            </div>
+            <small>${escapeHtml(row.start_date || "-")} ~ ${escapeHtml(row.end_date || "-")}｜${escapeHtml(row.completed_at || "-")}</small>
+          </article>
+        `).join("") : `<p class="muted-text">目前沒有 Run ID 分布資料。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderStrategyStockHistorySignalCard(row, index) {
+  const metric = getStockHistoryMetric();
+  const selectedReturn = pick(row, [metric.field], null);
+  const outcome = pick(row, ["outcome_label"], "pending");
+  return `
+    <article class="stock-card strategy-backtest-card strategy-stock-history-card">
+      <div class="stock-top">
+        <div class="stock-main">
+          <span class="rank-badge">歷史 ${index + 1}</span>
+          <div class="stock-name">
+            <h3>${escapeHtml(pick(row, ["strategy_name"], "策略訊號"))}</h3>
+            <span class="stock-code">${escapeHtml(pick(row, ["signal_trade_date"], "-"))}</span>
+            <span class="badge">Run ${escapeHtml(pick(row, ["run_id"], "-"))}</span>
+            <span class="badge">${escapeHtml(pick(row, ["preset_key"], "未標示參數"))}</span>
+          </div>
+        </div>
+        <div class="score-box ${getReturnClass(selectedReturn)}">
+          <span class="score-value">${formatReturnPercent(selectedReturn)}</span>
+          <span class="score-label">${escapeHtml(metric.shortLabel)}</span>
+        </div>
+      </div>
+      <div class="quick-summary">
+        <span class="summary-pill score-mid">策略分數 ${formatNumber(pick(row, ["strategy_score"], "-"))}</span>
+        <span class="summary-pill ${getBacktestOutcomeClass(outcome)}">${escapeHtml(getBacktestOutcomeText(outcome))}</span>
+        <span class="summary-text">${escapeHtml(pick(row, ["trigger_summary"], "符合策略條件"))}</span>
+      </div>
+      <div class="strategy-performance-pills">
+        ${renderPerformancePill("1日", pick(row, ["return_1d_percent"], null), pick(row, ["price_after_1d_date"], ""))}
+        ${renderPerformancePill("3日", pick(row, ["return_3d_percent"], null), pick(row, ["price_after_3d_date"], ""))}
+        ${renderPerformancePill("5日", pick(row, ["return_5d_percent"], null), pick(row, ["price_after_5d_date"], ""))}
+        ${renderPerformancePill("目前", pick(row, ["latest_return_percent"], null), pick(row, ["latest_price_date"], ""))}
+      </div>
+      <div class="info-grid strategy-info-grid">
+        ${createInfoItem("進場價", `${formatPrice(pick(row, ["entry_price"], "-"))} / ${formatDate(pick(row, ["entry_price_date"], "-"))}`)}
+        ${createInfoItem("目前價", `${formatPrice(pick(row, ["latest_price"], "-"))} / ${formatDate(pick(row, ["latest_price_date"], "-"))}`)}
+        ${createInfoItem("排名", formatNumber(pick(row, ["source_rank"], "-")))}
+        ${createInfoItem("結果", escapeHtml(pick(row, ["outcome_description"], getBacktestOutcomeText(outcome))), getBacktestOutcomeClass(outcome))}
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyStockHistorySignals(signals = []) {
+  return `
+    <section class="strategy-ranking-section strategy-stock-history-section">
+      <div class="ranking-section-title">
+        <h4>歷史訊號清單</h4>
+        <span>依目前排序顯示單一股票的策略訊號</span>
+      </div>
+      ${signals.length ? signals.map(renderStrategyStockHistorySignalCard).join("") : `
+        <article class="search-intro-card">
+          <div class="intro-icon">🔎</div>
+          <h3>${escapeHtml(state.strategyStockHistoryCode || "此股票")} 目前沒有策略歷史訊號</h3>
+          <p>這代表在目前回測 Run、策略與市場條件下沒有命中。可改看「個股查詢」查看股票目前資料。</p>
+          <div class="example-row">
+            <button class="example-btn" type="button" data-go-page="search">前往個股查詢</button>
+          </div>
+        </article>
+      `}
+    </section>
+  `;
+}
+
+function renderStrategyStockHistoryPage() {
+  const history = state.strategyStockHistory;
+  const metric = getStockHistoryMetric();
+  const code = String(state.strategyStockHistoryCode || "").trim();
+
+  if (!code) {
+    setContentSummary([
+      { label: "查詢狀態", value: "尚未輸入" },
+      { label: "指標", value: metric.label },
+    ], "輸入股票代號後，會查詢既有策略回測結果。 ");
+    setResultHeader({ title: "個股策略歷史紀錄", desc: "請先輸入股票代號，例如 2330。", badge: "V1.4-7" });
+    stockList.innerHTML = `${renderStrategyStockHistoryFilter()}<article class="search-intro-card"><div class="intro-icon">📚</div><h3>請輸入股票代號</h3><p>查詢後會顯示該股票過去出現過的策略訊號、勝率與後續報酬。</p></article>`;
+    return;
+  }
+
+  if (!history) {
+    setContentSummary([
+      { label: "查詢股票", value: code },
+      { label: "指標", value: metric.label },
+    ], "正在等待查詢結果。 ");
+    setResultHeader({ title: "個股策略歷史紀錄", desc: "套用查詢後會顯示歷史訊號。", badge: "V1.4-7" });
+    stockList.innerHTML = `${renderStrategyStockHistoryFilter()}<article class="search-intro-card"><div class="intro-icon">📚</div><h3>尚未載入歷史紀錄</h3><p>請按「查詢歷史」取得資料。</p></article>`;
+    return;
+  }
+
+  const summary = history.summary || {};
+  const signals = Array.isArray(history.signals) ? history.signals : [];
+  const strategySummary = Array.isArray(history.strategy_summary) ? history.strategy_summary : [];
+  const runSummary = Array.isArray(history.run_summary) ? history.run_summary : [];
+  const stockLabel = `${summary.stock_code || code} ${summary.stock_name || ""}`.trim();
+
+  updatePageMetaBar([
+    { label: "股票", value: stockLabel || code },
+    { label: "指標", value: history.filters?.metric_label || metric.label },
+  ]);
+
+  setContentSummary([
+    { label: "歷史訊號", value: `${formatNumber(summary.signal_count || 0)} 筆` },
+    { label: "命中策略", value: `${formatNumber(summary.strategy_count || 0)} 種` },
+    { label: "回測 Run", value: `${formatNumber(summary.run_count || 0)} 次` },
+    { label: "勝率", value: formatTrendPercent(summary.selected_win_rate) },
+    { label: "平均報酬", value: formatReturnPercent(summary.selected_avg_return), className: getReturnClass(summary.selected_avg_return) },
+    { label: "訊號期間", value: `${summary.first_signal_date || "-"} ~ ${summary.latest_signal_date || "-"}` },
+  ], "個股策略歷史只代表歷史回測條件命中紀錄，不代表未來績效保證。 ");
+
+  setResultHeader({
+    title: `${stockLabel || code} 策略歷史紀錄`,
+    desc: `目前指標：${history.filters?.metric_label || metric.label}，市場：${history.filters?.market || state.market || "全部"}。`,
+    badge: "個股歷史",
+    countText: `${formatNumber(summary.signal_count || 0)} 筆訊號`,
+  });
+
+  stockList.innerHTML = [
+    renderStrategyStockHistoryFilter(),
+    `<section class="strategy-dashboard-card strategy-stock-history-highlight-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">${escapeHtml(stockLabel || code)}</p>
+          <h3>歷史回測摘要</h3>
+          <p>${signals.length ? "這檔股票曾在歷史回測中出現策略訊號，可往下查看策略分布與每筆訊號。" : "這檔股票在目前條件下沒有策略訊號。"}</p>
+        </div>
+        <div class="strategy-meta-box">
+          ${renderHistoryResultMini(summary.best_result, "最佳")}
+          ${renderHistoryResultMini(summary.weakest_result, "最弱")}
+        </div>
+      </div>
+    </section>`,
+    renderStrategyStockHistoryStrategySummary(strategySummary),
+    renderStrategyStockHistoryRunSummary(runSummary),
+    renderStrategyStockHistorySignals(signals),
+  ].join("");
+}
+
+async function loadStrategyStockHistory() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    if (!state.strategyOptions.length) {
+      const presetResponse = await fetchJson(`/strategy-optimization/presets?preset=balanced`, { method: "GET", raw: true }).catch(() => null);
+      if (presetResponse) {
+        state.strategyOptions = Array.isArray(presetResponse.strategies) ? presetResponse.strategies : getStrategyOptions();
+      }
+    }
+
+    const code = String(state.strategyStockHistoryCode || "").trim();
+    if (!code) {
+      state.strategyStockHistory = null;
+      renderStrategyStockHistoryPage();
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("stock_code", code);
+    params.set("metric", state.strategyStockHistoryMetric || "5d");
+    params.set("limit", String(state.strategyStockHistoryLimit || 100));
+    params.set("sort", state.strategyStockHistorySort || "signal_desc");
+    if (state.strategyStockHistoryStrategy) params.set("strategy", state.strategyStockHistoryStrategy);
+    if (state.market) params.set("market", state.market);
+
+    const result = await fetchJson(`/strategy-backtests/stock-history?${params.toString()}`, { method: "GET", raw: true });
+    state.strategyStockHistory = result.data || null;
+    renderStrategyStockHistoryPage();
+    showTemporaryStatus(`${code} 策略歷史已更新。`, "success");
+  } catch (error) {
+    state.strategyStockHistory = null;
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 已部署 V1.4-7，且 strategy_backtest_results 已有資料。 ");
+    setResultHeader({ title: "個股策略歷史讀取失敗", desc: "目前無法取得個股策略歷史。", badge: "讀取失敗" });
+    stockList.innerHTML = `
+      ${renderStrategyStockHistoryFilter()}
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>個股策略歷史讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+      </article>
+    `;
+    showStatus(`個股策略歷史讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleStrategyStockHistorySubmit(form) {
+  const formData = new FormData(form);
+  const code = String(formData.get("stock_code") || "").trim().toUpperCase().replace(/[^0-9A-Z]/g, "");
+  const metric = String(formData.get("metric") || "5d").trim();
+  const strategy = String(formData.get("strategy") || "").trim();
+  const limit = Number.parseInt(String(formData.get("limit") || "100"), 10);
+  const sort = String(formData.get("sort") || "signal_desc").trim();
+
+  state.strategyStockHistoryCode = code;
+  state.strategyStockHistoryMetric = STRATEGY_BACKTEST_METRICS.some((item) => item.key === metric) ? metric : "5d";
+  state.strategyStockHistoryStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
+  state.strategyStockHistoryLimit = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 300)) : 100;
+  state.strategyStockHistorySort = STRATEGY_STOCK_HISTORY_SORT_OPTIONS.some((item) => item.key === sort) ? sort : "signal_desc";
+  loadStrategyStockHistory();
 }
 
 function getLineProviderStatus() {
@@ -6722,6 +7083,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "strategyStockHistory") {
+    await loadStrategyStockHistory();
+    return;
+  }
+
   if (state.page === "strategyTrends") {
     await loadStrategyWinRateTrend();
     return;
@@ -6968,6 +7334,9 @@ function switchPage(page) {
   if (page === "strategyTrends") {
     state.strategyWinRateTrend = null;
   }
+  if (page === "strategyStockHistory") {
+    state.strategyStockHistory = null;
+  }
   if (page === "notifications") {
     state.notificationLastTestResult = null;
   }
@@ -6993,6 +7362,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyStockHistoryForm = event.target.closest("[data-strategy-stock-history-form]");
+  if (strategyStockHistoryForm) {
+    event.preventDefault();
+    handleStrategyStockHistorySubmit(strategyStockHistoryForm);
+    return;
+  }
+
   const strategyTrendForm = event.target.closest("[data-strategy-trend-form]");
   if (strategyTrendForm) {
     event.preventDefault();
@@ -7060,6 +7436,16 @@ stockList.addEventListener("click", (event) => {
   const dailyReportSendLineButton = event.target.closest("[data-strategy-daily-report-send-line]");
   if (dailyReportSendLineButton) {
     handleStrategyDailyReportSendLine(dailyReportSendLineButton);
+    return;
+  }
+
+  const stockHistoryButton = event.target.closest("[data-stock-history-code]");
+  if (stockHistoryButton) {
+    const code = String(stockHistoryButton.dataset.stockHistoryCode || "").trim();
+    if (code) {
+      state.strategyStockHistoryCode = code;
+      switchPage("strategyStockHistory");
+    }
     return;
   }
 
