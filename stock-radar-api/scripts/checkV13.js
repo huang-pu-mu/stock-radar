@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.3.4.3";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v43";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.6";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v44";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.3-4-3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "PWA 預期版本為 v43", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v43", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-1-6", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "PWA 預期版本為 v44", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v44", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -98,6 +98,7 @@ async function main() {
     "strategy-backtests:setup",
     "strategy-backtests:generate",
     "v13:check",
+    "v14:check",
   ];
 
   for (const scriptName of requiredScripts) {
@@ -189,7 +190,7 @@ async function main() {
   const overallStatus = failCount > 0 ? "fail" : warnCount > 0 ? "warn" : "pass";
 
   console.log("====================================");
-  console.log("V1.3 收尾驗收檢查");
+  console.log("V1.4 UI 優化驗收檢查");
   console.log(`API 版本：${EXPECTED_API_VERSION}`);
   console.log(`PWA 版本：${EXPECTED_PWA_VERSION}`);
   if (apiBaseUrl) console.log(`線上 API：${apiBaseUrl}`);
@@ -211,7 +212,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("V1.3 收尾驗收檢查失敗");
+  console.error("V1.4 UI 優化驗收檢查失敗");
   console.error(error);
   process.exit(1);
 });

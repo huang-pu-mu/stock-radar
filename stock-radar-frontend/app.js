@@ -55,6 +55,7 @@ const state = {
   strategyBacktestFilterOutcome: "",
   strategyBacktestSearch: "",
   strategyBacktestSort: "5d_desc",
+  strategyBacktestResultCount: 0,
   strategyBacktestRuns: [],
   strategyBacktestSummary: null,
   strategyBacktestRankings: null,
@@ -87,6 +88,7 @@ const closeChartZoomBtn = document.getElementById("closeChartZoomBtn");
 const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
 const alertsTabBadge = document.getElementById("alertsTabBadge");
+const backToTopBtn = document.getElementById("backToTopBtn");
 
 
 const DEFAULT_STRATEGY_OPTIONS = [
@@ -771,6 +773,23 @@ function setSearchLoading(isLoading) {
   stockSearchBtn.disabled = isLoading;
   stockSearchInput.disabled = isLoading;
   stockSearchBtn.textContent = isLoading ? "查詢中..." : "查詢";
+}
+
+function updateBackToTopVisibility() {
+  if (!backToTopBtn) return;
+  backToTopBtn.classList.toggle("hidden", window.scrollY < 520);
+}
+
+function scrollToPageTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function scrollToBacktestResults() {
+  const target = document.getElementById("strategyBacktestResultsSection");
+  if (!target) return;
+  window.setTimeout(() => {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
 }
 
 async function fetchJson(path, options = {}) {
@@ -4629,7 +4648,7 @@ function renderStrategyBacktestRankingPanel() {
           <h3>回測排行榜強化</h3>
           <p>依 ${escapeHtml(metric.label)} 檢查最佳股票、最弱股票與各策略平均表現。</p>
         </div>
-        <div class="ranking-limit-note">顯示前 ${formatNumber(state.strategyBacktestRankingLimit || 20)} 名資料</div>
+        <div class="ranking-limit-note">排行榜不受搜尋條件影響</div>
       </div>
       ${renderStrategyBacktestMetricTabs()}
       ${renderStrategyBacktestRankingModeTabs()}
@@ -4638,7 +4657,7 @@ function renderStrategyBacktestRankingPanel() {
       ${showStocks && rankingMode === "weakest" ? renderBacktestRankingColumns([], weakestStocks) : ""}
       ${showStrategies ? renderBacktestStrategyRankingList(strategyRankings, metric) : ""}
       <div class="strategy-result-note compact-note">
-        排行榜只比較已有價格資料的訊號；樣本數太少時，平均報酬容易被單一股票放大或扭曲。
+        排行榜不受搜尋條件影響，只比較整個 Run 中已有價格資料的訊號；樣本數太少時，平均報酬容易被單一股票放大或扭曲。
       </div>
     </section>
   `;
@@ -4697,6 +4716,43 @@ function renderStrategyBacktestResultCard(row, index) {
   `;
 }
 
+function renderStrategyBacktestResultsSection(rows) {
+  const searchText = String(state.strategyBacktestSearch || "").trim();
+  const hasSearch = Boolean(searchText);
+  const totalCount = Number.isFinite(Number(state.strategyBacktestResultCount))
+    ? Number(state.strategyBacktestResultCount)
+    : rows.length;
+
+  return `
+    <section id="strategyBacktestResultsSection" class="strategy-backtest-results-section">
+      <div class="strategy-result-header">
+        <div>
+          <p class="section-kicker">回測結果清單</p>
+          <h3>${hasSearch ? `目前搜尋：${escapeHtml(searchText)}` : "回測結果清單"}</h3>
+          <p>${hasSearch ? `共找到 ${formatNumber(totalCount)} 筆回測訊號` : "依目前篩選條件列出策略訊號明細。"}</p>
+        </div>
+        ${hasSearch ? `<span class="summary-pill score-high">搜尋結果</span>` : `<span class="summary-pill">明細</span>`}
+      </div>
+      <div class="strategy-result-note">
+        回測是用歷史資料檢查策略訊號，不是保證未來績效。樣本數越多，統計才越有參考價值。
+      </div>
+      ${rows.length ? rows.map(renderStrategyBacktestResultCard).join("") : `
+        <article class="search-intro-card">
+          <div class="intro-icon">🔎</div>
+          <h3>${hasSearch ? `${escapeHtml(searchText)} 在本次回測沒有策略訊號` : "沒有符合篩選條件的回測結果"}</h3>
+          <p>${hasSearch ? "請改用「個股查詢」查看股票目前資料。" : "請調整策略、結果或搜尋關鍵字。"}</p>
+          ${hasSearch ? `
+            <div class="example-row">
+              <button class="example-btn" type="button" data-go-page="search">前往個股查詢</button>
+              <button class="example-btn" type="button" data-strategy-backtest-reset>清除搜尋</button>
+            </div>
+          ` : ""}
+        </article>
+      `}
+    </section>
+  `;
+}
+
 function renderStrategyBacktestEmpty() {
   stockList.innerHTML = `
     ${renderStrategyBacktestFilters()}
@@ -4719,14 +4775,15 @@ function renderStrategyBacktestPage() {
     return;
   }
 
+  const hasSearch = Boolean(String(state.strategyBacktestSearch || "").trim());
+  const resultsSection = renderStrategyBacktestResultsSection(rows);
+  const rankingPanel = renderStrategyBacktestRankingPanel();
+
   stockList.innerHTML = `
     ${renderStrategyBacktestFilters()}
     ${renderStrategyBacktestSummary()}
-    ${renderStrategyBacktestRankingPanel()}
-    <div class="strategy-result-note">
-      回測是用歷史資料檢查策略訊號，不是保證未來績效。樣本數越多，統計才越有參考價值。
-    </div>
-    ${rows.length ? rows.map(renderStrategyBacktestResultCard).join("") : `<article class="search-intro-card"><h3>沒有符合篩選條件的回測結果</h3><p>請調整策略、結果或搜尋關鍵字。</p></article>`}
+    ${hasSearch ? resultsSection : rankingPanel}
+    ${hasSearch ? rankingPanel : resultsSection}
   `;
 }
 
@@ -4743,7 +4800,7 @@ function handleStrategyBacktestFilterSubmit(form) {
   state.strategyBacktestFilterOutcome = STRATEGY_BACKTEST_OUTCOME_OPTIONS.some((item) => item.key === outcome) ? outcome : "";
   state.strategyBacktestSort = STRATEGY_BACKTEST_SORT_OPTIONS.some((item) => item.key === sort) ? sort : "5d_desc";
   state.strategyBacktestSearch = search;
-  loadStrategyBacktests();
+  loadStrategyBacktests({ scrollToResults: Boolean(search) });
 }
 
 function resetStrategyBacktestFilters() {
@@ -4751,6 +4808,7 @@ function resetStrategyBacktestFilters() {
   state.strategyBacktestFilterOutcome = "";
   state.strategyBacktestSearch = "";
   state.strategyBacktestSort = "5d_desc";
+  state.strategyBacktestResultCount = 0;
   loadStrategyBacktests();
 }
 
@@ -4769,7 +4827,7 @@ function handleStrategyBacktestRankingMode(button) {
   renderStrategyBacktestPage();
 }
 
-async function loadStrategyBacktests() {
+async function loadStrategyBacktests(options = {}) {
   setLoading(true);
   renderLoadingCards();
 
@@ -4791,10 +4849,15 @@ async function loadStrategyBacktests() {
     state.strategyBacktestSummary = summaryResponse.data || null;
     state.strategyBacktestRankings = rankingResponse.data ? { data: rankingResponse.data } : null;
     state.latestRows = Array.isArray(resultsResponse.data) ? resultsResponse.data : [];
+    state.strategyBacktestResultCount = Number(resultsResponse.total_count ?? resultsResponse.count ?? state.latestRows.length) || 0;
     renderStrategyBacktestPage();
-    showTemporaryStatus(`已更新 ${state.latestRows.length} 筆回測結果。`, "success");
+    if (options.scrollToResults && state.strategyBacktestSearch) {
+      scrollToBacktestResults();
+    }
+    showTemporaryStatus(`已更新 ${formatNumber(state.strategyBacktestResultCount)} 筆回測結果。`, "success");
   } catch (error) {
     state.latestRows = [];
+    state.strategyBacktestResultCount = 0;
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
         <div class="intro-icon">⚠️</div>
@@ -5245,6 +5308,10 @@ searchPanel.addEventListener("submit", (event) => {
 authMiniCard?.addEventListener("click", () => {
   switchPage("account");
 });
+
+backToTopBtn?.addEventListener("click", scrollToPageTop);
+window.addEventListener("scroll", updateBackToTopVisibility, { passive: true });
+updateBackToTopVisibility();
 
 refreshBtn.addEventListener("click", loadList);
 closeDetailBtn.addEventListener("click", closeDetail);

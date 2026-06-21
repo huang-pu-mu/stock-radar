@@ -227,8 +227,8 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.3.4.3";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v43";
+const API_VERSION = "stock-radar-api-v1.4.1.6";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v44";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -4518,6 +4518,16 @@ app.get("/strategy-backtests/results", async (req, res) => {
     const { whereSql, params } = buildBacktestResultWhere({ ...req.query, run_id: runId });
     const sortSql = getBacktestResultSort(req.query.sort || req.query.order);
 
+    const totalRows = await query(
+      `
+      SELECT COUNT(*) AS total_count
+      FROM strategy_backtest_results r
+      ${whereSql}
+      `,
+      params,
+    );
+    const totalCount = Number(totalRows[0]?.total_count || 0);
+
     const rows = await query(
       `
       SELECT
@@ -4563,6 +4573,7 @@ app.get("/strategy-backtests/results", async (req, res) => {
       success: true,
       run_id: runId,
       count: rows.length,
+      total_count: totalCount,
       limit,
       offset,
       data: convertBigIntToString(rows),
