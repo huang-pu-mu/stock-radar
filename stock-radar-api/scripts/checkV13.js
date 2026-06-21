@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.3.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v49";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.4.1";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v50";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v49", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v49", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-4-1", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v50", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v50", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -98,6 +98,7 @@ async function main() {
     "strategy-backtests:setup",
     "strategy-backtests:generate",
     "strategy-params:setup",
+    "notifications:setup",
     "v13:check",
     "v14:check",
   ];
@@ -117,6 +118,8 @@ async function main() {
     "stock-radar-api/scripts/setupStrategyBacktests.js",
     "stock-radar-api/scripts/generateStrategyBacktests.js",
     "stock-radar-api/scripts/setupStrategyParameterPresets.js",
+    "stock-radar-api/sql/notification-channels.sql",
+    "stock-radar-api/scripts/setupNotificationChannels.js",
     "stock-radar-api/scripts/checkV13.js",
     "stock-radar-frontend/index.html",
     "stock-radar-frontend/app.js",
@@ -149,6 +152,11 @@ async function main() {
     ["get", "/strategy-backtests/results"],
     ["get", "/strategy-backtests/summary"],
     ["get", "/strategy-backtests/rankings"],
+    ["get", "/notification/channels"],
+    ["post", "/notification/channels/line"],
+    ["patch", "/notification/channels/:channelId"],
+    ["delete", "/notification/channels/:channelId"],
+    ["post", "/notification/channels/:channelId/test"],
   ];
 
   for (const [method, route] of requiredRoutes) {
@@ -161,11 +169,13 @@ async function main() {
     ["策略追蹤頁籤", 'data-page="strategyTracks"'],
     ["策略回測頁籤", 'data-page="strategyBacktests"'],
     ["策略最佳化頁籤", 'data-page="strategyOptimize"'],
+    ["通知外送頁籤", 'data-page="notifications"'],
     ["我的頁頁籤", 'data-page="account"'],
     ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
     ["策略回測 API", 'strategy-backtests'],
     ["策略最佳化 API", 'strategy-optimization'],
     ["策略追蹤停利停損", 'risk-settings'],
+    ["通知外送 API", 'notification/channels'],
   ];
 
   for (const [label, marker] of requiredFrontendMarkers) {
@@ -193,6 +203,11 @@ async function main() {
     ["回測條件調整 CLI", readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("parseStrategyOptimizationParamsFromArgs") && readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("applyStrategyOptimizationParams")],
     ["回測條件調整前端", appSource.includes("renderStrategyBacktestConditionPanel") && appSource.includes("buildStrategyBacktestGenerateCommand")],
     ["回測條件調整樣式", styleSource.includes(".strategy-backtest-condition-card") && styleSource.includes(".backtest-command-box")],
+    ["LINE 通知 SQL", readText("stock-radar-api/sql/notification-channels.sql").includes("notification_channels") && readText("stock-radar-api/sql/notification-channels.sql").includes("notification_send_logs")],
+    ["LINE 通知設定腳本", readText("stock-radar-api/scripts/setupNotificationChannels.js").includes("notification-channels.sql")],
+    ["LINE 通知 API", serverSource.includes("sendLinePushMessage") && serverSource.includes("LINE_CHANNEL_ACCESS_TOKEN")],
+    ["LINE 通知前端", appSource.includes("renderNotificationSettingsPage") && appSource.includes("data-line-notification-form")],
+    ["LINE 通知樣式", styleSource.includes(".line-notification-form") && styleSource.includes(".notification-channel-card")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {

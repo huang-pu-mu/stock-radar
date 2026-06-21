@@ -21,7 +21,8 @@
     "strategy-backtests:generate": "node scripts/generateStrategyBacktests.js",
     "v13:check": "node scripts/checkV13.js",
     "v14:check": "node scripts/checkV13.js",
-    "strategy-params:setup": "node scripts/setupStrategyParameterPresets.js"
+    "strategy-params:setup": "node scripts/setupStrategyParameterPresets.js",
+    "notifications:setup": "node scripts/setupNotificationChannels.js"
   },
   "keywords": [
     "stock",

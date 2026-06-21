@@ -226,9 +226,207 @@ function isValidDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
+function safeJsonParse(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return fallback;
+  }
+}
 
-const API_VERSION = "stock-radar-api-v1.4.3.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v49";
+function maskSecretText(value, visiblePrefix = 6, visibleSuffix = 4) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= visiblePrefix + visibleSuffix + 3) return "已設定";
+  return `${text.slice(0, visiblePrefix)}...${text.slice(-visibleSuffix)}`;
+}
+
+function getLineChannelAccessToken() {
+  return String(process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+}
+
+function getNotificationProviderStatus() {
+  const lineToken = getLineChannelAccessToken();
+  return {
+    line: {
+      provider: "LINE Messaging API",
+      is_configured: Boolean(lineToken),
+      token_masked: lineToken ? maskSecretText(lineToken, 8, 6) : "",
+      required_env: "LINE_CHANNEL_ACCESS_TOKEN",
+      note: lineToken
+        ? "已設定 LINE_CHANNEL_ACCESS_TOKEN，可測試推播。"
+        : "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，只能保存收件目標，不能實際發送。",
+    },
+  };
+}
+
+function normalizeDestinationType(value) {
+  const destinationType = String(value || "user").trim().toLowerCase();
+  if (["user", "group", "room"].includes(destinationType)) return destinationType;
+  return "user";
+}
+
+function normalizeLineDestinationId(value) {
+  return String(value || "").trim().slice(0, 128);
+}
+
+function normalizeNotificationName(value) {
+  return String(value || "LINE 通知").trim().slice(0, 64) || "LINE 通知";
+}
+
+function formatLineDestinationType(value) {
+  const type = normalizeDestinationType(value);
+  if (type === "group") return "群組";
+  if (type === "room") return "聊天室";
+  return "個人";
+}
+
+function mapNotificationChannelRow(row) {
+  const destinationId = String(row.destination_id || "");
+  return {
+    id: Number(row.id),
+    channel_type: row.channel_type,
+    channel_name: row.channel_name,
+    destination_type: row.destination_type,
+    destination_type_label: formatLineDestinationType(row.destination_type),
+    destination_id_masked: maskSecretText(destinationId, 8, 5),
+    is_enabled: Number(row.is_enabled) === 1,
+    last_tested_at: row.last_tested_at || null,
+    last_error: row.last_error || "",
+    config: safeJsonParse(row.config_json, {}),
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+async function getNotificationChannels(userId) {
+  const rows = await query(
+    `
+    SELECT
+      id,
+      channel_type,
+      channel_name,
+      destination_type,
+      destination_id,
+      is_enabled,
+      config_json,
+      DATE_FORMAT(last_tested_at, '%Y-%m-%d %H:%i:%s') AS last_tested_at,
+      last_error,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM notification_channels
+    WHERE user_id = ?
+    ORDER BY is_enabled DESC, updated_at DESC, id DESC
+    `,
+    [userId],
+  );
+
+  return rows.map(mapNotificationChannelRow);
+}
+
+async function getNotificationChannelForUser(userId, channelId) {
+  const rows = await query(
+    `
+    SELECT
+      id,
+      user_id,
+      channel_type,
+      channel_name,
+      destination_type,
+      destination_id,
+      is_enabled,
+      config_json,
+      DATE_FORMAT(last_tested_at, '%Y-%m-%d %H:%i:%s') AS last_tested_at,
+      last_error,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM notification_channels
+    WHERE id = ?
+      AND user_id = ?
+    LIMIT 1
+    `,
+    [channelId, userId],
+  );
+
+  return rows[0] || null;
+}
+
+function buildLineTestMessage(user) {
+  const userName = user?.display_name || user?.email || "使用者";
+  return [
+    "雷達之星 LINE 測試通知",
+    `帳號：${userName}`,
+    `時間：${nowTaipeiText()}`,
+    "代表 V1.4-4-1 LINE 通知外送設定已可使用。",
+  ].join("\n");
+}
+
+async function sendLinePushMessage(destinationId, messageText) {
+  const token = getLineChannelAccessToken();
+  if (!token) {
+    throw new Error("尚未設定 LINE_CHANNEL_ACCESS_TOKEN，請先到 Vercel / .env 設定 LINE Messaging API Channel access token。 ");
+  }
+
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: destinationId,
+      messages: [
+        {
+          type: "text",
+          text: messageText,
+        },
+      ],
+    }),
+  });
+
+  const responseText = await response.text();
+  let responseJson = null;
+  try {
+    responseJson = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    responseJson = { raw: responseText.slice(0, 500) };
+  }
+
+  if (!response.ok) {
+    const message = responseJson?.message || responseJson?.details?.[0]?.message || responseText || `LINE API 發送失敗，HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    status: response.status,
+    body: responseJson,
+  };
+}
+
+async function insertNotificationSendLog({ userId, channelId, channelType = "line", templateKey = "manual_test", title, messageText, status, errorMessage = "", providerMessageId = "" }) {
+  await query(
+    `
+    INSERT INTO notification_send_logs (
+      user_id,
+      channel_id,
+      channel_type,
+      template_key,
+      title,
+      message_text,
+      status,
+      provider_message_id,
+      error_message
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [userId, channelId || null, channelType, templateKey, title, messageText, status, providerMessageId || null, errorMessage || null],
+  );
+}
+
+
+const API_VERSION = "stock-radar-api-v1.4.4.1";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v50";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -245,6 +443,8 @@ const V13_FEATURE_TABLES = [
   { name: "strategy_watchlists", label: "策略追蹤", date_column: "created_at" },
   { name: "strategy_backtest_runs", label: "策略回測任務", date_column: "created_at" },
   { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_trade_date" },
+  { name: "notification_channels", label: "通知外送設定", date_column: "updated_at" },
+  { name: "notification_send_logs", label: "通知外送紀錄", date_column: "created_at" },
 ];
 
 const V13_MODULES = [
@@ -289,6 +489,18 @@ const V13_MODULES = [
       "GET /strategy-backtests/results",
       "GET /strategy-backtests/summary",
       "GET /strategy-backtests/rankings",
+    ],
+  },
+  {
+    key: "notification_delivery",
+    name: "通知外送",
+    required_tables: ["notification_channels", "notification_send_logs"],
+    required_apis: [
+      "GET /notification/channels",
+      "POST /notification/channels/line",
+      "PATCH /notification/channels/:channelId",
+      "DELETE /notification/channels/:channelId",
+      "POST /notification/channels/:channelId/test",
     ],
   },
 ];
@@ -5367,6 +5579,271 @@ app.delete("/strategy-watchlist/:trackId", requireAuth, async (req, res) => {
       success: false,
       message: "移除策略追蹤失敗",
       error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4-4-1 通知外送：查詢通知通道
+// GET /notification/channels
+// ==============================
+app.get("/notification/channels", requireAuth, async (req, res) => {
+  try {
+    const channels = await getNotificationChannels(req.user.id);
+
+    res.json({
+      success: true,
+      provider_status: getNotificationProviderStatus(),
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("查詢通知外送設定失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "查詢通知外送設定失敗，請先確認是否已執行 npm run notifications:setup。",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4-4-1 通知外送：新增 / 更新 LINE 通道
+// POST /notification/channels/line
+// body: { channel_name, destination_type, destination_id, is_enabled }
+// ==============================
+app.post("/notification/channels/line", requireAuth, async (req, res) => {
+  try {
+    const channelName = normalizeNotificationName(req.body?.channel_name);
+    const destinationType = normalizeDestinationType(req.body?.destination_type);
+    const destinationId = normalizeLineDestinationId(req.body?.destination_id);
+    const isEnabled = req.body?.is_enabled === false ? 0 : 1;
+
+    if (!destinationId) {
+      return res.status(400).json({
+        success: false,
+        message: "請輸入 LINE User ID / Group ID / Room ID。",
+      });
+    }
+
+    await query(
+      `
+      INSERT INTO notification_channels (
+        user_id,
+        channel_type,
+        channel_name,
+        destination_type,
+        destination_id,
+        is_enabled,
+        config_json
+      ) VALUES (?, 'line', ?, ?, ?, ?, JSON_OBJECT('provider', 'LINE Messaging API'))
+      ON DUPLICATE KEY UPDATE
+        channel_name = VALUES(channel_name),
+        destination_type = VALUES(destination_type),
+        is_enabled = VALUES(is_enabled),
+        config_json = VALUES(config_json),
+        last_error = NULL,
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [req.user.id, channelName, destinationType, destinationId, isEnabled],
+    );
+
+    const channels = await getNotificationChannels(req.user.id);
+
+    res.json({
+      success: true,
+      message: "LINE 通知通道已儲存。",
+      provider_status: getNotificationProviderStatus(),
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("儲存 LINE 通知通道失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      message: "儲存 LINE 通知通道失敗",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4-4-1 通知外送：啟用 / 停用通道
+// PATCH /notification/channels/:channelId
+// body: { is_enabled }
+// ==============================
+app.patch("/notification/channels/:channelId", requireAuth, async (req, res) => {
+  try {
+    const channelId = Number(req.params.channelId);
+    if (!Number.isInteger(channelId) || channelId <= 0) {
+      return res.status(400).json({ success: false, message: "通知通道 ID 不正確。" });
+    }
+
+    const isEnabled = req.body?.is_enabled === false ? 0 : 1;
+    const result = await query(
+      `
+      UPDATE notification_channels
+      SET is_enabled = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [isEnabled, channelId, req.user.id],
+    );
+
+    if (Number(result?.affectedRows || 0) === 0) {
+      return res.status(404).json({ success: false, message: "查不到這個通知通道。" });
+    }
+
+    const channels = await getNotificationChannels(req.user.id);
+    res.json({
+      success: true,
+      message: isEnabled ? "通知通道已啟用。" : "通知通道已停用。",
+      provider_status: getNotificationProviderStatus(),
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("更新通知通道失敗：", error);
+    res.status(500).json({ success: false, message: "更新通知通道失敗", error: error.message });
+  }
+});
+
+// ==============================
+// V1.4-4-1 通知外送：刪除通道
+// DELETE /notification/channels/:channelId
+// ==============================
+app.delete("/notification/channels/:channelId", requireAuth, async (req, res) => {
+  try {
+    const channelId = Number(req.params.channelId);
+    if (!Number.isInteger(channelId) || channelId <= 0) {
+      return res.status(400).json({ success: false, message: "通知通道 ID 不正確。" });
+    }
+
+    const result = await query(
+      `
+      DELETE FROM notification_channels
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [channelId, req.user.id],
+    );
+
+    if (Number(result?.affectedRows || 0) === 0) {
+      return res.status(404).json({ success: false, message: "查不到這個通知通道。" });
+    }
+
+    const channels = await getNotificationChannels(req.user.id);
+    res.json({
+      success: true,
+      message: "通知通道已刪除。",
+      provider_status: getNotificationProviderStatus(),
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("刪除通知通道失敗：", error);
+    res.status(500).json({ success: false, message: "刪除通知通道失敗", error: error.message });
+  }
+});
+
+// ==============================
+// V1.4-4-1 通知外送：LINE 測試發送
+// POST /notification/channels/:channelId/test
+// ==============================
+app.post("/notification/channels/:channelId/test", requireAuth, async (req, res) => {
+  const channelId = Number(req.params.channelId);
+  const messageText = String(req.body?.message || buildLineTestMessage(req.user)).trim().slice(0, 900);
+
+  if (!Number.isInteger(channelId) || channelId <= 0) {
+    return res.status(400).json({ success: false, message: "通知通道 ID 不正確。" });
+  }
+
+  let channel = null;
+
+  try {
+    channel = await getNotificationChannelForUser(req.user.id, channelId);
+
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "查不到這個通知通道。" });
+    }
+
+    if (channel.channel_type !== "line") {
+      return res.status(400).json({ success: false, message: "目前只支援 LINE 通知測試。" });
+    }
+
+    if (Number(channel.is_enabled) !== 1) {
+      return res.status(400).json({ success: false, message: "這個 LINE 通知通道目前停用，請先啟用再測試。" });
+    }
+
+    const result = await sendLinePushMessage(channel.destination_id, messageText);
+
+    await query(
+      `
+      UPDATE notification_channels
+      SET last_tested_at = CURRENT_TIMESTAMP,
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND user_id = ?
+      `,
+      [channelId, req.user.id],
+    );
+
+    await insertNotificationSendLog({
+      userId: req.user.id,
+      channelId,
+      channelType: "line",
+      templateKey: "manual_test",
+      title: "LINE 測試通知",
+      messageText,
+      status: "sent",
+      providerMessageId: String(result?.body?.sentMessages?.[0]?.id || ""),
+    });
+
+    const channels = await getNotificationChannels(req.user.id);
+    res.json({
+      success: true,
+      message: "LINE 測試通知已送出。",
+      provider_status: getNotificationProviderStatus(),
+      test_result: { status: "sent", sent_at: nowTaipeiText() },
+      count: channels.length,
+      data: channels,
+    });
+  } catch (error) {
+    console.error("LINE 測試通知發送失敗：", error);
+
+    if (channel) {
+      await query(
+        `
+        UPDATE notification_channels
+        SET last_error = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND user_id = ?
+        `,
+        [String(error.message || "LINE 測試通知發送失敗").slice(0, 1000), channelId, req.user.id],
+      ).catch(() => {});
+
+      await insertNotificationSendLog({
+        userId: req.user.id,
+        channelId,
+        channelType: "line",
+        templateKey: "manual_test",
+        title: "LINE 測試通知",
+        messageText,
+        status: "failed",
+        errorMessage: error.message,
+      }).catch(() => {});
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "LINE 測試通知發送失敗",
+      error: error.message,
+      provider_status: getNotificationProviderStatus(),
     });
   }
 });

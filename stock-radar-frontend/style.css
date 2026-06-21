@@ -4329,3 +4329,126 @@ body.chart-zoom-open {
     font-size: 0.8rem;
   }
 }
+
+/* V1.4-4-1：LINE 通知外送 */
+.notification-provider-card,
+.line-notification-form-card {
+  margin-bottom: 18px;
+}
+
+.notification-provider-card.warning-card {
+  border-color: rgba(248, 214, 109, 0.42);
+  background: rgba(248, 214, 109, 0.08);
+}
+
+.notification-guide-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.notification-guide-list div {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.46);
+  color: #dbeafe;
+  line-height: 1.55;
+}
+
+.notification-guide-list strong {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: #07111f;
+  background: var(--accent);
+  font-size: 0.86rem;
+}
+
+.notification-guide-list code,
+.notification-empty-card code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.line-notification-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.line-notification-form .wide-field,
+.line-notification-form .toggle-inline-field,
+.line-notification-form .notification-form-actions {
+  grid-column: 1 / -1;
+}
+
+.line-notification-form input,
+.line-notification-form select {
+  width: 100%;
+}
+
+.toggle-inline-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: #d8e7ff;
+  font-weight: 800;
+}
+
+.toggle-inline-field input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.notification-channel-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.notification-channel-card .stock-name {
+  word-break: break-all;
+}
+
+.notification-action-row {
+  justify-content: flex-end;
+}
+
+.notification-result-box {
+  margin-bottom: 16px;
+}
+
+.danger-ghost-btn {
+  border-color: rgba(255, 107, 107, 0.38);
+  color: #fecaca;
+}
+
+.danger-ghost-btn:hover {
+  border-color: rgba(255, 107, 107, 0.7);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+@media (max-width: 720px) {
+  .line-notification-form {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-action-row {
+    justify-content: stretch;
+  }
+
+  .notification-action-row button {
+    flex: 1 1 auto;
+  }
+}

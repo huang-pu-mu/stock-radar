@@ -65,6 +65,9 @@ const state = {
   strategyBacktestRuns: [],
   strategyBacktestSummary: null,
   strategyBacktestRankings: null,
+  notificationChannels: [],
+  notificationProviderStatus: null,
+  notificationLastTestResult: null,
   strategyBacktestConditionPresetKey: "balanced",
   strategyBacktestConditionStrategy: "",
   strategyBacktestConditionMarket: "",
@@ -128,6 +131,7 @@ const PAGE_GROUP_MAP = {
   strategyOptimize: "strategy",
   strategyBacktests: "strategy",
   alerts: "alerts",
+  notifications: "alerts",
   account: "account",
 };
 
@@ -168,6 +172,7 @@ const PAGE_CONTENT_CONFIG = {
   search: { groupLabel: "個股與自選", filterTitle: "個股查詢", filterDesc: "輸入股票代號後，下方會顯示行情、法人與籌碼資料。", resultTitle: "個股查詢結果", resultDesc: "查詢後會顯示股票目前資料。" },
   watchlist: { groupLabel: "個股與自選", filterTitle: "自選股操作", filterDesc: "登入後可查看與調整自己的自選股清單。", resultTitle: "自選股清單", resultDesc: "顯示你目前保存的股票，並可調整順序或移除。" },
   alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
+  notifications: { groupLabel: "個股與自選", filterTitle: "通知外送設定", filterDesc: "設定 LINE Messaging API 收件目標，並發送測試通知。", resultTitle: "通知外送通道", resultDesc: "管理 LINE 通知通道，後續每日報告與提醒會共用這裡的設定。" },
   strategies: { groupLabel: "策略中心", filterTitle: "策略與市場篩選", filterDesc: "選擇策略與市場後，下方會顯示符合條件的股票。", resultTitle: "策略選股清單", resultDesc: "依策略分數排序，快速整理觀察名單。" },
   strategyTracks: { groupLabel: "策略中心", filterTitle: "策略追蹤篩選", filterDesc: "依股票、策略、狀態與報酬排序追蹤後續表現。", resultTitle: "策略追蹤清單", resultDesc: "檢查加入追蹤後的報酬與停利停損狀態。" },
   strategyOptimize: { groupLabel: "策略中心", filterTitle: "策略最佳化", filterDesc: "選擇策略與參數預設，預覽不同門檻下的策略清單。", resultTitle: "策略最佳化結果", resultDesc: "比較保守、平衡、積極參數對訊號數量與分數的影響。" },
@@ -1388,6 +1393,7 @@ function updatePageText() {
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
   const isAlertsPage = state.page === "alerts";
+  const isNotificationsPage = state.page === "notifications";
   const isStrategiesPage = state.page === "strategies";
   const isStrategyTracksPage = state.page === "strategyTracks";
   const isStrategyOptimizePage = state.page === "strategyOptimize";
@@ -1395,7 +1401,7 @@ function updatePageText() {
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isStrategyTracksPage || isStrategyBacktestsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
   updateContentFilterHeader();
   updatePageMetaBar();
@@ -1431,6 +1437,13 @@ function updatePageText() {
     pageTitle.textContent = "策略選股";
     pageDesc.textContent = `${marketText}${activeStrategy.name}，用全市場資料快速篩出符合條件的觀察名單。`;
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>先選策略，再用上市 / 上櫃切換市場；這是篩選清單，不是買賣建議。</span>`;
+    return;
+  }
+
+  if (state.page === "notifications") {
+    pageTitle.textContent = "通知外送";
+    pageDesc.textContent = "設定 LINE Messaging API 通知通道，先完成測試發送，後續每日報告與自選股提醒會共用。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先新增自己的 LINE User ID，再按「測試發送」。若尚未設定 LINE_CHANNEL_ACCESS_TOKEN，畫面會顯示設定提示。</span>`;
     return;
   }
 
@@ -5781,6 +5794,313 @@ async function loadStrategyBacktests(options = {}) {
   }
 }
 
+function getLineProviderStatus() {
+  return state.notificationProviderStatus?.line || {};
+}
+
+function renderLineProviderNotice() {
+  const lineStatus = getLineProviderStatus();
+  const configured = Boolean(lineStatus.is_configured);
+
+  return `
+    <section class="strategy-dashboard-card notification-provider-card ${configured ? "" : "warning-card"}">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-4-1 LINE 通知</p>
+          <h3>${configured ? "LINE Messaging API 已設定" : "尚未設定 LINE Channel Access Token"}</h3>
+          <p>${escapeHtml(lineStatus.note || "讀取 LINE 通知設定中。")}</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>Provider：${escapeHtml(lineStatus.provider || "LINE Messaging API")}</span>
+          <span>ENV：${escapeHtml(lineStatus.required_env || "LINE_CHANNEL_ACCESS_TOKEN")}</span>
+          <span>${configured ? "可測試發送" : "尚不能發送"}</span>
+        </div>
+      </div>
+      <div class="notification-guide-list">
+        <div><strong>1</strong><span>到 LINE Developers 建立 Messaging API Channel，取得 Channel access token。</span></div>
+        <div><strong>2</strong><span>在 Vercel 或本機 .env 設定 <code>LINE_CHANNEL_ACCESS_TOKEN</code>。</span></div>
+        <div><strong>3</strong><span>輸入 LINE User ID / Group ID / Room ID，儲存後按「測試發送」。</span></div>
+      </div>
+    </section>
+  `;
+}
+
+function renderLineNotificationForm() {
+  return `
+    <section class="strategy-dashboard-card line-notification-form-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">新增 LINE 收件目標</p>
+          <h3>LINE 通知通道</h3>
+          <p>第一版先支援手動填入 LINE User ID / Group ID / Room ID。後續可再接 webhook 自動綁定。</p>
+        </div>
+      </div>
+
+      <form class="line-notification-form" data-line-notification-form>
+        <label class="filter-field">
+          <span>通道名稱</span>
+          <input name="channel_name" type="text" maxlength="64" placeholder="例如：阿茂 LINE" value="LINE 通知" />
+        </label>
+        <label class="filter-field">
+          <span>目標類型</span>
+          <select name="destination_type">
+            <option value="user">個人 User ID</option>
+            <option value="group">群組 Group ID</option>
+            <option value="room">聊天室 Room ID</option>
+          </select>
+        </label>
+        <label class="filter-field wide-field">
+          <span>LINE 目標 ID</span>
+          <input name="destination_id" type="text" maxlength="128" placeholder="例如：Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
+        </label>
+        <label class="toggle-inline-field">
+          <input name="is_enabled" type="checkbox" checked />
+          <span>啟用這個通知通道</span>
+        </label>
+        <div class="strategy-track-filter-actions notification-form-actions">
+          <button class="search-btn" type="submit">儲存 LINE 通道</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderNotificationChannelCard(channel) {
+  const enabled = Boolean(channel.is_enabled);
+  const lastTested = channel.last_tested_at || "尚未測試";
+  const lastError = channel.last_error || "";
+
+  return `
+    <article class="stock-card notification-channel-card">
+      <div class="stock-card-header">
+        <div>
+          <p class="stock-code">${escapeHtml(channel.channel_type || "line")}</p>
+          <h3>${escapeHtml(channel.channel_name || "LINE 通知")}</h3>
+          <p class="stock-name">${escapeHtml(channel.destination_type_label || "個人")}｜${escapeHtml(channel.destination_id_masked || "已設定")}</p>
+        </div>
+        <span class="score-badge ${enabled ? "score-high" : "score-low"}">${enabled ? "啟用" : "停用"}</span>
+      </div>
+      <div class="info-grid">
+        ${createInfoItem("平台", "LINE Messaging API")}
+        ${createInfoItem("最後測試", escapeHtml(lastTested))}
+        ${createInfoItem("狀態", `<span class="status-chip ${enabled ? "good" : "bad"}">${enabled ? "可發送" : "已停用"}</span>`)}
+        ${createInfoItem("最後錯誤", lastError ? escapeHtml(lastError) : "-")}
+      </div>
+      <div class="action-buttons notification-action-row">
+        <button class="detail-btn" type="button" data-notification-test="${escapeHtml(String(channel.id))}" ${enabled ? "" : "disabled"}>測試發送</button>
+        <button class="ghost-btn" type="button" data-notification-toggle="${escapeHtml(String(channel.id))}" data-next-enabled="${enabled ? "false" : "true"}">${enabled ? "停用" : "啟用"}</button>
+        <button class="ghost-btn danger-ghost-btn" type="button" data-notification-delete="${escapeHtml(String(channel.id))}">刪除</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderNotificationEmptyState() {
+  return `
+    <article class="search-intro-card notification-empty-card">
+      <div class="intro-icon">📣</div>
+      <h3>尚未建立 LINE 通知通道</h3>
+      <p>請先設定 LINE_CHANNEL_ACCESS_TOKEN，再新增你的 LINE User ID / Group ID / Room ID。</p>
+    </article>
+  `;
+}
+
+function renderNotificationSettingsPage() {
+  const lineStatus = getLineProviderStatus();
+  const channels = Array.isArray(state.notificationChannels) ? state.notificationChannels : [];
+  const enabledCount = channels.filter((item) => item.is_enabled).length;
+
+  updatePageMetaBar([
+    { label: "LINE", value: lineStatus.is_configured ? "Token 已設定" : "Token 未設定" },
+    { label: "通道", value: `${formatNumber(channels.length)} 個` },
+  ]);
+
+  setContentSummary([
+    { label: "LINE Token", value: lineStatus.is_configured ? "已設定" : "未設定" },
+    { label: "通知通道", value: `${formatNumber(channels.length)} 個` },
+    { label: "啟用中", value: `${formatNumber(enabledCount)} 個` },
+    { label: "最後測試", value: channels.find((item) => item.last_tested_at)?.last_tested_at || "尚未測試" },
+  ], "V1.4-4-1 先完成 LINE 測試發送；Email / Telegram 會在後續版本接續。 ");
+
+  setResultHeader({
+    title: "通知外送通道",
+    desc: "LINE 通道會供後續每日策略報告、自選股提醒與策略訊號外送使用。",
+    badge: "LINE",
+    countText: `${formatNumber(channels.length)} 個通道`,
+  });
+
+  const lastTestResult = state.notificationLastTestResult
+    ? `<div class="status-box success notification-result-box">${escapeHtml(state.notificationLastTestResult)}</div>`
+    : "";
+
+  stockList.innerHTML = [
+    renderLineProviderNotice(),
+    renderLineNotificationForm(),
+    lastTestResult,
+    channels.length ? `<section class="notification-channel-grid">${channels.map(renderNotificationChannelCard).join("")}</section>` : renderNotificationEmptyState(),
+  ].join("");
+}
+
+async function loadNotificationSettings() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    setContentSummary([
+      { label: "登入狀態", value: "未登入" },
+      { label: "LINE 通知", value: "需要登入" },
+    ], "通知外送設定會綁定 Google 帳號，請先登入。 ");
+    setResultHeader({ title: "請先登入", desc: "登入後才能設定 LINE 通知收件目標。", badge: "需要登入" });
+    stockList.innerHTML = `
+      <article class="search-intro-card">
+        <div class="intro-icon">🔐</div>
+        <h3>請先登入 Google 帳號</h3>
+        <p>通知通道會綁定你的帳號，避免不同使用者互相看到通知設定。</p>
+        <button class="search-btn" type="button" data-go-account>前往我的帳號</button>
+      </article>
+    `;
+    return;
+  }
+
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const result = await fetchJson("/notification/channels", { method: "GET", auth: true, raw: true });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : [];
+    state.notificationProviderStatus = result.provider_status || null;
+    renderNotificationSettingsPage();
+    showTemporaryStatus(`已讀取 ${formatNumber(state.notificationChannels.length)} 個通知通道。`, "success");
+  } catch (error) {
+    state.notificationChannels = [];
+    state.notificationProviderStatus = null;
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認已執行 npm run notifications:setup，並重新部署 API。 ");
+    setResultHeader({ title: "通知外送讀取失敗", desc: "目前無法取得 LINE 通知設定。", badge: "讀取失敗" });
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>通知外送讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <p>請先在 API 專案執行：<code>npm run notifications:setup</code></p>
+      </article>
+    `;
+    showStatus(`通知外送讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleLineNotificationSubmit(form) {
+  const formData = new FormData(form);
+  const payload = {
+    channel_name: String(formData.get("channel_name") || "LINE 通知").trim(),
+    destination_type: String(formData.get("destination_type") || "user").trim(),
+    destination_id: String(formData.get("destination_id") || "").trim(),
+    is_enabled: formData.get("is_enabled") === "on",
+  };
+
+  if (!payload.destination_id) {
+    showStatus("請輸入 LINE User ID / Group ID / Room ID。", "error");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const result = await fetchJson("/notification/channels/line", {
+      method: "POST",
+      auth: true,
+      raw: true,
+      body: payload,
+    });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : [];
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    state.notificationLastTestResult = "LINE 通道已儲存，請按測試發送確認。";
+    renderNotificationSettingsPage();
+    showTemporaryStatus(result.message || "LINE 通知通道已儲存。", "success");
+  } catch (error) {
+    showStatus(`儲存 LINE 通道失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleNotificationTest(button) {
+  const channelId = button.dataset.notificationTest;
+  if (!channelId) return;
+
+  button.disabled = true;
+  button.textContent = "發送中...";
+
+  try {
+    const result = await fetchJson(`/notification/channels/${encodeURIComponent(channelId)}/test`, {
+      method: "POST",
+      auth: true,
+      raw: true,
+      body: {},
+    });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : [];
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    state.notificationLastTestResult = result.message || "LINE 測試通知已送出。";
+    renderNotificationSettingsPage();
+    showTemporaryStatus(state.notificationLastTestResult, "success");
+  } catch (error) {
+    state.notificationLastTestResult = "";
+    showStatus(`LINE 測試通知發送失敗：${escapeHtml(error.message)}`, "error");
+    await loadNotificationSettings();
+  }
+}
+
+async function handleNotificationToggle(button) {
+  const channelId = button.dataset.notificationToggle;
+  const nextEnabled = button.dataset.nextEnabled === "true";
+  if (!channelId) return;
+
+  setLoading(true);
+  try {
+    const result = await fetchJson(`/notification/channels/${encodeURIComponent(channelId)}`, {
+      method: "PATCH",
+      auth: true,
+      raw: true,
+      body: { is_enabled: nextEnabled },
+    });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : [];
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    renderNotificationSettingsPage();
+    showTemporaryStatus(result.message || "通知通道已更新。", "success");
+  } catch (error) {
+    showStatus(`更新通知通道失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleNotificationDelete(button) {
+  const channelId = button.dataset.notificationDelete;
+  if (!channelId) return;
+
+  const ok = window.confirm("確定要刪除這個 LINE 通知通道嗎？");
+  if (!ok) return;
+
+  setLoading(true);
+  try {
+    const result = await fetchJson(`/notification/channels/${encodeURIComponent(channelId)}`, {
+      method: "DELETE",
+      auth: true,
+      raw: true,
+    });
+    state.notificationChannels = Array.isArray(result.data) ? result.data : [];
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    renderNotificationSettingsPage();
+    showTemporaryStatus(result.message || "通知通道已刪除。", "success");
+  } catch (error) {
+    showStatus(`刪除通知通道失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function loadList() {
   updatePageText();
   hideStatus();
@@ -5803,6 +6123,11 @@ async function loadList() {
 
   if (state.page === "alerts") {
     await loadAlerts();
+    return;
+  }
+
+  if (state.page === "notifications") {
+    await loadNotificationSettings();
     return;
   }
 
@@ -6044,6 +6369,9 @@ function switchPage(page) {
     state.strategyBacktestSummary = null;
     state.strategyBacktestRankings = null;
   }
+  if (page === "notifications") {
+    state.notificationLastTestResult = null;
+  }
   loadList();
 }
 
@@ -6063,6 +6391,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const lineNotificationForm = event.target.closest("[data-line-notification-form]");
+  if (lineNotificationForm) {
+    event.preventDefault();
+    handleLineNotificationSubmit(lineNotificationForm);
+    return;
+  }
+
   const strategyBacktestConditionForm = event.target.closest("[data-strategy-backtest-condition-form]");
   if (strategyBacktestConditionForm) {
     event.preventDefault();
@@ -6106,6 +6441,24 @@ stockList.addEventListener("submit", (event) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const notificationTestButton = event.target.closest("[data-notification-test]");
+  if (notificationTestButton) {
+    handleNotificationTest(notificationTestButton);
+    return;
+  }
+
+  const notificationToggleButton = event.target.closest("[data-notification-toggle]");
+  if (notificationToggleButton) {
+    handleNotificationToggle(notificationToggleButton);
+    return;
+  }
+
+  const notificationDeleteButton = event.target.closest("[data-notification-delete]");
+  if (notificationDeleteButton) {
+    handleNotificationDelete(notificationDeleteButton);
+    return;
+  }
+
   const orderButton = event.target.closest("[data-order-action]");
   if (orderButton) {
     handleWatchlistOrder(orderButton);
