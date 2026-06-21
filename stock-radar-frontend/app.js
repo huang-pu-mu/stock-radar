@@ -47,6 +47,12 @@ const state = {
   strategyTrackFilterStatus: "",
   strategyTrackSearch: "",
   strategyTrackSort: "created_desc",
+  strategyOptimizationStrategyKey: "legal_strength",
+  strategyOptimizationPresetKey: "balanced",
+  strategyOptimizationParams: {},
+  strategyOptimizationFields: [],
+  strategyOptimizationPresets: [],
+  strategyOptimizationSummary: null,
   strategyBacktestRunId: "",
   strategyBacktestMetric: "5d",
   strategyBacktestRankingMode: "overview",
@@ -111,6 +117,7 @@ const PAGE_GROUP_MAP = {
   watchlist: "personal",
   strategies: "strategy",
   strategyTracks: "strategy",
+  strategyOptimize: "strategy",
   strategyBacktests: "strategy",
   alerts: "alerts",
   account: "account",
@@ -155,6 +162,7 @@ const PAGE_CONTENT_CONFIG = {
   alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
   strategies: { groupLabel: "策略中心", filterTitle: "策略與市場篩選", filterDesc: "選擇策略與市場後，下方會顯示符合條件的股票。", resultTitle: "策略選股清單", resultDesc: "依策略分數排序，快速整理觀察名單。" },
   strategyTracks: { groupLabel: "策略中心", filterTitle: "策略追蹤篩選", filterDesc: "依股票、策略、狀態與報酬排序追蹤後續表現。", resultTitle: "策略追蹤清單", resultDesc: "檢查加入追蹤後的報酬與停利停損狀態。" },
+  strategyOptimize: { groupLabel: "策略中心", filterTitle: "策略最佳化", filterDesc: "選擇策略與參數預設，預覽不同門檻下的策略清單。", resultTitle: "策略最佳化結果", resultDesc: "比較保守、平衡、積極參數對訊號數量與分數的影響。" },
   strategyBacktests: { groupLabel: "策略中心", filterTitle: "回測條件", filterDesc: "依 Run ID、策略、結果、排序與搜尋條件查看歷史訊號。", resultTitle: "策略回測清單", resultDesc: "顯示歷史策略訊號與後續 1 / 3 / 5 日績效。" },
   account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
 };
@@ -441,6 +449,299 @@ function renderTextListItems(items, itemClass = "") {
   const normalized = normalizeTextList(items);
   if (normalized.length === 0) return `<li>尚無資料。</li>`;
   return normalized.map((item) => `<li class="${itemClass}">${escapeHtml(item)}</li>`).join("");
+}
+
+
+const DEFAULT_STRATEGY_OPTIMIZATION_PRESETS = [
+  {
+    key: "balanced",
+    name: "平衡參數",
+    badge: "建議預設",
+    description: "保留 V1.3 的篩選精神，適合作為每日觀察基準。",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 70,
+      min_legal_score: 20,
+      min_volume_score: 12,
+      min_price_score: 8,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 30,
+    },
+  },
+  {
+    key: "conservative",
+    name: "保守參數",
+    badge: "訊號較少",
+    description: "提高分數與門檻，適合只想看較強訊號的情境。",
+    params: {
+      min_strategy_score: 100,
+      min_chip_score: 80,
+      min_legal_score: 30,
+      min_volume_score: 15,
+      min_price_score: 10,
+      min_total_net_lots: 500,
+      min_large_holder_ratio_change: 0.5,
+      event_window_days: 14,
+    },
+  },
+  {
+    key: "aggressive",
+    name: "積極參數",
+    badge: "訊號較多",
+    description: "降低部分門檻，適合想先擴大觀察名單再人工篩選。",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 60,
+      min_legal_score: 10,
+      min_volume_score: 8,
+      min_price_score: 5,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 45,
+    },
+  },
+];
+
+const DEFAULT_STRATEGY_OPTIMIZATION_FIELDS = [
+  { key: "min_strategy_score", label: "最低策略分數", unit: "分", min: 0, max: 300, step: 1 },
+  { key: "min_chip_score", label: "最低籌碼分數", unit: "分", min: 0, max: 100, step: 1 },
+  { key: "min_legal_score", label: "最低法人分數", unit: "分", min: 0, max: 80, step: 1 },
+  { key: "min_volume_score", label: "最低量能分數", unit: "分", min: 0, max: 50, step: 1 },
+  { key: "min_price_score", label: "最低股價位置分數", unit: "分", min: 0, max: 50, step: 1 },
+  { key: "min_total_net_lots", label: "最低法人合計買超", unit: "張", min: 0, max: 50000, step: 1 },
+  { key: "min_large_holder_ratio_change", label: "最低大戶比重增加", unit: "%", min: -10, max: 20, step: 0.1 },
+  { key: "event_window_days", label: "ETF 事件天數", unit: "天", min: 1, max: 90, step: 1 },
+];
+
+function getStrategyOptimizationPresets() {
+  return Array.isArray(state.strategyOptimizationPresets) && state.strategyOptimizationPresets.length > 0
+    ? state.strategyOptimizationPresets
+    : DEFAULT_STRATEGY_OPTIMIZATION_PRESETS;
+}
+
+function getStrategyOptimizationFields() {
+  return Array.isArray(state.strategyOptimizationFields) && state.strategyOptimizationFields.length > 0
+    ? state.strategyOptimizationFields
+    : DEFAULT_STRATEGY_OPTIMIZATION_FIELDS;
+}
+
+function getStrategyOptimizationPreset(key = state.strategyOptimizationPresetKey) {
+  return getStrategyOptimizationPresets().find((item) => item.key === key) || DEFAULT_STRATEGY_OPTIMIZATION_PRESETS[0];
+}
+
+function getStrategyOptimizationParams() {
+  const preset = getStrategyOptimizationPreset();
+  return {
+    ...(preset?.params || {}),
+    ...(state.strategyOptimizationParams || {}),
+  };
+}
+
+function buildStrategyOptimizationQueryString() {
+  const params = new URLSearchParams();
+  const optimizationParams = getStrategyOptimizationParams();
+  params.set("strategy", state.strategyOptimizationStrategyKey || state.strategyKey || "legal_strength");
+  params.set("preset", state.strategyOptimizationPresetKey || "balanced");
+  params.set("limit", "30");
+  if (state.market) params.set("market", state.market);
+
+  for (const field of getStrategyOptimizationFields()) {
+    const value = optimizationParams[field.key];
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(field.key, String(value));
+    }
+  }
+
+  return params.toString();
+}
+
+function getStrategyOptimizationAverageScore(rows) {
+  const values = rows.map((row) => toNumber(pick(row, ["strategy_score", "chip_score", "major_holder_score"], null))).filter((value) => value !== null);
+  if (!values.length) return "-";
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return average.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+}
+
+function renderStrategyOptimizationPresetButtons() {
+  return `
+    <div class="strategy-optimization-preset-grid">
+      ${getStrategyOptimizationPresets().map((preset) => `
+        <button class="strategy-optimization-preset ${preset.key === state.strategyOptimizationPresetKey ? "active" : ""}" type="button" data-strategy-optimization-preset="${escapeHtml(preset.key)}">
+          <span>${escapeHtml(preset.badge || "預設")}</span>
+          <strong>${escapeHtml(preset.name)}</strong>
+          <small>${escapeHtml(preset.description || "套用此組參數。")}</small>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStrategyOptimizationForm() {
+  const params = getStrategyOptimizationParams();
+  const activeStrategy = getStrategyOption(state.strategyOptimizationStrategyKey);
+
+  return `
+    <section class="strategy-dashboard-card strategy-optimization-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-2 策略參數最佳化</p>
+          <h3>調整參數並預覽清單</h3>
+          <p>目前策略：${escapeHtml(activeStrategy.name)}。這裡先做參數預覽，後續 V1.4-3 會接回測條件調整。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>預設：${escapeHtml(getStrategyOptimizationPreset().name)}</span>
+          <span>市場：${escapeHtml(state.market || "全部")}</span>
+        </div>
+      </div>
+
+      ${renderStrategyOptimizationPresetButtons()}
+
+      <form class="strategy-optimization-form" data-strategy-optimization-form>
+        <label class="filter-field wide-field">
+          <span>策略</span>
+          <select name="strategy">
+            ${getStrategyOptions().map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyOptimizationStrategyKey ? "selected" : ""}>${escapeHtml(item.name)}</option>
+            `).join("")}
+          </select>
+        </label>
+
+        <div class="strategy-optimization-param-grid">
+          ${getStrategyOptimizationFields().map((field) => `
+            <label class="filter-field">
+              <span>${escapeHtml(field.label)}${field.unit ? `（${escapeHtml(field.unit)}）` : ""}</span>
+              <input
+                name="${escapeHtml(field.key)}"
+                type="number"
+                min="${escapeHtml(field.min ?? 0)}"
+                max="${escapeHtml(field.max ?? 999999)}"
+                step="${escapeHtml(field.step ?? 1)}"
+                value="${escapeHtml(params[field.key] ?? "")}" />
+            </label>
+          `).join("")}
+        </div>
+
+        <div class="strategy-track-filter-actions">
+          <button class="search-btn" type="submit">套用並預覽</button>
+          <button class="ghost-btn" type="button" data-strategy-optimization-preset="balanced">恢復平衡參數</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderStrategyOptimizationPage() {
+  const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+  const activeStrategy = getStrategyOption(state.strategyOptimizationStrategyKey);
+  const preset = getStrategyOptimizationPreset();
+  const avgScore = getStrategyOptimizationAverageScore(rows);
+
+  setContentSummary([
+    { label: "目前策略", value: activeStrategy.name },
+    { label: "參數預設", value: preset.name },
+    { label: "符合筆數", value: `${formatNumber(rows.length)} 筆` },
+    { label: "平均分數", value: avgScore },
+    { label: "市場", value: state.market || "全部" },
+  ], "策略最佳化先用不同門檻預覽候選清單；後續會把參數接到回測條件與勝率比較。");
+
+  setResultHeader({
+    title: "策略最佳化結果",
+    desc: `${activeStrategy.name} 套用 ${preset.name} 後的候選股票。`,
+    badge: preset.badge || "參數",
+    countText: `${formatNumber(rows.length)} 筆`,
+  });
+
+  stockList.innerHTML = `
+    ${renderStrategyOptimizationForm()}
+    <div class="strategy-result-note">
+      目前套用 <strong>${escapeHtml(activeStrategy.name)}</strong> + <strong>${escapeHtml(preset.name)}</strong>。
+      這是參數預覽清單，請再搭配策略回測與個股明細確認。
+    </div>
+    ${rows.length ? rows.map(renderStrategyCard).join("") : `
+      <article class="search-intro-card strategies-empty-card">
+        <div class="intro-icon">⚙️</div>
+        <h3>目前參數沒有符合股票</h3>
+        <p>可以改用積極參數、降低分數門檻，或切換其他策略。</p>
+      </article>
+    `}
+  `;
+}
+
+function handleStrategyOptimizationSubmit(form) {
+  const formData = new FormData(form);
+  const strategy = String(formData.get("strategy") || "").trim();
+  state.strategyOptimizationStrategyKey = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "legal_strength";
+
+  const nextParams = {};
+  for (const field of getStrategyOptimizationFields()) {
+    const value = formData.get(field.key);
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      const numberValue = Number(value);
+      if (Number.isFinite(numberValue)) nextParams[field.key] = numberValue;
+    }
+  }
+  state.strategyOptimizationParams = nextParams;
+  loadStrategyOptimization();
+}
+
+function handleStrategyOptimizationPreset(button) {
+  const key = button.dataset.strategyOptimizationPreset;
+  const preset = getStrategyOptimizationPreset(key);
+  state.strategyOptimizationPresetKey = preset.key;
+  state.strategyOptimizationParams = { ...(preset.params || {}) };
+  loadStrategyOptimization();
+}
+
+async function loadStrategyOptimization() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    const presetResponse = await fetchJson(`/strategy-optimization/presets?preset=${encodeURIComponent(state.strategyOptimizationPresetKey || "balanced")}`, { method: "GET", raw: true });
+    state.strategyOptimizationPresets = Array.isArray(presetResponse.presets) ? presetResponse.presets : DEFAULT_STRATEGY_OPTIMIZATION_PRESETS;
+    state.strategyOptimizationFields = Array.isArray(presetResponse.fields) ? presetResponse.fields : DEFAULT_STRATEGY_OPTIMIZATION_FIELDS;
+    state.strategyOptions = Array.isArray(presetResponse.strategies) ? presetResponse.strategies : getStrategyOptions();
+
+    if (!state.strategyOptimizationParams || Object.keys(state.strategyOptimizationParams).length === 0) {
+      state.strategyOptimizationParams = { ...(getStrategyOptimizationPreset().params || {}) };
+    }
+
+    const result = await fetchJson(`/strategies?${buildStrategyOptimizationQueryString()}`, { method: "GET", raw: true });
+    state.latestRows = Array.isArray(result.data) ? result.data : [];
+    state.strategyOptimizationSummary = {
+      strategy: result.strategy,
+      strategy_name: result.strategy_name,
+      trade_date: result.trade_date,
+      market: result.market,
+      optimization: result.optimization,
+      count: result.count,
+    };
+    if (result.optimization?.params) {
+      state.strategyOptimizationParams = { ...result.optimization.params };
+    }
+    renderStrategyOptimizationPage();
+    showTemporaryStatus(`已套用 ${escapeHtml(getStrategyOptimizationPreset().name)}，找到 ${formatNumber(state.latestRows.length)} 筆。`, "success");
+  } catch (error) {
+    state.latestRows = [];
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 是否已部署 V1.4-2，並檢查 /strategy-optimization/presets。 ");
+    setResultHeader({ title: "策略最佳化讀取失敗", desc: "目前無法取得策略最佳化資料。", badge: "讀取失敗" });
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>策略最佳化讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <button class="retry-btn" type="button" id="retryBtn">重新讀取</button>
+      </article>
+    `;
+    document.getElementById("retryBtn")?.addEventListener("click", loadList);
+    showStatus(`策略最佳化讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
 function renderStrategyDefinitionPanel() {
@@ -1081,6 +1382,7 @@ function updatePageText() {
   const isAlertsPage = state.page === "alerts";
   const isStrategiesPage = state.page === "strategies";
   const isStrategyTracksPage = state.page === "strategyTracks";
+  const isStrategyOptimizePage = state.page === "strategyOptimize";
   const isStrategyBacktestsPage = state.page === "strategyBacktests";
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
@@ -1092,6 +1394,14 @@ function updatePageText() {
   setResultHeader({ badge: "待更新" });
 
 
+
+  if (state.page === "strategyOptimize") {
+    const activeStrategy = getStrategyOption(state.strategyOptimizationStrategyKey);
+    pageTitle.textContent = "策略最佳化";
+    pageDesc.textContent = `調整 ${activeStrategy.name} 的參數門檻，先看訊號數量與清單變化。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>保守參數訊號較少、積極參數訊號較多；最佳化是幫你比較條件，不是保證獲利。</span>`;
+    return;
+  }
 
   if (state.page === "strategyBacktests") {
     const metric = getBacktestMetric();
@@ -1795,6 +2105,11 @@ function rerenderCurrentContent() {
 
   if (state.page === "strategyBacktests") {
     renderStrategyBacktestPage();
+    return;
+  }
+
+  if (state.page === "strategyOptimize") {
+    renderStrategyOptimizationPage();
     return;
   }
 
@@ -5273,6 +5588,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "strategyOptimize") {
+    await loadStrategyOptimization();
+    return;
+  }
+
   if (state.page === "watchlist") {
     if (!isAuthenticated()) {
       setLoading(false);
@@ -5484,6 +5804,9 @@ function switchPage(page) {
   if (page === "strategyTracks") {
     state.strategyTrackSummary = null;
   }
+  if (page === "strategyOptimize") {
+    state.strategyOptimizationSummary = null;
+  }
   if (page === "strategyBacktests") {
     state.strategyBacktestSummary = null;
     state.strategyBacktestRankings = null;
@@ -5507,6 +5830,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyOptimizationForm = event.target.closest("[data-strategy-optimization-form]");
+  if (strategyOptimizationForm) {
+    event.preventDefault();
+    handleStrategyOptimizationSubmit(strategyOptimizationForm);
+    return;
+  }
+
   const strategyBacktestFilterForm = event.target.closest("[data-strategy-backtest-filter-form]");
   if (strategyBacktestFilterForm) {
     event.preventDefault();
@@ -5563,6 +5893,12 @@ stockList.addEventListener("click", (event) => {
   const strategyPerformanceButton = event.target.closest("[data-strategy-performance-metric]");
   if (strategyPerformanceButton) {
     handleStrategyPerformanceMetric(strategyPerformanceButton);
+    return;
+  }
+
+  const strategyOptimizationPresetButton = event.target.closest("[data-strategy-optimization-preset]");
+  if (strategyOptimizationPresetButton) {
+    handleStrategyOptimizationPreset(strategyOptimizationPresetButton);
     return;
   }
 

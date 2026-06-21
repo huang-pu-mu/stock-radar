@@ -4190,3 +4190,86 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==============================
+   V1.4-2 策略參數最佳化
+   ============================== */
+.strategy-optimization-card {
+  margin-bottom: 16px;
+}
+
+.strategy-optimization-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.strategy-optimization-preset {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.strategy-optimization-preset span {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(86, 214, 255, 0.12);
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.strategy-optimization-preset strong {
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.strategy-optimization-preset small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.strategy-optimization-preset.active {
+  border-color: rgba(248, 214, 109, 0.72);
+  background: rgba(248, 214, 109, 0.13);
+  box-shadow: 0 0 0 1px rgba(248, 214, 109, 0.18) inset;
+}
+
+.strategy-optimization-form {
+  display: grid;
+  gap: 14px;
+}
+
+.strategy-optimization-param-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.strategy-optimization-form .filter-field input,
+.strategy-optimization-form .filter-field select {
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .strategy-optimization-preset-grid,
+  .strategy-optimization-param-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .strategy-optimization-preset-grid,
+  .strategy-optimization-param-grid {
+    grid-template-columns: 1fr;
+  }
+}

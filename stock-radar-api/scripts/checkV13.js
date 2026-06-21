@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.9";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v47";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.2.0";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v48";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-1-5", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v47", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v47", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-2", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v48", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v48", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -97,6 +97,7 @@ async function main() {
     "strategy-watchlists:setup",
     "strategy-backtests:setup",
     "strategy-backtests:generate",
+    "strategy-params:setup",
     "v13:check",
     "v14:check",
   ];
@@ -109,11 +110,13 @@ async function main() {
     "stock-radar-api/sql/watchlist-alerts.sql",
     "stock-radar-api/sql/strategy-watchlists.sql",
     "stock-radar-api/sql/strategy-backtests.sql",
+    "stock-radar-api/sql/strategy-parameter-presets.sql",
     "stock-radar-api/scripts/setupWatchlistAlerts.js",
     "stock-radar-api/scripts/generateWatchlistAlerts.js",
     "stock-radar-api/scripts/setupStrategyWatchlists.js",
     "stock-radar-api/scripts/setupStrategyBacktests.js",
     "stock-radar-api/scripts/generateStrategyBacktests.js",
+    "stock-radar-api/scripts/setupStrategyParameterPresets.js",
     "stock-radar-api/scripts/checkV13.js",
     "stock-radar-frontend/index.html",
     "stock-radar-frontend/app.js",
@@ -136,6 +139,7 @@ async function main() {
     ["post", "/watchlist/rules"],
     ["get", "/strategies"],
     ["get", "/strategies/definitions"],
+    ["get", "/strategy-optimization/presets"],
     ["get", "/strategy-watchlist"],
     ["get", "/strategy-watchlist/performance"],
     ["get", "/strategy-watchlist/rankings"],
@@ -156,9 +160,11 @@ async function main() {
     ["策略選股頁籤", 'data-page="strategies"'],
     ["策略追蹤頁籤", 'data-page="strategyTracks"'],
     ["策略回測頁籤", 'data-page="strategyBacktests"'],
+    ["策略最佳化頁籤", 'data-page="strategyOptimize"'],
     ["我的頁頁籤", 'data-page="account"'],
     ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
     ["策略回測 API", 'strategy-backtests'],
+    ["策略最佳化 API", 'strategy-optimization'],
     ["策略追蹤停利停損", 'risk-settings'],
   ];
 
@@ -180,6 +186,10 @@ async function main() {
     ["右側統計摘要 HTML", indexSource.includes("contentSummaryBar") && indexSource.includes("resultHeader")],
     ["右側內容區摘要 JS", appSource.includes("updateListOverview") && appSource.includes("setContentSummary") && appSource.includes("setResultHeader")],
     ["右側內容區版面 CSS", styleSource.includes(".content-summary-bar") && styleSource.includes(".result-header-card") && styleSource.includes(".summary-metric-grid")],
+    ["策略最佳化頁面 HTML", indexSource.includes('data-page="strategyOptimize"')],
+    ["策略最佳化前端 JS", appSource.includes("renderStrategyOptimizationPage") && appSource.includes("buildStrategyOptimizationQueryString")],
+    ["策略最佳化樣式 CSS", styleSource.includes(".strategy-optimization-card") && styleSource.includes(".strategy-optimization-param-grid")],
+    ["策略最佳化 API 參數", serverSource.includes("STRATEGY_OPTIMIZATION_PRESETS") && serverSource.includes("applyStrategyOptimizationParams")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {

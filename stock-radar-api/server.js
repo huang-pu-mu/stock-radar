@@ -227,8 +227,8 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.4.1.9";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v47";
+const API_VERSION = "stock-radar-api-v1.4.2.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v48";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -717,6 +717,164 @@ const STRATEGY_DEFINITIONS = [
     ],
   },
 ];
+
+
+const STRATEGY_OPTIMIZATION_PRESETS = [
+  {
+    key: "balanced",
+    name: "平衡參數",
+    badge: "建議預設",
+    description: "保留 V1.3 的篩選精神，適合作為每日觀察基準。",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 70,
+      min_legal_score: 20,
+      min_volume_score: 12,
+      min_price_score: 8,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 30,
+    },
+  },
+  {
+    key: "conservative",
+    name: "保守參數",
+    badge: "訊號較少",
+    description: "提高分數與門檻，適合只想看較強訊號的情境。",
+    params: {
+      min_strategy_score: 100,
+      min_chip_score: 80,
+      min_legal_score: 30,
+      min_volume_score: 15,
+      min_price_score: 10,
+      min_total_net_lots: 500,
+      min_large_holder_ratio_change: 0.5,
+      event_window_days: 14,
+    },
+  },
+  {
+    key: "aggressive",
+    name: "積極參數",
+    badge: "訊號較多",
+    description: "降低部分門檻，適合想先擴大觀察名單再人工篩選。",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 60,
+      min_legal_score: 10,
+      min_volume_score: 8,
+      min_price_score: 5,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 45,
+    },
+  },
+];
+
+const STRATEGY_OPTIMIZATION_FIELDS = [
+  { key: "min_strategy_score", label: "最低策略分數", unit: "分", min: 0, max: 300, step: 1, description: "所有策略共用，低於此分數的結果會被排除。" },
+  { key: "min_chip_score", label: "最低籌碼分數", unit: "分", min: 0, max: 100, step: 1, description: "適用法人轉強、短線強勢與多數個股策略。" },
+  { key: "min_legal_score", label: "最低法人分數", unit: "分", min: 0, max: 80, step: 1, description: "外資分數 + 投信分數的最低要求。" },
+  { key: "min_volume_score", label: "最低量能分數", unit: "分", min: 0, max: 50, step: 1, description: "適用量價轉強與短線強勢策略。" },
+  { key: "min_price_score", label: "最低股價位置分數", unit: "分", min: 0, max: 50, step: 1, description: "適用量價轉強與短線強勢策略。" },
+  { key: "min_total_net_lots", label: "最低法人合計買超", unit: "張", min: 0, max: 50000, step: 1, description: "適用資金流入與法人類策略。" },
+  { key: "min_large_holder_ratio_change", label: "最低大戶比重增加", unit: "%", min: -10, max: 20, step: 0.1, description: "適用主力增持策略。" },
+  { key: "event_window_days", label: "ETF 事件天數", unit: "天", min: 1, max: 90, step: 1, description: "適用 ETF 除息觀察策略。" },
+];
+
+function getStrategyOptimizationPreset(key) {
+  const presetKey = String(key || "balanced").trim();
+  return STRATEGY_OPTIMIZATION_PRESETS.find((item) => item.key === presetKey) || STRATEGY_OPTIMIZATION_PRESETS[0];
+}
+
+function parseOptimizationNumber(value, fallback, min, max, decimals = 4) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return fallback;
+  return Number(Math.max(min, Math.min(numberValue, max)).toFixed(decimals));
+}
+
+function parseStrategyOptimizationParams(query = {}) {
+  const preset = getStrategyOptimizationPreset(query.preset || query.optimization_preset);
+  const base = { ...preset.params };
+
+  for (const field of STRATEGY_OPTIMIZATION_FIELDS) {
+    if (query[field.key] !== undefined && query[field.key] !== null && query[field.key] !== "") {
+      base[field.key] = parseOptimizationNumber(query[field.key], base[field.key], field.min, field.max, 4);
+    }
+  }
+
+  return {
+    preset_key: preset.key,
+    preset_name: preset.name,
+    preset_description: preset.description,
+    params: base,
+    fields: STRATEGY_OPTIMIZATION_FIELDS,
+  };
+}
+
+function readStrategyOptimizationNumber(row, keys) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      const numberValue = Number(String(value).replaceAll(",", ""));
+      if (Number.isFinite(numberValue)) return numberValue;
+    }
+  }
+  return null;
+}
+
+function passMinimum(value, minimum) {
+  if (minimum === null || minimum === undefined || Number(minimum) <= 0) return true;
+  if (value === null || value === undefined) return false;
+  return Number(value) >= Number(minimum);
+}
+
+function applyStrategyOptimizationParams(rows, strategyKey, optimization) {
+  const params = optimization?.params || {};
+  const filtered = rows.filter((row) => {
+    const strategyScore = readStrategyOptimizationNumber(row, ["strategy_score", "chip_score", "major_holder_score"]);
+    if (!passMinimum(strategyScore, params.min_strategy_score)) return false;
+
+    if (["legal_strength", "short_term_strong", "volume_price_breakout", "capital_inflow"].includes(strategyKey)) {
+      const chipScore = readStrategyOptimizationNumber(row, ["chip_score"]);
+      if (!passMinimum(chipScore, params.min_chip_score)) return false;
+    }
+
+    if (strategyKey === "legal_strength") {
+      const legalScore =
+        (readStrategyOptimizationNumber(row, ["foreign_score"]) || 0) +
+        (readStrategyOptimizationNumber(row, ["investment_trust_score"]) || 0);
+      if (!passMinimum(legalScore, params.min_legal_score)) return false;
+      const totalNetLots = readStrategyOptimizationNumber(row, ["total_net_lots"]);
+      if (Number(params.min_total_net_lots || 0) > 1 && !passMinimum(totalNetLots, params.min_total_net_lots)) return false;
+    }
+
+    if (["volume_price_breakout", "short_term_strong"].includes(strategyKey)) {
+      const volumeScore = readStrategyOptimizationNumber(row, ["volume_score"]);
+      const priceScore = readStrategyOptimizationNumber(row, ["price_score"]);
+      if (!passMinimum(volumeScore, params.min_volume_score)) return false;
+      if (!passMinimum(priceScore, params.min_price_score)) return false;
+    }
+
+    if (strategyKey === "capital_inflow") {
+      const totalNetLots = readStrategyOptimizationNumber(row, ["total_net_lots"]);
+      if (!passMinimum(totalNetLots, params.min_total_net_lots)) return false;
+    }
+
+    if (strategyKey === "major_holder_accumulate") {
+      const ratioChange = readStrategyOptimizationNumber(row, ["large_holder_ratio_change"]);
+      if (!passMinimum(ratioChange, params.min_large_holder_ratio_change)) return false;
+    }
+
+    if (strategyKey === "etf_calendar_watch") {
+      const daysLeft = readStrategyOptimizationNumber(row, ["days_left"]);
+      if (!passMinimum(params.event_window_days, daysLeft)) return false;
+    }
+
+    return true;
+  });
+
+  return filtered;
+}
 
 function getStrategyDefinition(key) {
   const strategyKey = String(key || "legal_strength").trim();
@@ -2124,6 +2282,8 @@ app.get("/radar-scores/:stockCode", async (req, res) => {
 app.get("/radar/today", async (req, res) => {
   try {
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
     const market = parseMarket(req.query.market);
     const limit = parseLimit(req.query.limit, 20, 100);
 
@@ -2245,6 +2405,8 @@ app.get("/radar/today", async (req, res) => {
 app.get("/radar/foreign-buy-ranking", async (req, res) => {
   try {
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
 
     let targetDate = queryDate;
@@ -2383,6 +2545,8 @@ app.get("/radar/foreign-buy-ranking", async (req, res) => {
 app.get("/radar/investment-trust-ranking", async (req, res) => {
   try {
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
 
     let targetDate = queryDate;
@@ -2536,6 +2700,8 @@ app.get("/radar/institutional-sync-buying", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -2828,6 +2994,8 @@ app.get("/radar/industry-flow", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 50);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3172,6 +3340,8 @@ app.get("/radar/major-holder", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3336,6 +3506,8 @@ app.get("/radar/top", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3462,6 +3634,8 @@ app.get("/foreign/top", async (req, res) => {
     const limit = parseLimit(req.query.limit, 20, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3760,6 +3934,28 @@ async function getWatchlistRows(userId, stockCode = null) {
 // GET /watchlist
 // ==============================
 
+
+// ==============================
+// V1.4-2 策略參數最佳化：取得參數預設
+// GET /strategy-optimization/presets
+// ==============================
+app.get("/strategy-optimization/presets", async (req, res) => {
+  try {
+    const selected = getStrategyOptimizationPreset(req.query.preset);
+    res.json({
+      success: true,
+      default_preset: selected.key,
+      count: STRATEGY_OPTIMIZATION_PRESETS.length,
+      presets: STRATEGY_OPTIMIZATION_PRESETS,
+      fields: STRATEGY_OPTIMIZATION_FIELDS,
+      strategies: STRATEGY_DEFINITIONS,
+    });
+  } catch (error) {
+    console.error("查詢策略最佳化參數預設失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略最佳化參數預設失敗", error: error.message });
+  }
+});
+
 // ==============================
 // V1.3-2-2 策略說明與分數拆解
 // GET /strategies/definitions?strategy=legal_strength
@@ -3797,6 +3993,8 @@ app.get("/strategies", async (req, res) => {
     const limit = parseLimit(req.query.limit, 30, 100);
     const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
+    const optimization = parseStrategyOptimizationParams(req.query);
+    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
 
     if (queryDate && !isValidDateText(queryDate)) {
       return res.status(400).json({
@@ -3820,7 +4018,7 @@ app.get("/strategies", async (req, res) => {
           marketCondition = "AND s.market_type = ?";
           params.push(market);
         }
-        params.push(limit);
+        params.push(optimization.params.min_chip_score, optimization.params.min_legal_score, sqlLimit);
 
         rows = await query(
           `
@@ -3863,7 +4061,7 @@ app.get("/strategies", async (req, res) => {
             ${marketCondition}
             AND s.is_active = 1
             AND (COALESCE(i.foreign_net, 0) > 0 OR COALESCE(i.investment_trust_net, 0) > 0)
-            AND (c.chip_score >= 70 OR (c.foreign_score + c.investment_trust_score) >= 20)
+            AND (c.chip_score >= ? OR (c.foreign_score + c.investment_trust_score) >= ?)
           ORDER BY strategy_score DESC, COALESCE(i.foreign_net, 0) + COALESCE(i.investment_trust_net, 0) DESC, c.stock_code ASC
           LIMIT ?
           `,
@@ -3966,7 +4164,7 @@ app.get("/strategies", async (req, res) => {
           marketCondition = "AND s.market_type = ?";
           params.push(market);
         }
-        params.push(limit);
+        params.push(optimization.params.min_volume_score, optimization.params.min_price_score, sqlLimit);
 
         rows = await query(
           `
@@ -4001,8 +4199,8 @@ app.get("/strategies", async (req, res) => {
           WHERE c.trade_date = ?
             ${marketCondition}
             AND s.is_active = 1
-            AND (c.volume_score >= 12 OR c.volume_status LIKE '%量增%' OR c.volume_status LIKE '%放大%')
-            AND (c.price_score >= 8 OR c.price_position LIKE '%高點%' OR COALESCE(p.price_change, 0) > 0)
+            AND (c.volume_score >= ? OR c.volume_status LIKE '%量增%' OR c.volume_status LIKE '%放大%')
+            AND (c.price_score >= ? OR c.price_position LIKE '%高點%' OR COALESCE(p.price_change, 0) > 0)
           ORDER BY strategy_score DESC, COALESCE(p.volume, 0) DESC, c.stock_code ASC
           LIMIT ?
           `,
@@ -4020,7 +4218,7 @@ app.get("/strategies", async (req, res) => {
           marketCondition = "AND s.market_type = ?";
           params.push(market);
         }
-        params.push(limit);
+        params.push(optimization.params.min_total_net_lots, sqlLimit);
 
         rows = await query(
           `
@@ -4062,7 +4260,7 @@ app.get("/strategies", async (req, res) => {
           WHERE i.trade_date = ?
             ${marketCondition}
             AND s.is_active = 1
-            AND COALESCE(i.total_net, 0) > 0
+            AND ROUND(COALESCE(i.total_net, 0) / 1000, 0) >= ?
           ORDER BY COALESCE(i.total_net, 0) DESC, COALESCE(p.transaction_amount, 0) DESC, i.stock_code ASC
           LIMIT ?
           `,
@@ -4085,7 +4283,7 @@ app.get("/strategies", async (req, res) => {
           marketCondition = "AND ep.market_type = ?";
           params.push(market);
         }
-        params.push(limit);
+        params.push(sqlLimit);
 
         rows = await query(
           `
@@ -4110,13 +4308,13 @@ app.get("/strategies", async (req, res) => {
             ON ep.stock_code = e.stock_code
           WHERE e.is_active = 1
             AND e.event_date >= ?
-            AND e.event_date <= DATE_ADD(?, INTERVAL 30 DAY)
+            AND e.event_date <= DATE_ADD(?, INTERVAL ? DAY)
             ${marketCondition}
             AND (e.event_type LIKE '%除息%' OR e.event_type LIKE '%收益%' OR e.event_type LIKE '%股利%' OR e.importance = 'high')
           ORDER BY e.event_date ASC, strategy_score DESC, e.stock_code ASC
           LIMIT ?
           `,
-          [targetDate, targetDate, targetDate, targetDate, targetDate, ...(market ? [market] : []), limit],
+          [targetDate, targetDate, targetDate, targetDate, targetDate, optimization.params.event_window_days, ...(market ? [market] : []), sqlLimit],
         );
       }
     }
@@ -4130,7 +4328,7 @@ app.get("/strategies", async (req, res) => {
           marketCondition = "AND s.market_type = ?";
           params.push(market);
         }
-        params.push(limit);
+        params.push(optimization.params.min_chip_score, optimization.params.min_price_score, sqlLimit);
 
         rows = await query(
           `
@@ -4166,8 +4364,8 @@ app.get("/strategies", async (req, res) => {
           WHERE c.trade_date = ?
             ${marketCondition}
             AND s.is_active = 1
-            AND c.chip_score >= 80
-            AND (COALESCE(p.price_change, 0) >= 0 OR c.price_score >= 10)
+            AND c.chip_score >= ?
+            AND (COALESCE(p.price_change, 0) >= 0 OR c.price_score >= ?)
           ORDER BY strategy_score DESC, c.chip_score DESC, c.stock_code ASC
           LIMIT ?
           `,
@@ -4176,7 +4374,8 @@ app.get("/strategies", async (req, res) => {
       }
     }
 
-    const data = rows.map((row, index) => enrichStrategyRow(row, strategy, index + 1));
+    const optimizedRows = applyStrategyOptimizationParams(rows, strategy.key, optimization).slice(0, limit);
+    const data = optimizedRows.map((row, index) => enrichStrategyRow(row, strategy, index + 1));
 
     res.json({
       success: true,
@@ -4188,6 +4387,8 @@ app.get("/strategies", async (req, res) => {
       reference_date: referenceDate || targetDate,
       market: market || "全部",
       limit,
+      sql_limit: sqlLimit,
+      optimization,
       count: data.length,
       strategies: STRATEGY_DEFINITIONS,
       data: convertBigIntToString(data),

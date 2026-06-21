@@ -20,7 +20,8 @@
     "strategy-backtests:setup": "node scripts/setupStrategyBacktests.js",
     "strategy-backtests:generate": "node scripts/generateStrategyBacktests.js",
     "v13:check": "node scripts/checkV13.js",
-    "v14:check": "node scripts/checkV13.js"
+    "v14:check": "node scripts/checkV13.js",
+    "strategy-params:setup": "node scripts/setupStrategyParameterPresets.js"
   },
   "keywords": [
     "stock",
