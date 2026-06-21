@@ -4827,3 +4827,89 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+/* V1.4-8 系統狀態 / 驗收檢查收尾 */
+.v14-status-card {
+  border-color: rgba(86, 214, 255, 0.26);
+}
+
+.v14-feature-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.v14-module-grid,
+.v14-acceptance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.v14-module-card {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.v14-module-card.completed {
+  background: rgba(84, 217, 156, 0.06);
+}
+
+.v14-module-card.first_version {
+  background: rgba(86, 214, 255, 0.055);
+}
+
+.v14-module-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.v14-module-top strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.v14-module-top span {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.v14-progress-track {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  margin-bottom: 8px;
+}
+
+.v14-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+}
+
+.v14-module-card small,
+.v14-acceptance-grid li {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.v14-acceptance-grid ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 760px) {
+  .v14-feature-grid,
+  .v14-module-grid,
+  .v14-acceptance-grid {
+    grid-template-columns: 1fr;
+  }
+}

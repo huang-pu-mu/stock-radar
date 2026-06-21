@@ -824,8 +824,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.7.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v53";
+const API_VERSION = "stock-radar-api-v1.4.8.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v54";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -844,6 +844,124 @@ const V13_FEATURE_TABLES = [
   { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_trade_date" },
   { name: "notification_channels", label: "通知外送設定", date_column: "updated_at" },
   { name: "notification_send_logs", label: "通知外送紀錄", date_column: "created_at" },
+];
+
+const V14_FEATURE_TABLES = [
+  ...V13_FEATURE_TABLES,
+  { name: "strategy_parameter_presets", label: "策略參數預設", date_column: "updated_at" },
+];
+
+const V14_MODULES = [
+  {
+    key: "ui_responsive_layout",
+    name: "V1.4 UI 改版",
+    progress: 100,
+    status: "completed",
+    required_apis: ["前端：左側功能列", "前端：手機底部主導航", "前端：回到頂部按鈕"],
+  },
+  {
+    key: "strategy_parameter_optimization",
+    name: "策略參數最佳化",
+    progress: 55,
+    status: "first_version",
+    required_tables: ["strategy_parameter_presets"],
+    required_apis: ["GET /strategy-optimization/presets", "GET /strategies"],
+  },
+  {
+    key: "backtest_condition_adjustment",
+    name: "回測條件調整",
+    progress: 60,
+    status: "first_version",
+    required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
+    required_apis: ["GET /strategy-backtests/runs", "GET /strategy-backtests/results", "CLI strategy-backtests:generate"],
+  },
+  {
+    key: "line_notification_delivery",
+    name: "LINE 通知外送",
+    progress: 65,
+    status: "first_version",
+    required_tables: ["notification_channels", "notification_send_logs"],
+    required_apis: ["GET /notification/channels", "POST /notification/channels/:channelId/test"],
+  },
+  {
+    key: "daily_strategy_report",
+    name: "每日策略報告",
+    progress: 70,
+    status: "first_version",
+    required_tables: ["daily_prices", "institutional_trades", "chip_scores"],
+    required_apis: ["GET /strategy-daily-report", "POST /strategy-daily-report/send-line"],
+  },
+  {
+    key: "strategy_win_rate_trend",
+    name: "策略勝率趨勢",
+    progress: 70,
+    status: "first_version",
+    required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
+    required_apis: ["GET /strategy-backtests/trends"],
+  },
+  {
+    key: "stock_strategy_history",
+    name: "個股策略歷史紀錄",
+    progress: 75,
+    status: "first_version",
+    required_tables: ["strategy_backtest_runs", "strategy_backtest_results", "stocks"],
+    required_apis: ["GET /strategy-backtests/stock-history"],
+  },
+  {
+    key: "v14_acceptance",
+    name: "V1.4 系統狀態 / 驗收檢查",
+    progress: 100,
+    status: "completed",
+    required_apis: ["GET /v14/status", "GET /v14/acceptance", "npm run v14:check"],
+  },
+];
+
+const V14_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "版本",
+    items: [
+      "GET /health 回傳 stock-radar-api-v1.4.8.0",
+      "service-worker.js 快取版本為 stock-radar-pwa-v54",
+      "前端重新部署後手機與桌機都不再讀到舊快取",
+    ],
+  },
+  {
+    group: "UI 改版",
+    items: [
+      "桌機 / 平板顯示左側功能列與右側內容區",
+      "手機直向顯示底部主導航與頁內次功能切換",
+      "右下角回到頂部按鈕可正常顯示與滾動",
+      "右側內容區標題、篩選列、統計摘要與清單標題可正常顯示",
+    ],
+  },
+  {
+    group: "策略功能",
+    items: [
+      "策略最佳化可讀取保守 / 平衡 / 積極參數",
+      "回測條件調整可產生 npm 回測指令",
+      "策略勝率趨勢可顯示最近 Run 勝率變化",
+      "個股策略歷史可用股票代號查詢歷史訊號",
+    ],
+  },
+  {
+    group: "通知與報告",
+    items: [
+      "LINE 通知通道可新增、停用、刪除與測試發送",
+      "每日策略報告可依日期、市場與筆數產生",
+      "每日策略報告可選擇 LINE 通道外送",
+      "Email / Telegram 已依需求延後，不列入本輪驗收",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v14:check",
+      "GET /v14/status",
+      "GET /v14/acceptance",
+      "node --check stock-radar-api/server.js",
+      "node --check stock-radar-frontend/app.js",
+    ],
+  },
 ];
 
 const V13_MODULES = [
@@ -1198,6 +1316,104 @@ async function getV13FeatureSnapshot() {
   snapshot.strategy_backtests = latestBacktestRun;
 
   return snapshot;
+}
+
+async function getCompletedBacktestRunCount() {
+  if (!(await checkTableExists("strategy_backtest_runs"))) return 0;
+
+  const rows = await safeQuery(
+    `
+    SELECT COUNT(*) AS run_count
+    FROM strategy_backtest_runs
+    WHERE status = 'completed'
+      AND signal_count > 0
+    `,
+    [],
+    [{ run_count: 0 }],
+  );
+
+  return Number(rows?.[0]?.run_count || 0);
+}
+
+async function getStrategyBacktestResultCount() {
+  if (!(await checkTableExists("strategy_backtest_results"))) return 0;
+
+  const rows = await safeQuery(
+    `SELECT COUNT(*) AS result_count FROM strategy_backtest_results`,
+    [],
+    [{ result_count: 0 }],
+  );
+
+  return Number(rows?.[0]?.result_count || 0);
+}
+
+async function getV14FeatureSnapshot() {
+  const snapshot = await getV13FeatureSnapshot();
+
+  if (await checkTableExists("strategy_parameter_presets")) {
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
+        DATE_FORMAT(MAX(updated_at), '%Y-%m-%d %H:%i:%s') AS latest_updated_at
+      FROM strategy_parameter_presets
+      `,
+      [],
+      [{ total_count: 0, active_count: 0, latest_updated_at: null }],
+    );
+    snapshot.strategy_parameter_presets = rows?.[0] || null;
+  } else {
+    snapshot.strategy_parameter_presets = null;
+  }
+
+  if (await checkTableExists("notification_channels")) {
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) AS enabled_count,
+        SUM(CASE WHEN channel_type = 'line' THEN 1 ELSE 0 END) AS line_count,
+        DATE_FORMAT(MAX(updated_at), '%Y-%m-%d %H:%i:%s') AS latest_updated_at
+      FROM notification_channels
+      `,
+      [],
+      [{ total_count: 0, enabled_count: 0, line_count: 0, latest_updated_at: null }],
+    );
+    snapshot.notification_channels = rows?.[0] || null;
+  } else {
+    snapshot.notification_channels = null;
+  }
+
+  if (await checkTableExists("notification_send_logs")) {
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent_count,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+        DATE_FORMAT(MAX(created_at), '%Y-%m-%d %H:%i:%s') AS latest_created_at
+      FROM notification_send_logs
+      `,
+      [],
+      [{ total_count: 0, sent_count: 0, failed_count: 0, latest_created_at: null }],
+    );
+    snapshot.notification_send_logs = rows?.[0] || null;
+  } else {
+    snapshot.notification_send_logs = null;
+  }
+
+  snapshot.backtest_result_count = await getStrategyBacktestResultCount();
+  snapshot.completed_backtest_run_count = await getCompletedBacktestRunCount();
+  snapshot.line_provider = getNotificationProviderStatus().line;
+
+  return snapshot;
+}
+
+function calculateV14Progress(modules = V14_MODULES) {
+  if (!Array.isArray(modules) || modules.length === 0) return 0;
+  const total = modules.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round((total / modules.length) * 10) / 10;
 }
 
 
@@ -2530,6 +2746,213 @@ app.get("/v13/acceptance", (req, res) => {
     checked_at: nowTaipeiText(),
   });
 });
+
+
+app.get("/v14/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const coreTableStatuses = [];
+    const featureTableStatuses = [];
+
+    for (const tableDefinition of V13_CORE_TABLES) {
+      coreTableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    for (const tableDefinition of V14_FEATURE_TABLES) {
+      featureTableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const allTableStatuses = [...coreTableStatuses, ...featureTableStatuses];
+    const latestDailyPrice = coreTableStatuses.find((item) => item.table_name === "daily_prices")?.latest_value || null;
+    const latestChipScore = coreTableStatuses.find((item) => item.table_name === "chip_scores")?.latest_value || null;
+    const latestInstitutionalTrade = coreTableStatuses.find((item) => item.table_name === "institutional_trades")?.latest_value || null;
+    const featureSnapshot = await getV14FeatureSnapshot();
+    const latestBacktestRun = featureSnapshot.strategy_backtests;
+    const latestBacktestStrategyStats = await getLatestBacktestStrategyStats(latestBacktestRun?.id);
+
+    const missingTables = allTableStatuses
+      .filter((item) => !item.exists)
+      .map((item) => item.table_name);
+
+    const emptyFeatureTables = featureTableStatuses
+      .filter((item) => item.exists && Number(item.row_count || 0) === 0)
+      .map((item) => item.table_name);
+
+    const strategyPresetCount = Number(featureSnapshot.strategy_parameter_presets?.active_count || featureSnapshot.strategy_parameter_presets?.total_count || 0);
+    const completedRunCount = Number(featureSnapshot.completed_backtest_run_count || 0);
+    const backtestResultCount = Number(featureSnapshot.backtest_result_count || 0);
+    const lineTokenConfigured = Boolean(featureSnapshot.line_provider?.configured);
+    const lineChannelCount = Number(featureSnapshot.notification_channels?.line_count || 0);
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.4.8.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v54" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.4 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.4 必要資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "core_market_data",
+        "核心行情 / 籌碼資料",
+        latestDailyPrice && latestChipScore && latestInstitutionalTrade ? "pass" : "warn",
+        latestDailyPrice && latestChipScore && latestInstitutionalTrade
+          ? "每日行情、法人資料與籌碼分數都有可用資料。"
+          : "核心資料部分缺少最新日期，請確認每日排程是否正常。",
+        { latest_daily_price: latestDailyPrice, latest_chip_score: latestChipScore, latest_institutional_trade: latestInstitutionalTrade },
+      ),
+      buildCheck(
+        "strategy_parameter_optimization",
+        "策略參數最佳化",
+        strategyPresetCount >= 3 ? "pass" : "warn",
+        strategyPresetCount >= 3 ? "保守 / 平衡 / 積極參數預設已就緒。" : "策略參數預設不足，請執行 npm run strategy-params:setup。",
+        { snapshot: featureSnapshot.strategy_parameter_presets },
+      ),
+      buildCheck(
+        "backtest_condition_adjustment",
+        "回測條件調整",
+        completedRunCount > 0 && backtestResultCount > 0 ? "pass" : "warn",
+        completedRunCount > 0 && backtestResultCount > 0 ? "已有完成回測 Run，可用於條件調整、趨勢與個股歷史。" : "尚未找到完成且有訊號的回測資料，請先產生回測 Run。",
+        { completed_run_count: completedRunCount, result_count: backtestResultCount, latest_run: latestBacktestRun },
+      ),
+      buildCheck(
+        "line_notification",
+        "LINE 通知外送",
+        lineTokenConfigured ? (lineChannelCount > 0 ? "pass" : "warn") : "warn",
+        lineTokenConfigured
+          ? (lineChannelCount > 0 ? "LINE token 與通知通道已設定。" : "LINE token 已設定，但尚未建立 LINE 通知通道。")
+          : "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，LINE 實際外送會失敗。",
+        { provider: featureSnapshot.line_provider, channels: featureSnapshot.notification_channels },
+      ),
+      buildCheck(
+        "daily_strategy_report",
+        "每日策略報告",
+        latestDailyPrice && latestChipScore && latestInstitutionalTrade ? "pass" : "warn",
+        "每日報告會使用最新行情、法人與籌碼資料產生摘要。",
+        { latest_daily_price: latestDailyPrice },
+      ),
+      buildCheck(
+        "strategy_win_rate_trend",
+        "策略勝率趨勢",
+        completedRunCount >= 2 ? "pass" : "warn",
+        completedRunCount >= 2 ? "已有多次完成回測，可比較勝率趨勢。" : "目前完成回測 Run 較少，趨勢比較資料會有限。",
+        { completed_run_count: completedRunCount },
+      ),
+      buildCheck(
+        "stock_strategy_history",
+        "個股策略歷史紀錄",
+        backtestResultCount > 0 ? "pass" : "warn",
+        backtestResultCount > 0 ? "已有回測訊號，可查詢個股策略歷史。" : "尚未有回測訊號，個股策略歷史暫無資料。",
+        { result_count: backtestResultCount },
+      ),
+      buildCheck(
+        "empty_feature_tables",
+        "V1.4 功能資料量",
+        emptyFeatureTables.filter((name) => !["notification_send_logs"].includes(name)).length === 0 ? "pass" : "warn",
+        emptyFeatureTables.length === 0 ? "V1.4 功能資料表已有資料。" : `以下資料表目前沒有資料：${emptyFeatureTables.join("、")}`,
+        { empty_tables: emptyFeatureTables },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+    const progressPercent = calculateV14Progress();
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.4 系統狀態 / 驗收檢查",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.4 主要功能、資料表與版本檢查正常。"
+          : overallStatus === "warn"
+            ? "V1.4 主要功能可用，但仍有資料量、LINE token 或回測樣本數需要確認。"
+            : "V1.4 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: progressPercent,
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: {
+        core: coreTableStatuses,
+        v14_features: featureTableStatuses,
+      },
+      latest_data: {
+        daily_prices: latestDailyPrice,
+        chip_scores: latestChipScore,
+        institutional_trades: latestInstitutionalTrade,
+      },
+      feature_snapshot: featureSnapshot,
+      latest_backtest_strategy_stats: latestBacktestStrategyStats,
+      modules: V14_MODULES,
+      deferred_modules: [
+        { key: "email_notification", name: "Email 通知", status: "deferred", note: "依需求先不開發。" },
+        { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
+      ],
+      next_actions: [
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.0。",
+        "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
+        "執行 npm run v14:check 做本機靜態驗收。",
+        "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.4 系統狀態失敗：", error);
+
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.4 系統狀態 / 驗收檢查",
+      message: "查詢 V1.4 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v14/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.4 收尾驗收清單",
+    acceptance_status: "ready_for_final_validation",
+    progress_percent: calculateV14Progress(),
+    checklist: V14_FINAL_ACCEPTANCE_ITEMS,
+    modules: V14_MODULES,
+    deferred_modules: [
+      { key: "email_notification", name: "Email 通知", status: "deferred", note: "依需求先不開發。" },
+      { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
+    ],
+    recommended_commands: [
+      "node --check stock-radar-api/server.js",
+      "node --check stock-radar-frontend/app.js",
+      "npm run v14:check",
+      "npm run v14:check -- --api=https://stock-radar-api-ten.vercel.app",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v14/status",
+      "/v14/acceptance",
+      "/strategy-optimization/presets",
+      "/strategy-backtests/runs",
+      "/strategy-backtests/trends",
+      "/strategy-backtests/stock-history",
+      "/strategy-daily-report",
+      "/notification/channels",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
 
 
 app.post("/auth/google", async (req, res) => {

@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.7.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v53";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.0";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v54";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-7", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v53", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v53", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-8", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v54", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v54", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -135,6 +135,8 @@ async function main() {
     ["get", "/health"],
     ["get", "/v13/status"],
     ["get", "/v13/acceptance"],
+    ["get", "/v14/status"],
+    ["get", "/v14/acceptance"],
     ["get", "/watchlist/alerts"],
     ["get", "/watchlist/alerts/unread-count"],
     ["post", "/watchlist/alerts/generate"],
@@ -178,7 +180,7 @@ async function main() {
     ["策略勝率趨勢頁籤", 'data-page="strategyTrends"'],
     ["個股策略歷史頁籤", 'data-page="strategyStockHistory"'],
     ["我的頁頁籤", 'data-page="account"'],
-    ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
+    ["V1.4 狀態 API", 'fetchJson("/v14/status"'],
     ["策略回測 API", 'strategy-backtests'],
     ["策略最佳化 API", 'strategy-optimization'],
     ["策略追蹤停利停損", 'risk-settings'],
@@ -186,6 +188,8 @@ async function main() {
     ["每日策略報告 API", 'strategy-daily-report'],
     ["策略勝率趨勢 API", 'strategy-backtests/trends'],
     ["個股策略歷史 API", 'strategy-backtests/stock-history'],
+    ["V1.4 狀態 API", 'fetchJson("/v14/status"'],
+    ["V1.4 狀態刷新", 'data-refresh-v14-status'],
   ];
 
   for (const [label, marker] of requiredFrontendMarkers) {
@@ -230,13 +234,16 @@ async function main() {
     ["個股策略歷史前端", appSource.includes("renderStrategyStockHistoryPage") && appSource.includes("data-strategy-stock-history-form")],
     ["個股策略歷史頁籤", indexSource.includes('data-page="strategyStockHistory"') && indexSource.includes("個股歷史")],
     ["個股策略歷史樣式", styleSource.includes(".strategy-stock-history-form") && styleSource.includes(".strategy-stock-history-card")],
+    ["V1.4 狀態 API", serverSource.includes('app.get("/v14/status"') && serverSource.includes('app.get("/v14/acceptance"')],
+    ["V1.4 狀態前端", appSource.includes('fetchJson("/v14/status"') && appSource.includes("renderV14ModuleProgress") && appSource.includes("data-refresh-v14-status")],
+    ["V1.4 狀態樣式", styleSource.includes(".v14-module-grid") && styleSource.includes(".v14-progress-track")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {
     checks.push(createCheck("V1.4 UI", label, ok, ok ? "存在" : "缺少"));
   }
 
-  checks.push(createWarn("前端樣式", "V1.3 狀態卡片樣式", styleSource.includes("v13-status-card"), "style.css 應包含 v13-status-card"));
+  checks.push(createWarn("前端樣式", "V1.4 狀態卡片樣式", styleSource.includes("v13-status-card"), "style.css 應包含 v13-status-card / v14-status-card"));
   checks.push(createWarn("前端樣式", "策略回測排行榜樣式", styleSource.includes("backtest") && styleSource.includes("ranking"), "style.css 應包含回測 / 排行榜相關樣式"));
 
   if (apiBaseUrl) {
@@ -250,6 +257,13 @@ async function main() {
 
     const acceptance = await fetchJson(`${apiBaseUrl}/v13/acceptance`).catch((error) => ({ ok: false, status: 0, error: error.message }));
     checks.push(createCheck("線上 API", "GET /v13/acceptance", Boolean(acceptance.ok && acceptance.data?.checklist), acceptance.data?.acceptance_status || acceptance.error || String(acceptance.status)));
+
+    const v14Status = await fetchJson(`${apiBaseUrl}/v14/status`).catch((error) => ({ ok: false, status: 0, error: error.message }));
+    checks.push(createCheck("線上 API", "GET /v14/status", Boolean(v14Status.ok && v14Status.data?.overall_status), v14Status.data?.overall_status || v14Status.error || String(v14Status.status)));
+    checks.push(createWarn("線上 API", "/v14/status 為 pass 或 warn", ["pass", "warn"].includes(v14Status.data?.overall_status), v14Status.data?.overall_status || "無 overall_status"));
+
+    const v14Acceptance = await fetchJson(`${apiBaseUrl}/v14/acceptance`).catch((error) => ({ ok: false, status: 0, error: error.message }));
+    checks.push(createCheck("線上 API", "GET /v14/acceptance", Boolean(v14Acceptance.ok && v14Acceptance.data?.checklist), v14Acceptance.data?.acceptance_status || v14Acceptance.error || String(v14Acceptance.status)));
   }
 
   const passCount = checks.filter((item) => item.status === "pass").length;
@@ -259,7 +273,7 @@ async function main() {
   const overallStatus = failCount > 0 ? "fail" : warnCount > 0 ? "warn" : "pass";
 
   console.log("====================================");
-  console.log("V1.4 UI 優化驗收檢查");
+  console.log("V1.4 系統狀態 / 驗收檢查");
   console.log(`API 版本：${EXPECTED_API_VERSION}`);
   console.log(`PWA 版本：${EXPECTED_PWA_VERSION}`);
   if (apiBaseUrl) console.log(`線上 API：${apiBaseUrl}`);
@@ -281,7 +295,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("V1.4 UI 優化驗收檢查失敗");
+  console.error("V1.4 系統狀態 / 驗收檢查失敗");
   console.error(error);
   process.exit(1);
 });

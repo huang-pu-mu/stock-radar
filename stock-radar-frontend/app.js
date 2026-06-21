@@ -197,7 +197,7 @@ const PAGE_CONTENT_CONFIG = {
   strategyTrends: { groupLabel: "策略中心", filterTitle: "勝率趨勢", filterDesc: "比較最近多次回測 Run 的勝率、平均報酬與策略排名變化。", resultTitle: "策略勝率趨勢", resultDesc: "依 1 / 3 / 5 日或目前報酬觀察策略穩定度。" },
   strategyStockHistory: { groupLabel: "策略中心", filterTitle: "個股策略歷史", filterDesc: "輸入股票代號後，查詢它過去出現過的策略訊號與後續報酬。", resultTitle: "個股策略歷史紀錄", resultDesc: "整理單一股票在不同 Run、不同策略中的歷史訊號。" },
   strategyReports: { groupLabel: "策略中心", filterTitle: "每日策略報告", filterDesc: "依資料日與市場產生策略摘要，並可外送到 LINE 通知通道。", resultTitle: "每日策略報告", resultDesc: "整理策略分布、高分訊號、法人資金與產業流向。" },
-  account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
+  account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、LINE 通知、每日報告、趨勢與個股歷史是否正常。" },
 };
 
 function getPageContentConfig(page = state.page) {
@@ -1506,7 +1506,7 @@ function updatePageText() {
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股，並檢查 V1.3 系統狀態、策略回測與提醒資料。";
+    pageDesc.textContent = "管理登入、自選股，並檢查 V1.4 系統狀態、策略、報告、LINE 通知與回測資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -4012,10 +4012,15 @@ function renderV13CheckCard(check) {
 function renderV13FeatureCards() {
   const alerts = getV13FeatureSnapshot("watchlist_alerts") || {};
   const tracks = getV13FeatureSnapshot("strategy_watchlists") || {};
-  const backtests = getV13FeatureSnapshot("strategy_backtests") || findV13Check("strategy_backtests")?.latest_run || {};
+  const backtests = getV13FeatureSnapshot("strategy_backtests") || findV13Check("backtest_condition_adjustment")?.latest_run || {};
+  const params = getV13FeatureSnapshot("strategy_parameter_presets") || {};
+  const channels = getV13FeatureSnapshot("notification_channels") || {};
+  const sendLogs = getV13FeatureSnapshot("notification_send_logs") || {};
+  const resultCount = state.v13Status?.feature_snapshot?.backtest_result_count;
+  const runCount = state.v13Status?.feature_snapshot?.completed_backtest_run_count;
 
   return `
-    <div class="v13-feature-grid">
+    <div class="v13-feature-grid v14-feature-grid">
       <div class="v13-feature-card">
         <span>自選股提醒</span>
         <strong>${formatV13Count(alerts.total_count)} 筆</strong>
@@ -4029,7 +4034,72 @@ function renderV13FeatureCards() {
       <div class="v13-feature-card">
         <span>策略回測</span>
         <strong>Run ${escapeHtml(backtests.id ?? backtests.run_id ?? "-")}</strong>
-        <small>訊號 ${formatV13Count(backtests.total_signals ?? backtests.signal_count)} 筆，5日平均 ${formatReturnPercent(backtests.avg_return_5d ?? backtests.avg_return_5d_percent)}</small>
+        <small>完成 Run ${formatV13Count(runCount)} 次，訊號 ${formatV13Count(resultCount ?? backtests.total_signals ?? backtests.signal_count)} 筆</small>
+      </div>
+      <div class="v13-feature-card">
+        <span>策略參數</span>
+        <strong>${formatV13Count(params.active_count ?? params.total_count)} 組</strong>
+        <small>保守 / 平衡 / 積極參數預設供策略與回測共用</small>
+      </div>
+      <div class="v13-feature-card">
+        <span>LINE 通知</span>
+        <strong>${formatV13Count(channels.enabled_count)} 個啟用</strong>
+        <small>LINE 通道 ${formatV13Count(channels.line_count)} 個，外送紀錄 ${formatV13Count(sendLogs.total_count)} 筆</small>
+      </div>
+      <div class="v13-feature-card">
+        <span>每日報告 / 趨勢 / 歷史</span>
+        <strong>已接 API</strong>
+        <small>每日策略報告、勝率趨勢、個股策略歷史已納入 V1.4 檢查</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderV14ModuleProgress() {
+  const modules = Array.isArray(state.v13Status?.modules) ? state.v13Status.modules : [];
+  if (!modules.length) return "";
+
+  return `
+    <div class="v13-subsection v14-module-section">
+      <div class="v13-subsection-title">
+        <strong>V1.4 功能完成度</strong>
+        <span>本輪 Email / Telegram 延後不列入</span>
+      </div>
+      <div class="v14-module-grid">
+        ${modules.map((module) => `
+          <div class="v14-module-card ${escapeHtml(module.status || "")}">
+            <div class="v14-module-top">
+              <strong>${escapeHtml(module.name || module.key || "功能")}</strong>
+              <span>${formatPercent(module.progress)}</span>
+            </div>
+            <div class="v14-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(module.progress || 0)))}%"></span></div>
+            <small>${escapeHtml(module.status === "completed" ? "已完成" : module.status === "first_version" ? "第一版完成" : module.status || "檢查中")}</small>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderV14AcceptanceSummary() {
+  const nextActions = Array.isArray(state.v13Status?.next_actions) ? state.v13Status.next_actions : [];
+  const deferred = Array.isArray(state.v13Status?.deferred_modules) ? state.v13Status.deferred_modules : [];
+
+  return `
+    <div class="v13-subsection v14-acceptance-section">
+      <div class="v13-subsection-title">
+        <strong>收尾驗收重點</strong>
+        <span>/v14/status + npm run v14:check</span>
+      </div>
+      <div class="v14-acceptance-grid">
+        <div class="v13-empty-note">
+          <strong>下一步檢查：</strong>
+          <ul>${nextActions.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </div>
+        <div class="v13-empty-note">
+          <strong>本輪延後：</strong>
+          <ul>${deferred.length ? deferred.map((item) => `<li>${escapeHtml(item.name || item.key)}：${escapeHtml(item.note || item.status || "延後")}</li>`).join("") : "<li>Email / Telegram 暫不開發</li>"}</ul>
+        </div>
       </div>
     </div>
   `;
@@ -4043,7 +4113,7 @@ function renderV13BacktestStats() {
   if (!stats.length) {
     return `
       <div class="v13-empty-note">
-        尚未讀到各策略回測統計；如果剛完成回測，請按「重新檢查 V1.3」。
+        尚未讀到各策略回測統計；如果剛完成回測，請按「重新檢查 V1.4」。
       </div>
     `;
   }
@@ -4068,12 +4138,12 @@ function renderV13StatusCard() {
 
   if (state.v13StatusLoading && !state.v13Status) {
     return `
-      <article class="account-card v13-status-card">
+      <article class="account-card v13-status-card v14-status-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V1.3 系統狀態</p>
-            <h3>正在檢查 V1.3 功能</h3>
-            <p>正在讀取 /health 與 /v13/status。</p>
+            <p class="eyebrow">V1.4 系統狀態</p>
+            <h3>正在檢查 V1.4 功能</h3>
+            <p>正在讀取 /health 與 /v14/status。</p>
           </div>
           <span class="v13-status-pill warn">檢查中</span>
         </div>
@@ -4084,17 +4154,17 @@ function renderV13StatusCard() {
 
   if (state.v13StatusError) {
     return `
-      <article class="account-card v13-status-card error-card">
+      <article class="account-card v13-status-card v14-status-card error-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V1.3 系統狀態</p>
+            <p class="eyebrow">V1.4 系統狀態</p>
             <h3>狀態檢查失敗</h3>
             <p>${escapeHtml(state.v13StatusError)}</p>
           </div>
           <span class="v13-status-pill fail">異常</span>
         </div>
         <div class="account-actions">
-          <button class="detail-btn" type="button" data-refresh-v13-status="true">重新檢查 V1.3</button>
+          <button class="detail-btn" type="button" data-refresh-v14-status="true">重新檢查 V1.4</button>
         </div>
       </article>
     `;
@@ -4106,18 +4176,22 @@ function renderV13StatusCard() {
   const meta = getV13StatusMeta(status.overall_status);
   const checks = [
     findV13Check("database"),
+    findV13Check("versions"),
     findV13Check("core_market_data"),
-    findV13Check("alerts"),
-    findV13Check("strategy_tracking"),
-    findV13Check("strategy_backtests"),
+    findV13Check("strategy_parameter_optimization"),
+    findV13Check("backtest_condition_adjustment"),
+    findV13Check("line_notification"),
+    findV13Check("daily_strategy_report"),
+    findV13Check("strategy_win_rate_trend"),
+    findV13Check("stock_strategy_history"),
   ].filter(Boolean);
 
   return `
-    <article class="account-card v13-status-card ${meta.className}">
+    <article class="account-card v13-status-card v14-status-card ${meta.className}">
       <div class="v13-status-header">
         <div>
-          <p class="eyebrow">V1.3 系統狀態</p>
-          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V1.3 狀態檢查完成")}</h3>
+          <p class="eyebrow">V1.4 系統狀態</p>
+          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V1.4 狀態檢查完成")}</h3>
           <p>檢查時間：${escapeHtml(status.checked_at || "-")}</p>
         </div>
         <span class="v13-status-pill ${meta.className}">${meta.label}</span>
@@ -4128,6 +4202,7 @@ function renderV13StatusCard() {
         ${createInfoItem("PWA 預期版本", escapeHtml(status.pwa_expected_version || "-"))}
         ${createInfoItem("資料庫", escapeHtml(status.database?.database_name || "-"))}
         ${createInfoItem("最新行情", formatDate(status.latest_data?.daily_prices))}
+        ${createInfoItem("V1.4 完成度", formatPercent(status.progress_percent))}
       </div>
 
       <div class="v13-check-grid">
@@ -4135,6 +4210,8 @@ function renderV13StatusCard() {
       </div>
 
       ${renderV13FeatureCards()}
+      ${renderV14ModuleProgress()}
+      ${renderV14AcceptanceSummary()}
 
       <div class="v13-subsection">
         <div class="v13-subsection-title">
@@ -4145,10 +4222,11 @@ function renderV13StatusCard() {
       </div>
 
       <div class="account-actions v13-actions">
-        <button class="detail-btn" type="button" data-refresh-v13-status="true">重新檢查 V1.3</button>
+        <button class="detail-btn" type="button" data-refresh-v14-status="true">重新檢查 V1.4</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyBacktests">看策略回測</button>
-        <button class="detail-btn secondary-action" type="button" data-go-page="alerts">提醒中心</button>
-        <button class="detail-btn secondary-action" type="button" data-go-page="strategyTracks">策略追蹤</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="strategyReports">每日報告</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="strategyTrends">勝率趨勢</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="strategyStockHistory">個股歷史</button>
       </div>
     </article>
   `;
@@ -4163,10 +4241,10 @@ async function loadV13Status({ force = false } = {}) {
   if (state.page === "account") renderAccountPage();
 
   try {
-    const result = await fetchJson("/v13/status", { method: "GET", raw: true });
+    const result = await fetchJson("/v14/status", { method: "GET", raw: true });
     state.v13Status = result;
   } catch (error) {
-    state.v13StatusError = error.message || "V1.3 狀態檢查失敗。";
+    state.v13StatusError = error.message || "V1.4 狀態檢查失敗。";
   } finally {
     state.v13StatusLoading = false;
     if (state.page === "account") renderAccountPage();
@@ -4180,7 +4258,7 @@ function renderAccountPage() {
     { label: "登入狀態", value: state.user ? "已登入" : "尚未登入" },
     { label: "自選股", value: `${formatNumber(state.watchlistCodes?.size || 0)} 檔` },
     { label: "未讀提醒", value: `${formatNumber(state.alertUnreadCount || 0)} 筆` },
-    { label: "V1.3 狀態", value: state.v13StatusLoading ? "檢查中" : (state.v13Status?.overall_status || state.v13StatusError || "尚未檢查") },
+    { label: "V1.4 狀態", value: state.v13StatusLoading ? "檢查中" : (state.v13Status?.overall_status || state.v13StatusError || "尚未檢查") },
   ], "我的頁已整理成帳號狀態、功能入口與系統狀態卡片。");
   setResultHeader({ title: "我的狀態卡片", desc: "查看登入、自選股、提醒與系統檢查狀態。", badge: state.user ? "已登入" : "未登入" });
 
@@ -7593,8 +7671,8 @@ stockList.addEventListener("click", (event) => {
     return;
   }
 
-  const v13RefreshButton = event.target.closest("[data-refresh-v13-status]");
-  if (v13RefreshButton) {
+  const v14RefreshButton = event.target.closest("[data-refresh-v14-status], [data-refresh-v13-status]");
+  if (v14RefreshButton) {
     loadV13Status({ force: true });
     return;
   }
