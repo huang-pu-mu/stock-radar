@@ -70,6 +70,7 @@ const stockList = document.getElementById("stockList");
 const statusBox = document.getElementById("statusBox");
 const refreshBtn = document.getElementById("refreshBtn");
 const tabButtons = document.querySelectorAll(".tab-btn");
+const mobileSubnavGroups = document.querySelectorAll("[data-mobile-subnav-group]");
 const marketButtons = document.querySelectorAll(".market-btn");
 const marketRow = document.getElementById("marketRow");
 const helpCard = document.getElementById("helpCard");
@@ -87,9 +88,53 @@ const chartZoomContent = document.getElementById("chartZoomContent");
 const closeChartZoomBtn = document.getElementById("closeChartZoomBtn");
 const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
-const alertsTabBadge = document.getElementById("alertsTabBadge");
+const alertsTabBadges = document.querySelectorAll(".alerts-tab-badge");
 const backToTopBtn = document.getElementById("backToTopBtn");
 
+
+
+const PAGE_GROUP_MAP = {
+  radar: "market",
+  foreign: "market",
+  foreignStreak: "market",
+  trust: "market",
+  syncBuy: "market",
+  industryFlow: "market",
+  majorHolder: "market",
+  search: "personal",
+  watchlist: "personal",
+  strategies: "strategy",
+  strategyTracks: "strategy",
+  strategyBacktests: "strategy",
+  alerts: "alerts",
+  account: "account",
+};
+
+function getPageGroup(page = state.page) {
+  return PAGE_GROUP_MAP[page] || "market";
+}
+
+function updateNavigationState(page = state.page) {
+  const activeGroup = getPageGroup(page);
+
+  tabButtons.forEach((btn) => {
+    const isBottomButton = btn.classList.contains("mobile-bottom-btn");
+    const isActive = isBottomButton
+      ? btn.dataset.mobileNavGroup === activeGroup
+      : btn.dataset.page === page;
+
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      btn.setAttribute("aria-current", "page");
+    } else {
+      btn.removeAttribute("aria-current");
+    }
+  });
+
+  mobileSubnavGroups.forEach((group) => {
+    group.classList.toggle("hidden", group.dataset.mobileSubnavGroup !== activeGroup);
+  });
+}
 
 const DEFAULT_STRATEGY_OPTIONS = [
   {
@@ -3060,13 +3105,21 @@ function readRuleForm(form) {
   return payload;
 }
 
+function renderAlertsBadgeCount(unreadCount = 0) {
+  const safeCount = Number(unreadCount || 0);
+
+  alertsTabBadges.forEach((badge) => {
+    badge.textContent = safeCount > 99 ? "99+" : String(safeCount);
+    badge.classList.toggle("hidden", safeCount <= 0);
+  });
+}
+
 async function updateAlertsBadge() {
-  if (!alertsTabBadge) return;
+  if (!alertsTabBadges.length) return;
 
   if (!isAuthenticated()) {
     state.alertUnreadCount = 0;
-    alertsTabBadge.textContent = "0";
-    alertsTabBadge.classList.add("hidden");
+    renderAlertsBadgeCount(0);
     return;
   }
 
@@ -3077,8 +3130,7 @@ async function updateAlertsBadge() {
     });
     const unreadCount = Number(data?.unread_count || 0);
     state.alertUnreadCount = unreadCount;
-    alertsTabBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
-    alertsTabBadge.classList.toggle("hidden", unreadCount <= 0);
+    renderAlertsBadgeCount(unreadCount);
   } catch (error) {
     console.warn("Update alert badge failed:", error);
   }
@@ -5086,8 +5138,8 @@ function closeDetail() {
 }
 
 function switchPage(page) {
-  tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.page === page));
   state.page = page;
+  updateNavigationState(page);
   if (page === "alerts") {
     state.alertMode = "list";
   }
@@ -5379,6 +5431,7 @@ if ("serviceWorker" in navigator) {
 }
 
 async function initApp() {
+  updateNavigationState(state.page);
   await loadCurrentUser();
   loadList();
 }

@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.7";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v45";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.8";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v46";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-1-7", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "PWA 預期版本為 v45", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v45", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-1-3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v46", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v46", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -160,15 +160,26 @@ async function main() {
     ["V1.3 狀態 API", 'fetchJson("/v13/status"'],
     ["策略回測 API", 'strategy-backtests'],
     ["策略追蹤停利停損", 'risk-settings'],
-    ["V1.4 左側功能列", 'class="app-sidebar"'],
-    ["V1.4 右側內容區", 'class="app-main"'],
-    ["V1.4 功能分類標題", 'class="side-nav-title"'],
-    ["V1.4 側欄功能按鈕", 'class="tab-btn side-nav-btn'],
   ];
 
   for (const [label, marker] of requiredFrontendMarkers) {
-    const source = marker.startsWith("data-page") || marker.startsWith("class=") ? indexSource : appSource;
+    const source = marker.startsWith("data-page") ? indexSource : appSource;
     checks.push(createCheck("前端功能", label, source.includes(marker), marker));
+  }
+
+  const v14UiMarkers = [
+    ["桌機左側功能列 HTML", indexSource.includes("desktop-sidebar") && indexSource.includes("side-nav-group")],
+    ["手機底部主導航 HTML", indexSource.includes("mobile-bottom-nav") && indexSource.includes("data-mobile-nav-group")],
+    ["手機頁內次功能切換 HTML", indexSource.includes("mobile-section-nav") && indexSource.includes("data-mobile-subnav-group")],
+    ["導航群組狀態 JS", appSource.includes("PAGE_GROUP_MAP") && appSource.includes("updateNavigationState")],
+    ["多位置提醒徽章 JS", appSource.includes("alertsTabBadges") && appSource.includes("renderAlertsBadgeCount")],
+    ["左側功能列 CSS", styleSource.includes(".desktop-sidebar") && styleSource.includes(".side-nav-btn")],
+    ["底部主導航 CSS", styleSource.includes(".mobile-bottom-nav") && styleSource.includes(".mobile-bottom-btn")],
+    ["手機頁內次功能 CSS", styleSource.includes(".mobile-section-nav") && styleSource.includes(".mobile-subnav-btn")],
+  ];
+
+  for (const [label, ok] of v14UiMarkers) {
+    checks.push(createCheck("V1.4 UI", label, ok, ok ? "存在" : "缺少"));
   }
 
   checks.push(createWarn("前端樣式", "V1.3 狀態卡片樣式", styleSource.includes("v13-status-card"), "style.css 應包含 v13-status-card"));
