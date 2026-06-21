@@ -620,6 +620,132 @@ function pickReportDate(value) {
   return isValidDateText(text) ? text : null;
 }
 
+
+const TWSE_INDUSTRY_CODE_NAME_MAP = new Map([
+  ["1", "水泥工業"],
+  ["2", "食品工業"],
+  ["3", "塑膠工業"],
+  ["4", "紡織纖維"],
+  ["5", "電機機械"],
+  ["6", "電器電纜"],
+  ["7", "化學生技醫療"],
+  ["8", "玻璃陶瓷"],
+  ["9", "造紙工業"],
+  ["10", "鋼鐵工業"],
+  ["11", "橡膠工業"],
+  ["12", "汽車工業"],
+  ["14", "建材營造"],
+  ["15", "航運業"],
+  ["16", "觀光事業"],
+  ["17", "金融保險"],
+  ["18", "貿易百貨"],
+  ["20", "其他"],
+  ["21", "化學工業"],
+  ["22", "生技醫療業"],
+  ["23", "油電燃氣業"],
+  ["24", "半導體業"],
+  ["25", "電腦及週邊設備業"],
+  ["26", "光電業"],
+  ["27", "通信網路業"],
+  ["28", "電子零組件業"],
+  ["29", "電子通路業"],
+  ["30", "資訊服務業"],
+  ["31", "其他電子業"],
+  ["32", "文化創意業"],
+  ["33", "農業科技業"],
+  ["34", "電子商務"],
+  ["35", "綠能環保"],
+  ["36", "數位雲端"],
+  ["37", "運動休閒"],
+  ["38", "居家生活"],
+]);
+
+function normalizeIndustryCodeText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text.replace(/^0+/, "") || "0";
+}
+
+function normalizeIndustryName(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-" || text === "未分類") return text || "未分類";
+
+  if (/^\d+$/.test(text)) {
+    const normalizedCode = normalizeIndustryCodeText(text);
+    const mapped = TWSE_INDUSTRY_CODE_NAME_MAP.get(text) || TWSE_INDUSTRY_CODE_NAME_MAP.get(normalizedCode);
+    if (mapped) return mapped;
+
+    if (text.length >= 4 && text.length % 2 === 0) {
+      const names = [];
+      for (let index = 0; index < text.length; index += 2) {
+        const code = normalizeIndustryCodeText(text.slice(index, index + 2));
+        const name = TWSE_INDUSTRY_CODE_NAME_MAP.get(code);
+        if (!name) return text;
+        names.push(name);
+      }
+      return names.join("、");
+    }
+  }
+
+  return text;
+}
+
+function normalizeIndustryFlowRows(rows = [], limit = 5) {
+  const grouped = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rawIndustry = String(row.industry || row.raw_industry || "").trim();
+    const industry = normalizeIndustryName(rawIndustry);
+    const key = industry || "未分類";
+    const stockCount = Number(row.stock_count || 0);
+    const netBuyStockCount = Number(row.net_buy_stock_count || 0);
+    const totalNetLots = Number(row.total_net_lots || 0);
+    const avgChipScore = Number(row.avg_chip_score);
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        industry: key,
+        industry_code: /^\d+$/.test(rawIndustry) ? rawIndustry : null,
+        stock_count: 0,
+        net_buy_stock_count: 0,
+        total_net_lots: 0,
+        chip_score_weight: 0,
+        chip_score_weight_count: 0,
+      });
+    }
+
+    const item = grouped.get(key);
+    item.stock_count += stockCount;
+    item.net_buy_stock_count += netBuyStockCount;
+    item.total_net_lots += totalNetLots;
+
+    if (Number.isFinite(avgChipScore) && stockCount > 0) {
+      item.chip_score_weight += avgChipScore * stockCount;
+      item.chip_score_weight_count += stockCount;
+    }
+  }
+
+  return [...grouped.values()]
+    .map((item) => ({
+      industry: item.industry,
+      industry_code: item.industry_code,
+      stock_count: item.stock_count,
+      net_buy_stock_count: item.net_buy_stock_count,
+      total_net_lots: String(Math.round(item.total_net_lots)),
+      avg_chip_score: item.chip_score_weight_count > 0
+        ? Number((item.chip_score_weight / item.chip_score_weight_count).toFixed(2))
+        : null,
+    }))
+    .sort((a, b) => {
+      const netDiff = Number(b.total_net_lots || 0) - Number(a.total_net_lots || 0);
+      if (netDiff !== 0) return netDiff;
+      const chipDiff = Number(b.avg_chip_score || 0) - Number(a.avg_chip_score || 0);
+      if (chipDiff !== 0) return chipDiff;
+      return String(a.industry || "").localeCompare(String(b.industry || ""), "zh-Hant");
+    })
+    .slice(0, Number(limit) || 5);
+}
+
 async function getLatestReportTradeDate(market = null, queryDate = null) {
   const marketCondition = market ? "AND s.market_type = ?" : "";
   const params = queryDate ? [queryDate] : [];
@@ -650,7 +776,7 @@ function mapDailyReportSignal(row) {
     stock_code: row.stock_code,
     stock_name: row.stock_name,
     market_type: row.market_type,
-    industry: row.industry || "-",
+    industry: normalizeIndustryName(row.industry || "-"),
     close_price: row.close_price,
     price_change: row.price_change,
     chip_score: row.chip_score,
@@ -821,7 +947,7 @@ async function queryDailyReportIndustryFlows(tradeDate, market, limit = 5) {
   const params = [tradeDate];
   if (market) params.push(market);
 
-  return safeQuery(
+  const rows = await safeQuery(
     `
     SELECT
       COALESCE(NULLIF(s.industry, ''), '未分類') AS industry,
@@ -837,11 +963,12 @@ async function queryDailyReportIndustryFlows(tradeDate, market, limit = 5) {
       AND COALESCE(NULLIF(s.industry, ''), '未分類') <> '未分類'
     GROUP BY COALESCE(NULLIF(s.industry, ''), '未分類')
     ORDER BY SUM(COALESCE(i.total_net, 0)) DESC, AVG(c.chip_score) DESC
-    LIMIT ?
     `,
-    [...params, limit],
+    params,
     [],
   );
+
+  return normalizeIndustryFlowRows(rows, limit);
 }
 
 async function queryDailyReportMarketSummary(tradeDate, market) {
@@ -1137,8 +1264,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.4";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v58";
+const API_VERSION = "stock-radar-api-v1.4.8.5";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v59";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1192,23 +1319,23 @@ const V14_MODULES = [
   {
     key: "line_notification_delivery",
     name: "LINE 通知外送",
-    progress: 85,
-    status: "enhanced",
+    progress: 100,
+    status: "completed",
     required_tables: ["notification_channels", "notification_send_logs", "notification_line_bindings"],
     required_apis: ["GET /notification/channels", "POST /notification/channels/:channelId/test", "POST /notification/line-bindings", "POST /line/webhook"],
   },
   {
     key: "daily_strategy_report",
     name: "每日策略報告",
-    progress: 85,
-    status: "enhanced",
+    progress: 100,
+    status: "completed",
     required_tables: ["daily_prices", "institutional_trades", "chip_scores"],
     required_apis: ["GET /strategy-daily-report", "POST /strategy-daily-report/send-line", "GET /strategy-optimization/backtest-comparison"],
   },
   {
     key: "strategy_win_rate_trend",
     name: "策略勝率趨勢",
-    progress: 80,
+    progress: 85,
     status: "enhanced",
     required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
     required_apis: ["GET /strategy-backtests/trends"],
@@ -1216,8 +1343,8 @@ const V14_MODULES = [
   {
     key: "stock_strategy_history",
     name: "個股策略歷史紀錄",
-    progress: 75,
-    status: "first_version",
+    progress: 85,
+    status: "enhanced",
     required_tables: ["strategy_backtest_runs", "strategy_backtest_results", "stocks"],
     required_apis: ["GET /strategy-backtests/stock-history"],
   },
@@ -1234,8 +1361,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.4",
-      "service-worker.js 快取版本為 stock-radar-pwa-v58",
+      "GET /health 回傳 stock-radar-api-v1.4.8.5",
+      "service-worker.js 快取版本為 stock-radar-pwa-v59",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -3127,7 +3254,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.4" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v58" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.5" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v59" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -3238,7 +3365,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.4。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.5。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",

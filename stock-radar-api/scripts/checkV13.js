@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.4";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v58";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.5";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v59";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4.8.4", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v58", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v58", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4.8.5", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v59", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v59", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -281,6 +281,10 @@ async function main() {
   checks.push(createCheck("V1.4.8.4 LINE", "LINE Webhook 簽章驗證", serverSource.includes("LINE_CHANNEL_SECRET") && serverSource.includes("verifyLineWebhookSignature"), "LINE_CHANNEL_SECRET"));
   checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定前端卡片", appSource.includes("renderLineBindingCard") && appSource.includes("data-line-binding-create"), "binding card"));
   checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定樣式", styleSource.includes(".line-binding-card") && styleSource.includes(".line-binding-status-grid"), "binding css"));
+
+  checks.push(createCheck("V1.4.8.5 封版", "每日報告產業代碼轉中文函式", serverSource.includes("TWSE_INDUSTRY_CODE_NAME_MAP") && serverSource.includes("normalizeIndustryName"), "industry code mapping"));
+  checks.push(createCheck("V1.4.8.5 封版", "每日報告產業流向套用中文名稱", serverSource.includes("normalizeIndustryFlowRows") && serverSource.includes("return normalizeIndustryFlowRows(rows, limit)"), "daily report industry names"));
+  checks.push(createCheck("V1.4.8.5 封版", "V1.4 最終版本", serverSource.includes("stock-radar-api-v1.4.8.5") && serviceWorkerSource.includes("stock-radar-pwa-v59"), "v1.4.8.5 / pwa-v59"));
 
   if (apiBaseUrl) {
     const health = await fetchJson(`${apiBaseUrl}/health`).catch((error) => ({ ok: false, status: 0, error: error.message }));
