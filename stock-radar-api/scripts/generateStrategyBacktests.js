@@ -16,6 +16,153 @@ const STRATEGIES = [
   { key: "short_term_strong", name: "短線強勢股" },
 ];
 
+const DEFAULT_STRATEGY_OPTIMIZATION_PRESETS = [
+  {
+    key: "balanced",
+    name: "平衡參數",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 70,
+      min_legal_score: 20,
+      min_volume_score: 12,
+      min_price_score: 8,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 30,
+    },
+  },
+  {
+    key: "conservative",
+    name: "保守參數",
+    params: {
+      min_strategy_score: 100,
+      min_chip_score: 80,
+      min_legal_score: 30,
+      min_volume_score: 15,
+      min_price_score: 10,
+      min_total_net_lots: 500,
+      min_large_holder_ratio_change: 0.5,
+      event_window_days: 14,
+    },
+  },
+  {
+    key: "aggressive",
+    name: "積極參數",
+    params: {
+      min_strategy_score: 0,
+      min_chip_score: 60,
+      min_legal_score: 10,
+      min_volume_score: 8,
+      min_price_score: 5,
+      min_total_net_lots: 1,
+      min_large_holder_ratio_change: 0,
+      event_window_days: 45,
+    },
+  },
+];
+
+const STRATEGY_OPTIMIZATION_FIELDS = [
+  { key: "min_strategy_score", min: 0, max: 300 },
+  { key: "min_chip_score", min: 0, max: 100 },
+  { key: "min_legal_score", min: 0, max: 80 },
+  { key: "min_volume_score", min: 0, max: 50 },
+  { key: "min_price_score", min: 0, max: 50 },
+  { key: "min_total_net_lots", min: 0, max: 50000 },
+  { key: "min_large_holder_ratio_change", min: -10, max: 20 },
+  { key: "event_window_days", min: 1, max: 90 },
+];
+
+function getStrategyOptimizationPreset(key) {
+  const presetKey = String(key || "balanced").trim();
+  return DEFAULT_STRATEGY_OPTIMIZATION_PRESETS.find((item) => item.key === presetKey) || DEFAULT_STRATEGY_OPTIMIZATION_PRESETS[0];
+}
+
+function parseOptimizationNumber(value, fallback, min, max, decimals = 4) {
+  const result = Number(value);
+  if (!Number.isFinite(result)) return fallback;
+  return Number(Math.max(min, Math.min(result, max)).toFixed(decimals));
+}
+
+function parseStrategyOptimizationParamsFromArgs(args) {
+  const preset = getStrategyOptimizationPreset(getArgValue(args, "preset") || getArgValue(args, "optimization-preset"));
+  const params = { ...preset.params };
+
+  for (const field of STRATEGY_OPTIMIZATION_FIELDS) {
+    const argValue = getArgValue(args, field.key);
+    if (argValue !== "") {
+      params[field.key] = parseOptimizationNumber(argValue, params[field.key], field.min, field.max);
+    }
+  }
+
+  return {
+    preset_key: preset.key,
+    preset_name: preset.name,
+    params,
+  };
+}
+
+function readStrategyNumber(row, keys) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      const result = Number(String(value).replaceAll(",", ""));
+      if (Number.isFinite(result)) return result;
+    }
+  }
+  return null;
+}
+
+function passMinimum(value, minimum) {
+  if (minimum === null || minimum === undefined || Number(minimum) <= 0) return true;
+  if (value === null || value === undefined) return false;
+  return Number(value) >= Number(minimum);
+}
+
+function applyStrategyOptimizationParams(rows, strategyKey, optimization) {
+  const params = optimization?.params || {};
+
+  return rows.filter((row) => {
+    const strategyScore = readStrategyNumber(row, ["strategy_score", "chip_score", "major_holder_score"]);
+    if (!passMinimum(strategyScore, params.min_strategy_score)) return false;
+
+    if (["legal_strength", "short_term_strong", "volume_price_breakout", "capital_inflow"].includes(strategyKey)) {
+      const chipScore = readStrategyNumber(row, ["chip_score"]);
+      if (!passMinimum(chipScore, params.min_chip_score)) return false;
+    }
+
+    if (strategyKey === "legal_strength") {
+      const legalScore = (readStrategyNumber(row, ["foreign_score"]) || 0) + (readStrategyNumber(row, ["investment_trust_score"]) || 0);
+      if (!passMinimum(legalScore, params.min_legal_score)) return false;
+      const totalNetLots = readStrategyNumber(row, ["total_net_lots"]);
+      if (Number(params.min_total_net_lots || 0) > 1 && !passMinimum(totalNetLots, params.min_total_net_lots)) return false;
+    }
+
+    if (["volume_price_breakout", "short_term_strong"].includes(strategyKey)) {
+      const volumeScore = readStrategyNumber(row, ["volume_score"]);
+      const priceScore = readStrategyNumber(row, ["price_score"]);
+      if (!passMinimum(volumeScore, params.min_volume_score)) return false;
+      if (!passMinimum(priceScore, params.min_price_score)) return false;
+    }
+
+    if (strategyKey === "capital_inflow") {
+      const totalNetLots = readStrategyNumber(row, ["total_net_lots"]);
+      if (!passMinimum(totalNetLots, params.min_total_net_lots)) return false;
+    }
+
+    if (strategyKey === "major_holder_accumulate") {
+      const ratioChange = readStrategyNumber(row, ["large_holder_ratio_change"]);
+      if (!passMinimum(ratioChange, params.min_large_holder_ratio_change)) return false;
+    }
+
+    if (strategyKey === "etf_calendar_watch") {
+      const daysLeft = readStrategyNumber(row, ["days_left"]);
+      if (!passMinimum(params.event_window_days, daysLeft)) return false;
+    }
+
+    return true;
+  });
+}
+
 function getTaiwanToday() {
   return new Intl.DateTimeFormat("sv-SE", {
     timeZone: "Asia/Taipei",
@@ -92,15 +239,22 @@ function hasFlag(args, name) {
 function parseArgs(argv) {
   const positional = argv.filter((arg) => !arg.startsWith("--"));
   const today = getTaiwanToday();
+  const optimization = parseStrategyOptimizationParamsFromArgs(argv);
+
+  const startDateArg = positional[0] || getArgValue(argv, "start-date");
+  const endDateArg = positional[1] || getArgValue(argv, "end-date");
 
   return {
-    startDate: positional[0] ? normalizeDate(positional[0], "開始日期") : "",
-    endDate: positional[1] ? normalizeDate(positional[1], "結束日期") : today,
+    startDate: startDateArg ? normalizeDate(startDateArg, "開始日期") : "",
+    endDate: endDateArg ? normalizeDate(endDateArg, "結束日期") : today,
     strategy: normalizeStrategy(getArgValue(argv, "strategy")),
     market: normalizeMarket(getArgValue(argv, "market")),
     limitPerStrategy: parsePositiveInteger(getArgValue(argv, "limit"), 30, 1, 100),
     maxTradingDays: parsePositiveInteger(getArgValue(argv, "max-days"), 80, 1, 260),
     runName: String(getArgValue(argv, "name") || "").trim().slice(0, 120),
+    optimizationPreset: optimization.preset_key,
+    optimizationPresetName: optimization.preset_name,
+    optimization,
     force: hasFlag(argv, "force"),
   };
 }
@@ -157,7 +311,7 @@ function buildMarketCondition(alias, market, params) {
   return `AND ${alias}.market_type = ?`;
 }
 
-async function getStrategyCandidates(conn, strategyKey, signalDate, market, limit) {
+async function getStrategyCandidates(conn, strategyKey, signalDate, market, limit, optimization = null) {
   const strategy = STRATEGIES.find((item) => item.key === strategyKey);
 
   if (!strategy) return [];
@@ -177,6 +331,10 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         s.industry,
         ? AS strategy_key,
         ? AS strategy_name,
+        c.chip_score,
+        c.foreign_score,
+        c.investment_trust_score,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
         (COALESCE(c.foreign_score, 0) + COALESCE(c.investment_trust_score, 0) + COALESCE(c.chip_score, 0)) AS strategy_score,
         CONCAT(c.foreign_status, '，', c.investment_trust_status) AS trigger_summary
       FROM chip_scores c
@@ -221,6 +379,8 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         ? AS strategy_key,
         ? AS strategy_name,
         ROUND(m.large_holder_ratio - COALESCE(prev.large_holder_ratio, m.large_holder_ratio), 4) AS large_holder_ratio_change,
+        c.chip_score,
+        c.big_holder_score,
         (
           COALESCE(c.chip_score, 0)
           + GREATEST(ROUND((m.large_holder_ratio - COALESCE(prev.large_holder_ratio, m.large_holder_ratio)) * 20, 4), 0)
@@ -271,6 +431,9 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         s.industry,
         ? AS strategy_key,
         ? AS strategy_name,
+        c.chip_score,
+        c.volume_score,
+        c.price_score,
         (COALESCE(c.volume_score, 0) + COALESCE(c.price_score, 0) + COALESCE(c.chip_score, 0)) AS strategy_score,
         CONCAT(c.volume_status, '，', c.price_position) AS trigger_summary
       FROM chip_scores c
@@ -303,6 +466,8 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         s.industry,
         ? AS strategy_key,
         ? AS strategy_name,
+        c.chip_score,
+        CAST(ROUND(COALESCE(i.total_net, 0) / 1000, 0) AS CHAR) AS total_net_lots,
         (COALESCE(i.total_net, 0) / 1000 + COALESCE(c.chip_score, 0)) AS strategy_score,
         CONCAT('三大法人合計買超 ', ROUND(i.total_net / 1000, 0), ' 張') AS trigger_summary
       FROM institutional_trades i
@@ -320,6 +485,7 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
   }
 
   if (strategyKey === "etf_calendar_watch") {
+    const eventWindowDays = parsePositiveInteger(optimization?.params?.event_window_days, 30, 1, 90);
     const params = [];
     const marketSql = market ? "AND ep.market_type = ?" : "";
     if (market) params.push(market);
@@ -335,19 +501,20 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         'ETF' AS industry,
         ? AS strategy_key,
         ? AS strategy_name,
+        DATEDIFF(e.event_date, ?) AS days_left,
         (CASE WHEN e.importance = 'high' THEN 100 ELSE 70 END - LEAST(GREATEST(DATEDIFF(e.event_date, ?), 0), 30)) AS strategy_score,
         CONCAT(DATEDIFF(e.event_date, ?), ' 天後：', e.event_type) AS trigger_summary
       FROM stock_calendar_events e
       INNER JOIN etf_profiles ep ON ep.stock_code = e.stock_code
       WHERE e.is_active = 1
         AND e.event_date >= ?
-        AND e.event_date <= DATE_ADD(?, INTERVAL 30 DAY)
+        AND e.event_date <= DATE_ADD(?, INTERVAL ? DAY)
         ${marketSql}
         AND (e.event_type LIKE '%除息%' OR e.event_type LIKE '%收益%' OR e.event_type LIKE '%股利%' OR e.importance = 'high')
       ORDER BY e.event_date ASC, strategy_score DESC, e.stock_code ASC
       LIMIT ?
       `,
-      [signalDate, strategy.key, strategy.name, signalDate, signalDate, signalDate, signalDate, ...params],
+      [signalDate, strategy.key, strategy.name, signalDate, signalDate, signalDate, signalDate, signalDate, eventWindowDays, ...params],
     );
   }
 
@@ -366,6 +533,9 @@ async function getStrategyCandidates(conn, strategyKey, signalDate, market, limi
         s.industry,
         ? AS strategy_key,
         ? AS strategy_name,
+        c.chip_score,
+        c.volume_score,
+        c.price_score,
         (COALESCE(c.chip_score, 0) + COALESCE(c.volume_score, 0) + COALESCE(c.price_score, 0)) AS strategy_score,
         CONCAT('籌碼 ', c.chip_score, ' 分，', c.volume_status, '，', c.price_position) AS trigger_summary
       FROM chip_scores c
@@ -694,7 +864,8 @@ function buildSummary(results) {
 }
 
 async function createRun(conn, options, startDate, endDate, tradingDaysCount) {
-  const runName = options.runName || `V1.3 策略回測 ${startDate} ~ ${endDate}`;
+  const presetName = options.optimization?.preset_name || options.optimizationPresetName || "平衡參數";
+  const runName = options.runName || `V1.4-3 ${presetName} 策略回測 ${startDate} ~ ${endDate}`;
   const result = await conn.query(
     `
     INSERT INTO strategy_backtest_runs (
@@ -803,19 +974,23 @@ async function generateStrategyBacktests(options) {
     runId = await createRun(conn, options, tradingDates[0], tradingDates[tradingDates.length - 1], tradingDates.length);
 
     console.log("====================================");
-    console.log("開始產生 V1.3-3-1 策略回測");
+    console.log("開始產生 V1.4-3 策略回測條件調整");
     console.log(`Run ID：${runId}`);
     console.log(`期間：${tradingDates[0]} ~ ${tradingDates[tradingDates.length - 1]}`);
     console.log(`交易日數：${tradingDates.length}`);
     console.log(`策略：${enabledStrategies.map((item) => item.name).join("、")}`);
     console.log(`每策略每日上限：${options.limitPerStrategy}`);
+    console.log(`參數預設：${options.optimization?.preset_name || "平衡參數"} (${options.optimization?.preset_key || "balanced"})`);
+    console.log(`參數內容：${JSON.stringify(options.optimization?.params || {})}`);
     console.log("====================================");
 
     const allResults = [];
 
     for (const signalDate of tradingDates) {
       for (const strategy of enabledStrategies) {
-        const candidates = await getStrategyCandidates(conn, strategy.key, signalDate, options.market, options.limitPerStrategy);
+        const fetchLimit = Math.min(Math.max(options.limitPerStrategy * 5, options.limitPerStrategy), 300);
+        const rawCandidates = await getStrategyCandidates(conn, strategy.key, signalDate, options.market, fetchLimit, options.optimization);
+        const candidates = applyStrategyOptimizationParams(rawCandidates, strategy.key, options.optimization).slice(0, options.limitPerStrategy);
         let rank = 1;
 
         for (const candidate of candidates) {

@@ -65,6 +65,14 @@ const state = {
   strategyBacktestRuns: [],
   strategyBacktestSummary: null,
   strategyBacktestRankings: null,
+  strategyBacktestConditionPresetKey: "balanced",
+  strategyBacktestConditionStrategy: "",
+  strategyBacktestConditionMarket: "",
+  strategyBacktestConditionStartDate: "",
+  strategyBacktestConditionEndDate: "",
+  strategyBacktestConditionLimit: 30,
+  strategyBacktestConditionMaxDays: 80,
+  strategyBacktestConditionParams: {},
   v13Status: null,
   v13StatusLoading: false,
   v13StatusError: "",
@@ -1406,8 +1414,8 @@ function updatePageText() {
   if (state.page === "strategyBacktests") {
     const metric = getBacktestMetric();
     pageTitle.textContent = "策略回測";
-    pageDesc.textContent = `用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
-    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看 5 日平均報酬與勝率，再看樣本數；回測只是歷史統計，不代表未來一定重演。</span>`;
+    pageDesc.textContent = `調整回測條件，並用歷史資料檢查策略訊號後續 ${metric.label}、勝率與最佳 / 最弱股票。`;
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>可以先產生保守 / 平衡 / 積極三個 Run ID，再比較 5 日平均報酬、勝率與樣本數。</span>`;
     return;
   }
 
@@ -4984,6 +4992,167 @@ async function searchStock(codeFromButton = "") {
 }
 
 
+
+function parseJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getBacktestConditionPreset(key = state.strategyBacktestConditionPresetKey) {
+  return getStrategyOptimizationPresets().find((item) => item.key === key) || getStrategyOptimizationPreset("balanced");
+}
+
+function getBacktestConditionParams() {
+  const preset = getBacktestConditionPreset();
+  return {
+    ...(preset?.params || {}),
+    ...(state.strategyBacktestConditionParams || {}),
+  };
+}
+
+function getBacktestRunParams(run = null) {
+  const selectedRun = run || getBacktestRunOptions().find((item) => String(item.id) === String(state.strategyBacktestRunId)) || state.strategyBacktestSummary?.run || null;
+  return parseJsonObject(selectedRun?.params_json);
+}
+
+function getBacktestRunPresetText(run = null) {
+  const params = getBacktestRunParams(run);
+  const optimization = params.optimization || {};
+  return optimization.preset_name || params.optimizationPresetName || params.optimizationPreset || params.optimizationPresetKey || "未標示";
+}
+
+function buildStrategyBacktestGenerateCommand() {
+  const parts = ["npm", "run", "strategy-backtests:generate", "--"];
+  const startDate = String(state.strategyBacktestConditionStartDate || "").trim();
+  const endDate = String(state.strategyBacktestConditionEndDate || "").trim();
+  const preset = getBacktestConditionPreset();
+  const params = getBacktestConditionParams();
+
+  if (startDate) parts.push(`--start-date=${startDate}`);
+  if (endDate) parts.push(`--end-date=${endDate}`);
+
+  parts.push(`--preset=${preset.key}`);
+  if (state.strategyBacktestConditionStrategy) parts.push(`--strategy=${state.strategyBacktestConditionStrategy}`);
+  if (state.strategyBacktestConditionMarket) parts.push(`--market=${state.strategyBacktestConditionMarket}`);
+  parts.push(`--limit=${Number(state.strategyBacktestConditionLimit || 30)}`);
+  parts.push(`--max-days=${Number(state.strategyBacktestConditionMaxDays || 80)}`);
+
+  for (const field of getStrategyOptimizationFields()) {
+    const presetValue = preset.params?.[field.key];
+    const value = params[field.key];
+    if (value !== undefined && value !== null && value !== "" && Number(value) !== Number(presetValue)) {
+      parts.push(`--${field.key}=${value}`);
+    }
+  }
+
+  return parts.filter((item) => item !== "").join(" ");
+}
+
+function renderStrategyBacktestConditionPresetButtons() {
+  return `
+    <div class="strategy-optimization-preset-grid backtest-condition-preset-grid">
+      ${getStrategyOptimizationPresets().map((preset) => `
+        <button class="strategy-optimization-preset ${preset.key === state.strategyBacktestConditionPresetKey ? "active" : ""}" type="button" data-strategy-backtest-preset="${escapeHtml(preset.key)}">
+          <span>${escapeHtml(preset.badge || "預設")}</span>
+          <strong>${escapeHtml(preset.name)}</strong>
+          <small>${escapeHtml(preset.description || "套用此組回測條件。")}</small>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStrategyBacktestConditionPanel() {
+  const params = getBacktestConditionParams();
+  const command = buildStrategyBacktestGenerateCommand();
+
+  return `
+    <section class="strategy-dashboard-card strategy-backtest-condition-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-3 回測條件調整</p>
+          <h3>產生不同參數的回測 Run ID</h3>
+          <p>選好日期、策略、市場與參數預設後，複製下方指令到本機 API 專案執行，再回到此頁選新的 Run ID 比較。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>目前預設：${escapeHtml(getBacktestConditionPreset().name)}</span>
+          <span>執行位置：stock-radar-api</span>
+        </div>
+      </div>
+
+      ${renderStrategyBacktestConditionPresetButtons()}
+
+      <form class="strategy-optimization-form backtest-condition-form" data-strategy-backtest-condition-form>
+        <label class="filter-field">
+          <span>開始日期</span>
+          <input name="start_date" type="date" value="${escapeHtml(state.strategyBacktestConditionStartDate)}" />
+        </label>
+        <label class="filter-field">
+          <span>結束日期</span>
+          <input name="end_date" type="date" value="${escapeHtml(state.strategyBacktestConditionEndDate)}" />
+        </label>
+        <label class="filter-field">
+          <span>策略</span>
+          <select name="strategy">
+            <option value="">全部策略</option>
+            ${getStrategyOptions().map((item) => `
+              <option value="${escapeHtml(item.key)}" ${item.key === state.strategyBacktestConditionStrategy ? "selected" : ""}>${escapeHtml(item.name)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>市場</span>
+          <select name="market">
+            <option value="">全部市場</option>
+            <option value="上市" ${state.strategyBacktestConditionMarket === "上市" ? "selected" : ""}>上市</option>
+            <option value="上櫃" ${state.strategyBacktestConditionMarket === "上櫃" ? "selected" : ""}>上櫃</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>每日每策略上限</span>
+          <input name="limit" type="number" min="1" max="100" step="1" value="${escapeHtml(state.strategyBacktestConditionLimit)}" />
+        </label>
+        <label class="filter-field">
+          <span>最多交易日</span>
+          <input name="max_days" type="number" min="1" max="260" step="1" value="${escapeHtml(state.strategyBacktestConditionMaxDays)}" />
+        </label>
+
+        <div class="strategy-optimization-param-grid compact-param-grid">
+          ${getStrategyOptimizationFields().map((field) => `
+            <label class="filter-field">
+              <span>${escapeHtml(field.label)}${field.unit ? `（${escapeHtml(field.unit)}）` : ""}</span>
+              <input
+                name="${escapeHtml(field.key)}"
+                type="number"
+                min="${escapeHtml(field.min ?? 0)}"
+                max="${escapeHtml(field.max ?? 999999)}"
+                step="${escapeHtml(field.step ?? 1)}"
+                value="${escapeHtml(params[field.key] ?? "")}" />
+            </label>
+          `).join("")}
+        </div>
+
+        <div class="strategy-track-filter-actions">
+          <button class="search-btn" type="submit">更新回測指令</button>
+          <button class="ghost-btn" type="button" data-copy-backtest-command>複製指令</button>
+        </div>
+      </form>
+
+      <div class="backtest-command-box">
+        <span>本機執行指令</span>
+        <code>${escapeHtml(command)}</code>
+        <small>請先切到 <strong>D:\\code\\stock-radar\\stock-radar-api</strong> 再執行。日期留空時，腳本會用最新日期並依最多交易日自動回推。</small>
+      </div>
+    </section>
+  `;
+}
+
 function buildStrategyBacktestQueryString() {
   const params = new URLSearchParams();
   const runId = String(state.strategyBacktestRunId || "").trim();
@@ -5007,7 +5176,7 @@ function renderStrategyBacktestFilters() {
     <section class="strategy-track-filter-panel strategy-backtest-filter-panel">
       <div class="strategy-filter-title">
         <div>
-          <p class="section-kicker">V1.3-3 策略回測</p>
+          <p class="section-kicker">V1.4-3 策略回測</p>
           <h3>回測條件</h3>
           <p>選擇 Run ID、策略、結果與排序方式，檢查歷史策略訊號後續表現。</p>
         </div>
@@ -5018,7 +5187,7 @@ function renderStrategyBacktestFilters() {
           <select name="run_id">
             ${getBacktestRunOptions().map((run) => `
               <option value="${escapeHtml(run.id)}" ${String(run.id) === String(state.strategyBacktestRunId) ? "selected" : ""}>
-                Run ${escapeHtml(run.id)}｜${formatDate(run.start_date)} ~ ${formatDate(run.end_date)}｜${formatNumber(run.signal_count)} 筆
+                Run ${escapeHtml(run.id)}｜${escapeHtml(getBacktestRunPresetText(run))}｜${formatDate(run.start_date)} ~ ${formatDate(run.end_date)}｜${formatNumber(run.signal_count)} 筆
               </option>
             `).join("")}
           </select>
@@ -5084,6 +5253,11 @@ function renderStrategyBacktestSummary() {
   const metricWinField = metric.key === "1d" ? "win_rate_1d" : metric.key === "3d" ? "win_rate_3d" : metric.key === "latest" ? "win_rate_5d" : "win_rate_5d";
   const rankings = state.strategyBacktestRankings?.data || state.strategyBacktestRankings || {};
   const rankingSummary = rankings.summary || {};
+  const runParams = getBacktestRunParams(run);
+  const optimization = runParams.optimization || {};
+  const presetText = optimization.preset_name || runParams.optimizationPresetName || "未標示";
+  const minChipScore = optimization.params?.min_chip_score ?? "-";
+  const minStrategyScore = optimization.params?.min_strategy_score ?? "-";
 
   return `
     <section class="strategy-tracking-summary strategy-backtest-summary">
@@ -5101,6 +5275,8 @@ function renderStrategyBacktestSummary() {
         <article><span>${escapeHtml(metric.label)}平均</span><strong class="${getReturnClass(rankingSummary.avg_return || run[metricAvgField])}">${formatReturnPercent(rankingSummary.avg_return || run[metricAvgField])}</strong></article>
         <article><span>5 日勝率</span><strong>${formatPercent(run.win_rate_5d)}</strong></article>
         <article><span>成功 / 失敗</span><strong>${formatNumber(run.success_count)} / ${formatNumber(run.fail_count)}</strong></article>
+        <article><span>參數預設</span><strong>${escapeHtml(presetText)}</strong></article>
+        <article><span>最低策略 / 籌碼</span><strong>${escapeHtml(minStrategyScore)} / ${escapeHtml(minChipScore)}</strong></article>
         <article><span>待資料</span><strong>${formatNumber(run.pending_count)}</strong></article>
       </div>
       ${strategies.length ? `
@@ -5303,7 +5479,7 @@ function renderStrategyBacktestRankingPanel() {
     <section class="strategy-ranking-section strategy-backtest-ranking-section enhanced-backtest-ranking-section">
       <div class="strategy-ranking-header">
         <div>
-          <p class="section-kicker">V1.3-3-4 排行榜</p>
+          <p class="section-kicker">V1.4-3 排行榜</p>
           <h3>回測排行榜強化</h3>
           <p>依 ${escapeHtml(metric.label)} 檢查最佳股票、最弱股票與各策略平均表現。</p>
         </div>
@@ -5420,6 +5596,7 @@ function renderStrategyBacktestEmpty() {
   ], "目前沒有符合條件的回測資料，可以清除篩選或重新產生回測結果。");
   setResultHeader({ title: "策略回測清單", desc: "目前沒有符合條件的回測資料。", badge: "空清單", countText: "0 筆" });
   stockList.innerHTML = `
+    ${renderStrategyBacktestConditionPanel()}
     ${renderStrategyBacktestFilters()}
     <article class="search-intro-card">
       <div class="intro-icon">📊</div>
@@ -5447,6 +5624,7 @@ function renderStrategyBacktestPage() {
     { label: "目前搜尋", value: hasSearch ? state.strategyBacktestSearch : "未搜尋" },
     { label: "結果筆數", value: `${formatNumber(totalCount)} 筆` },
     { label: "績效指標", value: getBacktestMetric().label },
+    { label: "參數預設", value: getBacktestRunPresetText() },
     { label: "排行榜", value: "不受搜尋影響" },
   ], hasSearch ? "搜尋後會優先顯示回測結果清單，排行榜仍維持整個 Run 的統計。" : "先看排行榜與總覽，再往下看回測結果清單。");
   setResultHeader({ title: hasSearch ? `搜尋結果：${state.strategyBacktestSearch}` : "策略回測清單", desc: hasSearch ? `共找到 ${formatNumber(totalCount)} 筆回測訊號。` : "顯示歷史策略訊號與後續績效。", badge: hasSearch ? "搜尋結果" : "回測", countText: `${formatNumber(totalCount)} 筆` });
@@ -5455,11 +5633,59 @@ function renderStrategyBacktestPage() {
   const rankingPanel = renderStrategyBacktestRankingPanel();
 
   stockList.innerHTML = `
+    ${renderStrategyBacktestConditionPanel()}
     ${renderStrategyBacktestFilters()}
     ${renderStrategyBacktestSummary()}
     ${hasSearch ? resultsSection : rankingPanel}
     ${hasSearch ? rankingPanel : resultsSection}
   `;
+}
+
+
+function handleStrategyBacktestConditionSubmit(form) {
+  const formData = new FormData(form);
+  const strategy = String(formData.get("strategy") || "").trim();
+  const market = String(formData.get("market") || "").trim();
+  const limit = Number.parseInt(String(formData.get("limit") || "30"), 10);
+  const maxDays = Number.parseInt(String(formData.get("max_days") || "80"), 10);
+  const nextParams = {};
+
+  state.strategyBacktestConditionStartDate = String(formData.get("start_date") || "").trim();
+  state.strategyBacktestConditionEndDate = String(formData.get("end_date") || "").trim();
+  state.strategyBacktestConditionStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
+  state.strategyBacktestConditionMarket = ["上市", "上櫃"].includes(market) ? market : "";
+  state.strategyBacktestConditionLimit = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 100)) : 30;
+  state.strategyBacktestConditionMaxDays = Number.isFinite(maxDays) ? Math.max(1, Math.min(maxDays, 260)) : 80;
+
+  for (const field of getStrategyOptimizationFields()) {
+    const value = formData.get(field.key);
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      const numberValue = Number(value);
+      if (Number.isFinite(numberValue)) nextParams[field.key] = numberValue;
+    }
+  }
+
+  state.strategyBacktestConditionParams = nextParams;
+  renderStrategyBacktestPage();
+  showTemporaryStatus("已更新回測產生指令。", "success");
+}
+
+function handleStrategyBacktestPreset(button) {
+  const key = button.dataset.strategyBacktestPreset;
+  const preset = getBacktestConditionPreset(key);
+  state.strategyBacktestConditionPresetKey = preset.key;
+  state.strategyBacktestConditionParams = { ...(preset.params || {}) };
+  renderStrategyBacktestPage();
+}
+
+async function copyStrategyBacktestCommand() {
+  const command = buildStrategyBacktestGenerateCommand();
+  try {
+    await navigator.clipboard.writeText(command);
+    showTemporaryStatus("已複製回測產生指令。", "success");
+  } catch {
+    showTemporaryStatus("瀏覽器無法自動複製，請手動選取指令。", "error");
+  }
 }
 
 function handleStrategyBacktestFilterSubmit(form) {
@@ -5507,6 +5733,13 @@ async function loadStrategyBacktests(options = {}) {
   renderLoadingCards();
 
   try {
+    if (!state.strategyOptimizationPresets.length || !state.strategyOptimizationFields.length || !state.strategyOptions.length) {
+      const presetResponse = await fetchJson(`/strategy-optimization/presets?preset=${encodeURIComponent(state.strategyBacktestConditionPresetKey || "balanced")}`, { method: "GET", raw: true });
+      state.strategyOptimizationPresets = Array.isArray(presetResponse.presets) ? presetResponse.presets : DEFAULT_STRATEGY_OPTIMIZATION_PRESETS;
+      state.strategyOptimizationFields = Array.isArray(presetResponse.fields) ? presetResponse.fields : DEFAULT_STRATEGY_OPTIMIZATION_FIELDS;
+      state.strategyOptions = Array.isArray(presetResponse.strategies) ? presetResponse.strategies : getStrategyOptions();
+    }
+
     const runsResponse = await fetchJson("/strategy-backtests/runs?status=completed&limit=20", { method: "GET", raw: true });
     state.strategyBacktestRuns = Array.isArray(runsResponse.data) ? runsResponse.data : [];
 
@@ -5830,6 +6063,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyBacktestConditionForm = event.target.closest("[data-strategy-backtest-condition-form]");
+  if (strategyBacktestConditionForm) {
+    event.preventDefault();
+    handleStrategyBacktestConditionSubmit(strategyBacktestConditionForm);
+    return;
+  }
+
   const strategyOptimizationForm = event.target.closest("[data-strategy-optimization-form]");
   if (strategyOptimizationForm) {
     event.preventDefault();
@@ -5893,6 +6133,18 @@ stockList.addEventListener("click", (event) => {
   const strategyPerformanceButton = event.target.closest("[data-strategy-performance-metric]");
   if (strategyPerformanceButton) {
     handleStrategyPerformanceMetric(strategyPerformanceButton);
+    return;
+  }
+
+  const strategyBacktestPresetButton = event.target.closest("[data-strategy-backtest-preset]");
+  if (strategyBacktestPresetButton) {
+    handleStrategyBacktestPreset(strategyBacktestPresetButton);
+    return;
+  }
+
+  const copyBacktestCommandButton = event.target.closest("[data-copy-backtest-command]");
+  if (copyBacktestCommandButton) {
+    copyStrategyBacktestCommand();
     return;
   }
 

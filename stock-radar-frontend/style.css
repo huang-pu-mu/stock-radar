@@ -4273,3 +4273,59 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+/* V1.4-3：策略回測條件調整 */
+.strategy-backtest-condition-card {
+  margin-bottom: 18px;
+}
+
+.backtest-condition-preset-grid {
+  margin-top: 14px;
+}
+
+.backtest-condition-form {
+  margin-top: 16px;
+}
+
+.compact-param-grid {
+  grid-column: 1 / -1;
+}
+
+.backtest-command-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.backtest-command-box span {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.backtest-command-box code {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.78);
+  color: #e2e8f0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.backtest-command-box small {
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  .backtest-command-box code {
+    font-size: 0.8rem;
+  }
+}

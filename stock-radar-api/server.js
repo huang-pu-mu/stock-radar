@@ -227,8 +227,8 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.4.2.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v48";
+const API_VERSION = "stock-radar-api-v1.4.3.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v49";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -4552,6 +4552,7 @@ app.get("/strategy-backtests/runs", async (req, res) => {
         win_rate_1d,
         win_rate_3d,
         win_rate_5d,
+        params_json,
         status,
         error_message,
         DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
@@ -4814,6 +4815,7 @@ app.get("/strategy-backtests/summary", async (req, res) => {
         win_rate_1d,
         win_rate_3d,
         win_rate_5d,
+        params_json,
         status,
         DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
         DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at

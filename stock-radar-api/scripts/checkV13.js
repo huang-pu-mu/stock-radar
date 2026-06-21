@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.2.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v48";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.3.0";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v49";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-2", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v48", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v48", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v49", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v49", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -190,6 +190,9 @@ async function main() {
     ["策略最佳化前端 JS", appSource.includes("renderStrategyOptimizationPage") && appSource.includes("buildStrategyOptimizationQueryString")],
     ["策略最佳化樣式 CSS", styleSource.includes(".strategy-optimization-card") && styleSource.includes(".strategy-optimization-param-grid")],
     ["策略最佳化 API 參數", serverSource.includes("STRATEGY_OPTIMIZATION_PRESETS") && serverSource.includes("applyStrategyOptimizationParams")],
+    ["回測條件調整 CLI", readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("parseStrategyOptimizationParamsFromArgs") && readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("applyStrategyOptimizationParams")],
+    ["回測條件調整前端", appSource.includes("renderStrategyBacktestConditionPanel") && appSource.includes("buildStrategyBacktestGenerateCommand")],
+    ["回測條件調整樣式", styleSource.includes(".strategy-backtest-condition-card") && styleSource.includes(".backtest-command-box")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {
