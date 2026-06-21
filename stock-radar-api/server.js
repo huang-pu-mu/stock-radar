@@ -824,8 +824,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.5.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v51";
+const API_VERSION = "stock-radar-api-v1.4.6.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v52";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -888,6 +888,7 @@ const V13_MODULES = [
       "GET /strategy-backtests/results",
       "GET /strategy-backtests/summary",
       "GET /strategy-backtests/rankings",
+      "GET /strategy-backtests/trends",
     ],
   },
   {
@@ -2513,6 +2514,8 @@ app.get("/v13/acceptance", (req, res) => {
       "/strategy-backtests/runs",
       "/strategy-backtests/summary",
       "/strategy-backtests/rankings",
+      "/strategy-backtests/trends",
+      "/strategy-daily-report",
     ],
     checked_at: nowTaipeiText(),
   });
@@ -5587,6 +5590,285 @@ app.get("/strategy-backtests/rankings", async (req, res) => {
   } catch (error) {
     console.error("查詢策略回測排行榜失敗：", error);
     res.status(500).json({ success: false, message: "查詢策略回測排行榜失敗", error: error.message });
+  }
+});
+
+
+function parseBacktestParamsPreset(paramsJson) {
+  if (!paramsJson) return "";
+  try {
+    const parsed = typeof paramsJson === "string" ? JSON.parse(paramsJson) : paramsJson;
+    return String(parsed?.preset || parsed?.preset_key || parsed?.optimization_preset || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function createBacktestTrendDirection(points = []) {
+  const validPoints = points
+    .map((point) => ({ ...point, win_rate: Number(point.win_rate) }))
+    .filter((point) => Number.isFinite(point.win_rate));
+
+  if (validPoints.length < 2) {
+    return { direction: "flat", delta: null, label: "資料不足" };
+  }
+
+  const previous = validPoints[validPoints.length - 2];
+  const latest = validPoints[validPoints.length - 1];
+  const delta = Number((latest.win_rate - previous.win_rate).toFixed(2));
+
+  if (delta > 1) return { direction: "up", delta, label: `上升 ${delta.toFixed(2)}%` };
+  if (delta < -1) return { direction: "down", delta, label: `下降 ${Math.abs(delta).toFixed(2)}%` };
+  return { direction: "flat", delta, label: "持平" };
+}
+
+async function buildBacktestWinRateTrend({ metricKey = "5d", strategyKey = "", market = "", limit = 12 } = {}) {
+  const metric = getBacktestMetric(metricKey);
+  const safeLimit = parsePositiveInteger(limit, 12, 2, 30);
+  const strategy = normalizeStrategyKeyValue(strategyKey);
+  const marketType = parseMarket(market);
+  const field = metric.field;
+  const runConditions = ["status = 'completed'"];
+  const runParams = [];
+
+  if (marketType) {
+    runConditions.push("(market_type = ? OR market_type IS NULL OR market_type = '')");
+    runParams.push(marketType);
+  }
+
+  if (strategy) {
+    runConditions.push("(strategy_key = ? OR strategy_key IS NULL OR strategy_key = '')");
+    runParams.push(strategy);
+  }
+
+  const runWhereSql = `WHERE ${runConditions.join(" AND ")}`;
+  const resultJoinConditions = ["br.run_id = latest.id"];
+  const resultJoinParams = [];
+
+  if (marketType) {
+    resultJoinConditions.push("br.market_type = ?");
+    resultJoinParams.push(marketType);
+  }
+
+  if (strategy) {
+    resultJoinConditions.push("br.strategy_key = ?");
+    resultJoinParams.push(strategy);
+  }
+
+  const runTrendRows = await query(
+    `
+    SELECT
+      latest.id AS run_id,
+      latest.run_name,
+      DATE_FORMAT(latest.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(latest.end_date, '%Y-%m-%d') AS end_date,
+      latest.market_type,
+      latest.strategy_key,
+      latest.limit_per_strategy,
+      latest.trading_days_count,
+      latest.params_json,
+      DATE_FORMAT(latest.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+      DATE_FORMAT(latest.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      COUNT(br.id) AS signal_count,
+      SUM(br.${field} IS NOT NULL) AS available_count,
+      AVG(br.${field}) AS avg_return,
+      AVG(CASE WHEN br.${field} IS NULL THEN NULL WHEN br.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+      SUM(CASE WHEN br.${field} > 0 THEN 1 ELSE 0 END) AS positive_count,
+      SUM(CASE WHEN br.${field} < 0 THEN 1 ELSE 0 END) AS negative_count,
+      SUM(CASE WHEN br.id IS NOT NULL AND br.${field} IS NULL THEN 1 ELSE 0 END) AS pending_count
+    FROM (
+      SELECT *
+      FROM strategy_backtest_runs
+      ${runWhereSql}
+      ORDER BY completed_at DESC, id DESC
+      LIMIT ?
+    ) latest
+    LEFT JOIN strategy_backtest_results br
+      ON ${resultJoinConditions.join(" AND ")}
+    GROUP BY latest.id
+    ORDER BY latest.completed_at ASC, latest.id ASC
+    `,
+    [...runParams, safeLimit, ...resultJoinParams],
+  );
+
+  const runIds = runTrendRows.map((row) => Number(row.run_id)).filter((id) => Number.isFinite(id) && id > 0);
+
+  let strategyTrendRows = [];
+  if (runIds.length > 0) {
+    const placeholders = runIds.map(() => "?").join(", ");
+    const strategyConditions = [`br.run_id IN (${placeholders})`];
+    const strategyParams = [...runIds];
+
+    if (marketType) {
+      strategyConditions.push("br.market_type = ?");
+      strategyParams.push(marketType);
+    }
+
+    if (strategy) {
+      strategyConditions.push("br.strategy_key = ?");
+      strategyParams.push(strategy);
+    }
+
+    strategyTrendRows = await query(
+      `
+      SELECT
+        br.run_id,
+        br.strategy_key,
+        br.strategy_name,
+        COUNT(*) AS signal_count,
+        SUM(br.${field} IS NOT NULL) AS available_count,
+        AVG(br.${field}) AS avg_return,
+        AVG(CASE WHEN br.${field} IS NULL THEN NULL WHEN br.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+        SUM(CASE WHEN br.${field} > 0 THEN 1 ELSE 0 END) AS positive_count,
+        SUM(CASE WHEN br.${field} < 0 THEN 1 ELSE 0 END) AS negative_count,
+        SUM(CASE WHEN br.${field} IS NULL THEN 1 ELSE 0 END) AS pending_count
+      FROM strategy_backtest_results br
+      WHERE ${strategyConditions.join(" AND ")}
+      GROUP BY br.run_id, br.strategy_key, br.strategy_name
+      ORDER BY br.strategy_key ASC, br.run_id ASC
+      `,
+      strategyParams,
+    );
+  }
+
+  const runMetaById = new Map(runTrendRows.map((row, index) => [Number(row.run_id), {
+    index,
+    run_id: Number(row.run_id),
+    run_label: `Run ${row.run_id}`,
+    completed_at: row.completed_at,
+    start_date: row.start_date,
+    end_date: row.end_date,
+    preset_key: parseBacktestParamsPreset(row.params_json),
+  }]));
+
+  const strategyMap = new Map();
+  for (const row of strategyTrendRows) {
+    const key = row.strategy_key || "unknown";
+    if (!strategyMap.has(key)) {
+      const definition = getStrategyDefinition(key);
+      strategyMap.set(key, {
+        strategy_key: key,
+        strategy_name: row.strategy_name || definition?.name || key,
+        run_points: [],
+      });
+    }
+
+    const runMeta = runMetaById.get(Number(row.run_id)) || {};
+    strategyMap.get(key).run_points.push({
+      run_id: Number(row.run_id),
+      run_label: runMeta.run_label || `Run ${row.run_id}`,
+      completed_at: runMeta.completed_at || "",
+      start_date: runMeta.start_date || "",
+      end_date: runMeta.end_date || "",
+      signal_count: Number(row.signal_count || 0),
+      available_count: Number(row.available_count || 0),
+      avg_return: row.avg_return === null ? null : Number(Number(row.avg_return || 0).toFixed(4)),
+      win_rate: row.win_rate === null ? null : Number(Number(row.win_rate || 0).toFixed(4)),
+      positive_count: Number(row.positive_count || 0),
+      negative_count: Number(row.negative_count || 0),
+      pending_count: Number(row.pending_count || 0),
+    });
+  }
+
+  const strategyTrends = Array.from(strategyMap.values()).map((item) => {
+    const points = item.run_points.sort((a, b) => Number(a.run_id) - Number(b.run_id));
+    const direction = createBacktestTrendDirection(points);
+    const latestPoint = points[points.length - 1] || {};
+    const previousPoint = points.length >= 2 ? points[points.length - 2] : {};
+    return {
+      ...item,
+      run_points: points,
+      latest_win_rate: latestPoint.win_rate ?? null,
+      latest_avg_return: latestPoint.avg_return ?? null,
+      latest_signal_count: latestPoint.signal_count ?? 0,
+      previous_win_rate: previousPoint.win_rate ?? null,
+      trend_direction: direction.direction,
+      trend_delta: direction.delta,
+      trend_label: direction.label,
+    };
+  }).sort((a, b) => {
+    const winRateDiff = Number(b.latest_win_rate || 0) - Number(a.latest_win_rate || 0);
+    if (winRateDiff !== 0) return winRateDiff;
+    return Number(b.latest_avg_return || 0) - Number(a.latest_avg_return || 0);
+  });
+
+  const runTrend = runTrendRows.map((row) => ({
+    run_id: Number(row.run_id),
+    run_name: row.run_name,
+    run_label: `Run ${row.run_id}`,
+    start_date: row.start_date,
+    end_date: row.end_date,
+    market_type: row.market_type,
+    strategy_key: row.strategy_key,
+    limit_per_strategy: Number(row.limit_per_strategy || 0),
+    trading_days_count: Number(row.trading_days_count || 0),
+    preset_key: parseBacktestParamsPreset(row.params_json),
+    completed_at: row.completed_at,
+    created_at: row.created_at,
+    signal_count: Number(row.signal_count || 0),
+    available_count: Number(row.available_count || 0),
+    avg_return: row.avg_return === null ? null : Number(Number(row.avg_return || 0).toFixed(4)),
+    win_rate: row.win_rate === null ? null : Number(Number(row.win_rate || 0).toFixed(4)),
+    positive_count: Number(row.positive_count || 0),
+    negative_count: Number(row.negative_count || 0),
+    pending_count: Number(row.pending_count || 0),
+  }));
+
+  const latestRun = runTrend[runTrend.length - 1] || null;
+  const previousRun = runTrend.length >= 2 ? runTrend[runTrend.length - 2] : null;
+  const latestWinRate = latestRun?.win_rate ?? null;
+  const previousWinRate = previousRun?.win_rate ?? null;
+  const winRateDelta = latestWinRate !== null && previousWinRate !== null
+    ? Number((latestWinRate - previousWinRate).toFixed(2))
+    : null;
+
+  return convertBigIntToString({
+    metric: metric.key,
+    metric_label: metric.label,
+    limit: safeLimit,
+    filters: {
+      strategy: strategy || "",
+      market: marketType || "全部",
+    },
+    summary: {
+      run_count: runTrend.length,
+      latest_run_id: latestRun?.run_id || null,
+      latest_run_label: latestRun?.run_label || "-",
+      latest_completed_at: latestRun?.completed_at || "",
+      latest_win_rate: latestWinRate,
+      previous_win_rate: previousWinRate,
+      win_rate_delta: winRateDelta,
+      latest_avg_return: latestRun?.avg_return ?? null,
+      latest_signal_count: latestRun?.signal_count || 0,
+      best_strategy_key: strategyTrends[0]?.strategy_key || "",
+      best_strategy_name: strategyTrends[0]?.strategy_name || "",
+      best_strategy_win_rate: strategyTrends[0]?.latest_win_rate ?? null,
+    },
+    run_trend: runTrend,
+    strategy_trends: strategyTrends,
+  });
+}
+
+// ==============================
+// V1.4-6：策略勝率趨勢
+// GET /strategy-backtests/trends?metric=5d&strategy=legal_strength&market=上市&limit=12
+// ==============================
+app.get("/strategy-backtests/trends", async (req, res) => {
+  try {
+    const trend = await buildBacktestWinRateTrend({
+      metricKey: req.query.metric,
+      strategyKey: req.query.strategy,
+      market: req.query.market,
+      limit: req.query.limit,
+    });
+
+    res.json({
+      success: true,
+      data: trend,
+    });
+  } catch (error) {
+    console.error("查詢策略勝率趨勢失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略勝率趨勢失敗", error: error.message });
   }
 });
 

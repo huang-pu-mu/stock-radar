@@ -72,6 +72,10 @@ const state = {
   strategyDailyReportDate: "",
   strategyDailyReportLimit: 10,
   strategyDailyReportLastSendResult: null,
+  strategyTrendMetric: "5d",
+  strategyTrendStrategy: "",
+  strategyTrendLimit: 12,
+  strategyWinRateTrend: null,
   strategyBacktestConditionPresetKey: "balanced",
   strategyBacktestConditionStrategy: "",
   strategyBacktestConditionMarket: "",
@@ -134,6 +138,7 @@ const PAGE_GROUP_MAP = {
   strategyTracks: "strategy",
   strategyOptimize: "strategy",
   strategyBacktests: "strategy",
+  strategyTrends: "strategy",
   strategyReports: "strategy",
   alerts: "alerts",
   notifications: "alerts",
@@ -182,6 +187,7 @@ const PAGE_CONTENT_CONFIG = {
   strategyTracks: { groupLabel: "策略中心", filterTitle: "策略追蹤篩選", filterDesc: "依股票、策略、狀態與報酬排序追蹤後續表現。", resultTitle: "策略追蹤清單", resultDesc: "檢查加入追蹤後的報酬與停利停損狀態。" },
   strategyOptimize: { groupLabel: "策略中心", filterTitle: "策略最佳化", filterDesc: "選擇策略與參數預設，預覽不同門檻下的策略清單。", resultTitle: "策略最佳化結果", resultDesc: "比較保守、平衡、積極參數對訊號數量與分數的影響。" },
   strategyBacktests: { groupLabel: "策略中心", filterTitle: "回測條件", filterDesc: "依 Run ID、策略、結果、排序與搜尋條件查看歷史訊號。", resultTitle: "策略回測清單", resultDesc: "顯示歷史策略訊號與後續 1 / 3 / 5 日績效。" },
+  strategyTrends: { groupLabel: "策略中心", filterTitle: "勝率趨勢", filterDesc: "比較最近多次回測 Run 的勝率、平均報酬與策略排名變化。", resultTitle: "策略勝率趨勢", resultDesc: "依 1 / 3 / 5 日或目前報酬觀察策略穩定度。" },
   strategyReports: { groupLabel: "策略中心", filterTitle: "每日策略報告", filterDesc: "依資料日與市場產生策略摘要，並可外送到 LINE 通知通道。", resultTitle: "每日策略報告", resultDesc: "整理策略分布、高分訊號、法人資金與產業流向。" },
   account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
 };
@@ -5813,6 +5819,260 @@ async function loadStrategyBacktests(options = {}) {
   }
 }
 
+
+function getTrendDirectionClass(direction) {
+  if (direction === "up") return "price-up";
+  if (direction === "down") return "price-down";
+  return "price-flat";
+}
+
+function formatTrendPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return `${numberValue.toFixed(2)}%`;
+}
+
+function getStrategyTrendMaxWinRate(points = []) {
+  const values = points.map((item) => toNumber(item.win_rate)).filter((value) => value !== null);
+  return values.length ? Math.max(...values, 1) : 100;
+}
+
+function renderStrategyTrendFilter() {
+  const trend = state.strategyWinRateTrend;
+  const selectedStrategy = state.strategyTrendStrategy || "";
+  const selectedMetric = state.strategyTrendMetric || "5d";
+  const limit = state.strategyTrendLimit || 12;
+
+  return `
+    <section class="strategy-dashboard-card strategy-trend-filter-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4-6 策略勝率趨勢</p>
+          <h3>回測勝率趨勢條件</h3>
+          <p>使用既有回測 Run 進行比較，不新增 SQL。建議先各跑一次平衡 / 保守 / 積極參數，再回來看趨勢。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>目前市場：${escapeHtml(state.market || "全部")}</span>
+          <span>指標：${escapeHtml(getBacktestMetric(selectedMetric).label)}</span>
+          <span>Run 數：${formatNumber(trend?.summary?.run_count || 0)}</span>
+        </div>
+      </div>
+      <form class="strategy-track-filter-form strategy-trend-form" data-strategy-trend-form>
+        <label>
+          <span>報酬指標</span>
+          <select name="metric">
+            ${STRATEGY_BACKTEST_METRICS.map((metric) => `<option value="${escapeHtml(metric.key)}" ${metric.key === selectedMetric ? "selected" : ""}>${escapeHtml(metric.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>策略</span>
+          <select name="strategy">
+            <option value="" ${selectedStrategy ? "" : "selected"}>全部策略</option>
+            ${getStrategyOptions().map((item) => `<option value="${escapeHtml(item.key)}" ${item.key === selectedStrategy ? "selected" : ""}>${escapeHtml(item.short_name || item.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>最近 Run 數</span>
+          <select name="limit">
+            ${[6, 8, 12, 20, 30].map((value) => `<option value="${value}" ${Number(limit) === value ? "selected" : ""}>最近 ${value} 次</option>`).join("")}
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button class="search-btn compact" type="submit">套用趨勢</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderStrategyTrendRunCard(row, index, maxWinRate) {
+  const winRate = toNumber(row.win_rate);
+  const avgReturn = toNumber(row.avg_return);
+  const width = winRate === null ? 0 : Math.max(4, Math.min(100, (winRate / maxWinRate) * 100));
+
+  return `
+    <article class="strategy-trend-run-card">
+      <div class="strategy-trend-run-head">
+        <div>
+          <strong>${escapeHtml(row.run_label || `Run ${row.run_id}`)}</strong>
+          <span>${escapeHtml(formatDate(row.end_date || row.completed_at || row.created_at))}</span>
+        </div>
+        <b class="${getReturnClass(avgReturn)}">${formatTrendPercent(avgReturn)}</b>
+      </div>
+      <div class="strategy-trend-bar-track" title="勝率 ${formatTrendPercent(winRate)}">
+        <div class="strategy-trend-bar" style="width:${width}%"></div>
+      </div>
+      <div class="strategy-trend-run-meta">
+        <span>勝率 ${formatTrendPercent(winRate)}</span>
+        <span>訊號 ${formatNumber(row.signal_count)} 筆</span>
+        <span>有效 ${formatNumber(row.available_count)} 筆</span>
+      </div>
+      <small>區間 ${escapeHtml(row.start_date || "-")} ~ ${escapeHtml(row.end_date || "-")}｜${escapeHtml(row.preset_key || "未標示參數")}</small>
+    </article>
+  `;
+}
+
+function renderStrategyTrendRunTimeline(runTrend = []) {
+  const maxWinRate = Math.max(...runTrend.map((item) => toNumber(item.win_rate) || 0), 1);
+  return `
+    <section class="strategy-ranking-section strategy-trend-section">
+      <div class="ranking-section-title">
+        <h4>最近回測 Run 勝率趨勢</h4>
+        <span>由舊到新排列，方便觀察是否改善</span>
+      </div>
+      <div class="strategy-trend-run-grid">
+        ${runTrend.length ? runTrend.map((row, index) => renderStrategyTrendRunCard(row, index, maxWinRate)).join("") : `<p class="muted-text">目前沒有已完成的回測 Run。請先執行 npm run strategy-backtests:generate。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderStrategyTrendStrategyCard(item) {
+  const points = Array.isArray(item.run_points) ? item.run_points : [];
+  const maxWinRate = getStrategyTrendMaxWinRate(points);
+  return `
+    <article class="strategy-trend-strategy-card">
+      <div class="strategy-trend-strategy-head">
+        <div>
+          <p class="section-kicker">${escapeHtml(item.strategy_key || "strategy")}</p>
+          <h4>${escapeHtml(item.strategy_name || "策略")}</h4>
+        </div>
+        <div class="strategy-trend-latest">
+          <strong>${formatTrendPercent(item.latest_win_rate)}</strong>
+          <span class="${getTrendDirectionClass(item.trend_direction)}">${escapeHtml(item.trend_label || "-")}</span>
+        </div>
+      </div>
+      <div class="strategy-trend-mini-chart">
+        ${points.map((point) => {
+          const winRate = toNumber(point.win_rate);
+          const height = winRate === null ? 6 : Math.max(8, Math.min(100, (winRate / maxWinRate) * 100));
+          return `<span style="height:${height}%" title="Run ${escapeHtml(point.run_id)} 勝率 ${formatTrendPercent(winRate)}"></span>`;
+        }).join("") || `<em>無資料</em>`}
+      </div>
+      <div class="strategy-trend-run-meta">
+        <span>最新平均報酬 ${formatTrendPercent(item.latest_avg_return)}</span>
+        <span>最新訊號 ${formatNumber(item.latest_signal_count)} 筆</span>
+        <span>資料點 ${formatNumber(points.length)} 次</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderStrategyTrendStrategyList(strategyTrends = []) {
+  return `
+    <section class="strategy-ranking-section strategy-trend-section">
+      <div class="ranking-section-title">
+        <h4>各策略勝率趨勢</h4>
+        <span>依最新勝率與最新平均報酬排序</span>
+      </div>
+      <div class="strategy-trend-strategy-grid">
+        ${strategyTrends.length ? strategyTrends.map(renderStrategyTrendStrategyCard).join("") : `<p class="muted-text">目前沒有策略分項趨勢資料。</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderStrategyWinRateTrendPage() {
+  const trend = state.strategyWinRateTrend;
+
+  if (!trend) {
+    setContentSummary([
+      { label: "趨勢狀態", value: "尚未載入" },
+      { label: "指標", value: getBacktestMetric(state.strategyTrendMetric).label },
+    ], "策略勝率趨勢會讀取最近多次已完成回測 Run。 ");
+    setResultHeader({ title: "策略勝率趨勢", desc: "套用條件後會顯示 Run 趨勢與策略分項趨勢。", badge: "V1.4-6" });
+    stockList.innerHTML = `${renderStrategyTrendFilter()}<article class="search-intro-card"><div class="intro-icon">📈</div><h3>尚未載入策略勝率趨勢</h3><p>請先套用條件，或確認資料庫已有已完成的策略回測 Run。</p></article>`;
+    return;
+  }
+
+  const summary = trend.summary || {};
+  const runTrend = Array.isArray(trend.run_trend) ? trend.run_trend : [];
+  const strategyTrends = Array.isArray(trend.strategy_trends) ? trend.strategy_trends : [];
+  const delta = toNumber(summary.win_rate_delta);
+  const deltaText = delta === null ? "-" : `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}%`;
+
+  updatePageMetaBar([
+    { label: "指標", value: trend.metric_label || getBacktestMetric(state.strategyTrendMetric).label },
+    { label: "Run", value: `${formatNumber(summary.run_count || 0)} 次` },
+  ]);
+
+  setContentSummary([
+    { label: "最新 Run", value: summary.latest_run_label || "-" },
+    { label: "最新勝率", value: formatTrendPercent(summary.latest_win_rate) },
+    { label: "勝率變化", value: deltaText, className: delta > 0 ? "good" : delta < 0 ? "bad" : "" },
+    { label: "最新平均報酬", value: formatTrendPercent(summary.latest_avg_return) },
+    { label: "最新訊號", value: `${formatNumber(summary.latest_signal_count || 0)} 筆` },
+    { label: "最佳策略", value: summary.best_strategy_name || "-" },
+  ], "勝率趨勢用於比較策略穩定度，不代表未來績效保證。 ");
+
+  setResultHeader({
+    title: "策略勝率趨勢",
+    desc: `目前指標：${trend.metric_label || getBacktestMetric(state.strategyTrendMetric).label}，市場：${trend.filters?.market || state.market || "全部"}。`,
+    badge: "勝率趨勢",
+    countText: `${formatNumber(summary.run_count || 0)} 次 Run`,
+  });
+
+  stockList.innerHTML = [
+    renderStrategyTrendFilter(),
+    renderStrategyTrendRunTimeline(runTrend),
+    renderStrategyTrendStrategyList(strategyTrends),
+  ].join("");
+}
+
+async function loadStrategyWinRateTrend() {
+  setLoading(true);
+  renderLoadingCards();
+
+  try {
+    if (!state.strategyOptions.length) {
+      const presetResponse = await fetchJson(`/strategy-optimization/presets?preset=balanced`, { method: "GET", raw: true }).catch(() => null);
+      if (presetResponse) {
+        state.strategyOptions = Array.isArray(presetResponse.strategies) ? presetResponse.strategies : getStrategyOptions();
+      }
+    }
+
+    const params = new URLSearchParams();
+    params.set("metric", state.strategyTrendMetric || "5d");
+    params.set("limit", String(state.strategyTrendLimit || 12));
+    if (state.strategyTrendStrategy) params.set("strategy", state.strategyTrendStrategy);
+    if (state.market) params.set("market", state.market);
+
+    const result = await fetchJson(`/strategy-backtests/trends?${params.toString()}`, { method: "GET", raw: true });
+    state.strategyWinRateTrend = result.data || null;
+    renderStrategyWinRateTrendPage();
+    showTemporaryStatus("策略勝率趨勢已更新。", "success");
+  } catch (error) {
+    state.strategyWinRateTrend = null;
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 已部署 V1.4-6，且已有已完成的回測 Run。 ");
+    setResultHeader({ title: "策略勝率趨勢讀取失敗", desc: "目前無法取得策略勝率趨勢。", badge: "讀取失敗" });
+    stockList.innerHTML = `
+      <article class="search-intro-card error-card">
+        <div class="intro-icon">⚠️</div>
+        <h3>策略勝率趨勢讀取失敗</h3>
+        <p>${escapeHtml(error.message)}</p>
+      </article>
+    `;
+    showStatus(`策略勝率趨勢讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleStrategyTrendSubmit(form) {
+  const formData = new FormData(form);
+  const metric = String(formData.get("metric") || "5d").trim();
+  const strategy = String(formData.get("strategy") || "").trim();
+  const limit = Number.parseInt(String(formData.get("limit") || "12"), 10);
+
+  state.strategyTrendMetric = STRATEGY_BACKTEST_METRICS.some((item) => item.key === metric) ? metric : "5d";
+  state.strategyTrendStrategy = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "";
+  state.strategyTrendLimit = Number.isFinite(limit) ? Math.max(2, Math.min(limit, 30)) : 12;
+  loadStrategyWinRateTrend();
+}
+
 function getLineProviderStatus() {
   return state.notificationProviderStatus?.line || {};
 }
@@ -6462,6 +6722,11 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "strategyTrends") {
+    await loadStrategyWinRateTrend();
+    return;
+  }
+
   if (state.page === "strategies") {
     await loadStrategies();
     return;
@@ -6700,6 +6965,9 @@ function switchPage(page) {
     state.strategyBacktestSummary = null;
     state.strategyBacktestRankings = null;
   }
+  if (page === "strategyTrends") {
+    state.strategyWinRateTrend = null;
+  }
   if (page === "notifications") {
     state.notificationLastTestResult = null;
   }
@@ -6725,6 +6993,13 @@ marketButtons.forEach((button) => {
 });
 
 stockList.addEventListener("submit", (event) => {
+  const strategyTrendForm = event.target.closest("[data-strategy-trend-form]");
+  if (strategyTrendForm) {
+    event.preventDefault();
+    handleStrategyTrendSubmit(strategyTrendForm);
+    return;
+  }
+
   const strategyDailyReportForm = event.target.closest("[data-strategy-daily-report-form]");
   if (strategyDailyReportForm) {
     event.preventDefault();
