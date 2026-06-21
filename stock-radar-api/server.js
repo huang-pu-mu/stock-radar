@@ -824,8 +824,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v54";
+const API_VERSION = "stock-radar-api-v1.4.8.1";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v55";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -920,8 +920,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.0",
-      "service-worker.js 快取版本為 stock-radar-pwa-v54",
+      "GET /health 回傳 stock-radar-api-v1.4.8.1",
+      "service-worker.js 快取版本為 stock-radar-pwa-v55",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -2789,7 +2789,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v54" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.1" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v55" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -2898,7 +2898,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.0。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.1。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",

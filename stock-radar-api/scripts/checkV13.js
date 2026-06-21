@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v54";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.1";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v55";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -88,8 +88,8 @@ async function main() {
   }
 
   checks.push(createCheck("版本", "API 版本為 V1.4-8", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v54", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v54", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v55", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v55", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -245,6 +245,11 @@ async function main() {
 
   checks.push(createWarn("前端樣式", "V1.4 狀態卡片樣式", styleSource.includes("v13-status-card"), "style.css 應包含 v13-status-card / v14-status-card"));
   checks.push(createWarn("前端樣式", "策略回測排行榜樣式", styleSource.includes("backtest") && styleSource.includes("ranking"), "style.css 應包含回測 / 排行榜相關樣式"));
+
+
+  checks.push(createCheck("V1.4.8.1 UI", "桌機版左側功能列修正標記", styleSource.includes("V1.4.8.1：桌機版左側功能列版面修正"), "desktop sidebar override"));
+  checks.push(createCheck("V1.4.8.1 UI", "桌機版 app-main-layout 強制 grid", styleSource.includes("body .app-main-layout") && styleSource.includes("grid-template-columns: 300px minmax(0, 1fr)"), "desktop grid override"));
+  checks.push(createCheck("V1.4.8.1 UI", "桌機版隱藏手機導航", styleSource.includes("body .mobile-section-nav") && styleSource.includes("body .mobile-bottom-nav"), "desktop hides mobile nav"));
 
   if (apiBaseUrl) {
     const health = await fetchJson(`${apiBaseUrl}/health`).catch((error) => ({ ok: false, status: 0, error: error.message }));

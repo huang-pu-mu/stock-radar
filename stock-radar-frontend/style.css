@@ -4913,3 +4913,134 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* V1.4.8.1：桌機版左側功能列版面修正
+   目的：桌機 / 筆電 / 平板橫向強制使用左側功能列 + 右側內容區，避免被舊版上方功能按鈕樣式覆蓋。 */
+@media (min-width: 761px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  body .app-shell {
+    width: min(1440px, calc(100% - 40px)) !important;
+    max-width: none !important;
+    margin: 0 auto !important;
+    padding: 20px 0 52px !important;
+  }
+
+  body .app-main-layout {
+    display: grid !important;
+    grid-template-columns: clamp(244px, 19vw, 300px) minmax(0, 1fr) !important;
+    gap: 20px !important;
+    align-items: start !important;
+    width: 100% !important;
+  }
+
+  body .desktop-sidebar {
+    display: block !important;
+    grid-column: 1 !important;
+    position: sticky !important;
+    top: 16px !important;
+    align-self: start !important;
+    width: 100% !important;
+    max-height: calc(100vh - 32px) !important;
+    min-width: 0 !important;
+  }
+
+  body .side-nav-card {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    max-height: calc(100vh - 32px) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius-lg) !important;
+    background: rgba(13, 27, 47, 0.92) !important;
+    box-shadow: var(--shadow) !important;
+    overflow: hidden !important;
+  }
+
+  body .side-nav-scroll {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 12px !important;
+  }
+
+  body .side-nav-group {
+    display: block !important;
+  }
+
+  body .side-nav-btn.tab-btn {
+    display: grid !important;
+    grid-template-columns: 30px minmax(0, 1fr) auto !important;
+    justify-content: stretch !important;
+    align-items: center !important;
+    width: 100% !important;
+    min-height: 48px !important;
+    margin-top: 6px !important;
+    border-radius: 16px !important;
+    padding: 9px 11px !important;
+    text-align: left !important;
+    white-space: normal !important;
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  body .side-nav-btn.tab-btn.active {
+    color: #06111e !important;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+    box-shadow: 0 12px 28px rgba(86, 214, 255, 0.16) !important;
+  }
+
+  body .side-nav-btn .nav-icon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 12px !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+  }
+
+  body .content-shell {
+    grid-column: 2 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  body .mobile-section-nav,
+  body .mobile-bottom-nav {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  body .app-shell {
+    width: min(1520px, calc(100% - 72px)) !important;
+  }
+
+  body .app-main-layout {
+    grid-template-columns: 300px minmax(0, 1fr) !important;
+    gap: 24px !important;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1020px) {
+  body .app-shell {
+    width: min(980px, calc(100% - 24px)) !important;
+  }
+
+  body .app-main-layout {
+    grid-template-columns: 228px minmax(0, 1fr) !important;
+    gap: 14px !important;
+  }
+
+  body .side-nav-btn.tab-btn {
+    min-height: 46px !important;
+    font-size: 14px !important;
+  }
+}
