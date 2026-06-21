@@ -24,7 +24,7 @@ async function main() {
   let conn;
 
   try {
-    console.log("開始建立 V1.4-4-1 通知外送資料表");
+    console.log("開始建立 V1.4-4-1 / V1.4.8.4 通知外送與 LINE 綁定資料表");
 
     const sqlText = await fs.readFile(sqlFilePath, "utf8");
     const statements = splitSqlStatements(sqlText);
@@ -42,9 +42,10 @@ async function main() {
     console.log("建立完成");
     console.log("資料表：notification_channels");
     console.log("資料表：notification_send_logs");
-    console.log("下一步：設定 LINE_CHANNEL_ACCESS_TOKEN，然後到前端通知外送頁新增 LINE 目標並測試。 ");
+    console.log("資料表：notification_line_bindings");
+    console.log("下一步：設定 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_CHANNEL_SECRET，然後到前端通知外送頁產生綁定碼或新增 LINE 目標並測試。 ");
   } catch (error) {
-    console.error("建立 V1.4-4-1 通知外送資料表失敗");
+    console.error("建立 V1.4-4-1 / V1.4.8.4 通知外送資料表失敗");
     console.error(error.message);
     process.exitCode = 1;
   } finally {

@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.3";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v57";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.4";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v58";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4.8.3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v57", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v57", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4.8.4", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v58", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v58", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -162,6 +162,9 @@ async function main() {
     ["patch", "/notification/channels/:channelId"],
     ["delete", "/notification/channels/:channelId"],
     ["post", "/notification/channels/:channelId/test"],
+    ["get", "/notification/line-bindings"],
+    ["post", "/notification/line-bindings"],
+    ["post", "/line/webhook"],
     ["get", "/strategy-daily-report"],
     ["post", "/strategy-daily-report/send-line"],
   ];
@@ -187,6 +190,8 @@ async function main() {
     ["策略最佳化回測比較 API", 'strategy-optimization/backtest-comparison'],
     ["策略追蹤停利停損", 'risk-settings'],
     ["通知外送 API", 'notification/channels'],
+    ["LINE 綁定 API", 'notification/line-bindings'],
+    ["LINE 綁定前端", 'data-line-binding-create'],
     ["每日策略報告 API", 'strategy-daily-report'],
     ["策略勝率趨勢 API", 'strategy-backtests/trends'],
     ["個股策略歷史 API", 'strategy-backtests/stock-history'],
@@ -222,11 +227,14 @@ async function main() {
     ["回測條件調整 CLI", readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("parseStrategyOptimizationParamsFromArgs") && readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("applyStrategyOptimizationParams")],
     ["回測條件調整前端", appSource.includes("renderStrategyBacktestConditionPanel") && appSource.includes("buildStrategyBacktestGenerateCommand")],
     ["回測條件調整樣式", styleSource.includes(".strategy-backtest-condition-card") && styleSource.includes(".backtest-command-box")],
-    ["LINE 通知 SQL", readText("stock-radar-api/sql/notification-channels.sql").includes("notification_channels") && readText("stock-radar-api/sql/notification-channels.sql").includes("notification_send_logs")],
+    ["LINE 通知 SQL", readText("stock-radar-api/sql/notification-channels.sql").includes("notification_channels") && readText("stock-radar-api/sql/notification-channels.sql").includes("notification_send_logs") && readText("stock-radar-api/sql/notification-channels.sql").includes("notification_line_bindings")],
     ["LINE 通知設定腳本", readText("stock-radar-api/scripts/setupNotificationChannels.js").includes("notification-channels.sql")],
     ["LINE 通知 API", serverSource.includes("sendLinePushMessage") && serverSource.includes("LINE_CHANNEL_ACCESS_TOKEN")],
+    ["LINE 綁定 Webhook API", serverSource.includes("verifyLineWebhookSignature") && serverSource.includes('app.post("/line/webhook"')],
     ["LINE 通知前端", appSource.includes("renderNotificationSettingsPage") && appSource.includes("data-line-notification-form")],
+    ["LINE 綁定前端", appSource.includes("renderLineBindingCard") && appSource.includes("handleLineBindingCreate")],
     ["LINE 通知樣式", styleSource.includes(".line-notification-form") && styleSource.includes(".notification-channel-card")],
+    ["LINE 綁定樣式", styleSource.includes(".line-binding-card") && styleSource.includes(".line-binding-command-box")],
     ["每日策略報告 API", serverSource.includes("buildDailyStrategyReport") && serverSource.includes('app.get("/strategy-daily-report"') && serverSource.includes('app.post("/strategy-daily-report/send-line"')],
     ["每日策略報告前端", appSource.includes("renderStrategyDailyReportPage") && appSource.includes("data-strategy-daily-report-form") && appSource.includes("data-strategy-daily-report-send-line")],
     ["每日策略報告頁籤", indexSource.includes('data-page="strategyReports"') && indexSource.includes("每日報告")],
@@ -260,12 +268,19 @@ async function main() {
   checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較前端", appSource.includes("renderStrategyOptimizationComparison") && appSource.includes("data-strategy-optimization-comparison-metric"), "comparison panel"));
   checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較樣式", styleSource.includes(".strategy-optimization-comparison-card") && styleSource.includes(".optimization-preset-compare-card"), "comparison css"));
 
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告今日重點後端", serverSource.includes("buildDailyReportHighlights") && serverSource.includes("buildDailyReportFocusSummary"), "daily report highlights"));
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告最佳參數後端", serverSource.includes("normalizeDailyReportOptimization") && serverSource.includes("optimization = normalizeDailyReportOptimization"), "daily report optimization"));
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告績效指標參數", serverSource.includes("metric: req.query.metric") && appSource.includes('name="metric"') && appSource.includes("strategyDailyReportMetric"), "daily report metric"));
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告今日重點前端", appSource.includes("renderDailyReportHighlights") && appSource.includes("daily-report-highlight-card"), "highlights panel"));
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告最佳參數前端", appSource.includes("renderDailyReportOptimizationSummary") && appSource.includes("daily-report-optimization-card"), "optimization panel"));
-  checks.push(createCheck("V1.4.8.3 報告", "每日報告補強樣式", styleSource.includes(".daily-report-highlight-grid") && styleSource.includes(".daily-report-recommendation-box"), "enhanced report css"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告今日重點後端", serverSource.includes("buildDailyReportHighlights") && serverSource.includes("buildDailyReportFocusSummary"), "daily report highlights"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告最佳參數後端", serverSource.includes("normalizeDailyReportOptimization") && serverSource.includes("optimization = normalizeDailyReportOptimization"), "daily report optimization"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告績效指標參數", serverSource.includes("metric: req.query.metric") && appSource.includes('name="metric"') && appSource.includes("strategyDailyReportMetric"), "daily report metric"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告今日重點前端", appSource.includes("renderDailyReportHighlights") && appSource.includes("daily-report-highlight-card"), "highlights panel"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告最佳參數前端", appSource.includes("renderDailyReportOptimizationSummary") && appSource.includes("daily-report-optimization-card"), "optimization panel"));
+  checks.push(createCheck("V1.4.8.4 報告", "每日報告補強樣式", styleSource.includes(".daily-report-highlight-grid") && styleSource.includes(".daily-report-recommendation-box"), "enhanced report css"));
+
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定碼資料表", readText("stock-radar-api/sql/notification-channels.sql").includes("notification_line_bindings"), "notification_line_bindings"));
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE Webhook 路由", hasRoute(serverSource, "post", "/line/webhook"), "POST /line/webhook"));
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定碼 API", hasRoute(serverSource, "post", "/notification/line-bindings") && hasRoute(serverSource, "get", "/notification/line-bindings"), "line-bindings api"));
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE Webhook 簽章驗證", serverSource.includes("LINE_CHANNEL_SECRET") && serverSource.includes("verifyLineWebhookSignature"), "LINE_CHANNEL_SECRET"));
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定前端卡片", appSource.includes("renderLineBindingCard") && appSource.includes("data-line-binding-create"), "binding card"));
+  checks.push(createCheck("V1.4.8.4 LINE", "LINE 綁定樣式", styleSource.includes(".line-binding-card") && styleSource.includes(".line-binding-status-grid"), "binding css"));
 
   if (apiBaseUrl) {
     const health = await fetchJson(`${apiBaseUrl}/health`).catch((error) => ({ ok: false, status: 0, error: error.message }));

@@ -41,3 +41,28 @@ CREATE TABLE IF NOT EXISTS `notification_send_logs` (
   CONSTRAINT `fk_notification_logs_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_notification_logs_channel_id` FOREIGN KEY (`channel_id`) REFERENCES `notification_channels` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V1.4 通知外送紀錄';
+
+-- V1.4.8.4 LINE 綁定碼資料表
+-- 使用方式：重新執行 npm run notifications:setup
+-- LINE Webhook URL：/line/webhook
+CREATE TABLE IF NOT EXISTS `notification_line_bindings` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(10) unsigned NOT NULL COMMENT '使用者 ID',
+  `binding_code` varchar(16) NOT NULL COMMENT 'LINE 綁定碼',
+  `channel_name` varchar(64) NOT NULL DEFAULT 'LINE 自動綁定' COMMENT '綁定完成後建立的通道名稱',
+  `status` varchar(20) NOT NULL DEFAULT 'pending' COMMENT 'pending/bound/expired',
+  `destination_type` varchar(20) DEFAULT NULL COMMENT 'LINE 目標類型：user/group/room',
+  `destination_id` varchar(128) DEFAULT NULL COMMENT 'LINE User ID / Group ID / Room ID',
+  `line_user_id` varchar(128) DEFAULT NULL COMMENT '觸發綁定的 LINE User ID',
+  `channel_id` bigint(20) unsigned DEFAULT NULL COMMENT '綁定完成後建立的通知通道 ID',
+  `expires_at` datetime NOT NULL COMMENT '綁定碼過期時間',
+  `bound_at` datetime DEFAULT NULL COMMENT '綁定完成時間',
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_notification_line_bindings_code` (`binding_code`),
+  KEY `idx_notification_line_bindings_user_status` (`user_id`,`status`,`expires_at`),
+  KEY `idx_notification_line_bindings_channel` (`channel_id`),
+  CONSTRAINT `fk_notification_line_bindings_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_notification_line_bindings_channel_id` FOREIGN KEY (`channel_id`) REFERENCES `notification_channels` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V1.4.8.4 LINE 綁定碼';

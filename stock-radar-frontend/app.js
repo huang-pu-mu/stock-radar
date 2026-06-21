@@ -71,6 +71,7 @@ const state = {
   strategyBacktestRankings: null,
   notificationChannels: [],
   notificationProviderStatus: null,
+  notificationLineBinding: null,
   notificationLastTestResult: null,
   strategyDailyReport: null,
   strategyDailyReportDate: "",
@@ -6702,9 +6703,68 @@ function renderLineProviderNotice() {
         </div>
       </div>
       <div class="notification-guide-list">
-        <div><strong>1</strong><span>到 LINE Developers 建立 Messaging API Channel，取得 Channel access token。</span></div>
-        <div><strong>2</strong><span>在 Vercel 或本機 .env 設定 <code>LINE_CHANNEL_ACCESS_TOKEN</code>。</span></div>
-        <div><strong>3</strong><span>輸入 LINE User ID / Group ID / Room ID，儲存後按「測試發送」。</span></div>
+        <div><strong>1</strong><span>到 LINE Developers 建立 Messaging API Channel，取得 Channel access token 與 Channel secret。</span></div>
+        <div><strong>2</strong><span>在 Vercel 或本機 .env 設定 <code>LINE_CHANNEL_ACCESS_TOKEN</code> 與 <code>LINE_CHANNEL_SECRET</code>。</span></div>
+        <div><strong>3</strong><span>優先使用下方「產生綁定碼」，在 LINE 對 Bot 傳送 <code>綁定 123456</code> 後，系統會自動建立通知通道。</span></div>
+      </div>
+    </section>
+  `;
+}
+
+function renderLineBindingCard() {
+  const binding = state.notificationLineBinding || null;
+  const lineStatus = getLineProviderStatus();
+  const webhookReady = Boolean(lineStatus.webhook_configured);
+  const activePending = binding && binding.status === "pending";
+  const bound = binding && binding.status === "bound";
+  const commandText = binding?.command_text || "綁定 123456";
+  const webhookUrl = binding?.webhook_url || "/line/webhook";
+
+  const bindingStatus = bound
+    ? `<span class="status-chip good">已綁定</span>`
+    : activePending
+      ? `<span class="status-chip warning">等待 LINE 訊息</span>`
+      : `<span class="status-chip bad">尚未產生</span>`;
+
+  return `
+    <section class="strategy-dashboard-card line-binding-card ${webhookReady ? "" : "warning-card"}">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4.8.4 LINE 自動綁定</p>
+          <h3>不用手動找 User ID</h3>
+          <p>產生綁定碼後，到 LINE 對 Bot 傳送指令，系統會從 webhook 自動取得真正的 LINE User ID / Group ID / Room ID。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>Webhook：${webhookReady ? "已設定 Secret" : "尚未設定 Secret"}</span>
+          <span>狀態：${binding?.status || "尚未產生"}</span>
+        </div>
+      </div>
+
+      <div class="line-binding-status-grid">
+        ${createInfoItem("綁定狀態", bindingStatus)}
+        ${createInfoItem("綁定碼", activePending ? `<code>${escapeHtml(binding.binding_code)}</code>` : bound ? "已完成" : "尚未產生")}
+        ${createInfoItem("LINE 指令", activePending ? `<code>${escapeHtml(commandText)}</code>` : "產生後顯示")}
+        ${createInfoItem("過期時間", binding?.expires_at || "- ")}
+        ${createInfoItem("綁定目標", binding?.destination_id_masked || "尚未綁定")}
+        ${createInfoItem("Webhook URL", `<code>${escapeHtml(webhookUrl)}</code>`)}
+      </div>
+
+      ${webhookReady ? "" : `
+        <div class="status-box warning line-binding-warning">
+          尚未設定 <code>LINE_CHANNEL_SECRET</code>。請在 Vercel API 環境變數加入後重新部署，並到 LINE Developers 設定 Webhook URL：<code>${escapeHtml(webhookUrl)}</code>
+        </div>
+      `}
+
+      ${activePending ? `
+        <div class="line-binding-command-box">
+          <span>請在 LINE 對 Bot 傳送：</span>
+          <strong>${escapeHtml(commandText)}</strong>
+        </div>
+      ` : ""}
+
+      <div class="strategy-track-filter-actions notification-form-actions line-binding-actions">
+        <button class="search-btn" type="button" data-line-binding-create>產生綁定碼</button>
+        <button class="ghost-btn" type="button" data-notification-refresh>我已傳送，重新整理</button>
       </div>
     </section>
   `;
@@ -6717,7 +6777,7 @@ function renderLineNotificationForm() {
         <div>
           <p class="section-kicker">新增 LINE 收件目標</p>
           <h3>LINE 通知通道</h3>
-          <p>第一版先支援手動填入 LINE User ID / Group ID / Room ID。後續可再接 webhook 自動綁定。</p>
+          <p>進階模式：可手動填入 LINE User ID / Group ID / Room ID。一般使用建議先用上方綁定碼自動建立。</p>
         </div>
       </div>
 
@@ -6820,6 +6880,7 @@ function renderNotificationSettingsPage() {
 
   stockList.innerHTML = [
     renderLineProviderNotice(),
+    renderLineBindingCard(),
     renderLineNotificationForm(),
     lastTestResult,
     channels.length ? `<section class="notification-channel-grid">${channels.map(renderNotificationChannelCard).join("")}</section>` : renderNotificationEmptyState(),
@@ -6849,14 +6910,19 @@ async function loadNotificationSettings() {
   renderLoadingCards();
 
   try {
-    const result = await fetchJson("/notification/channels", { method: "GET", auth: true, raw: true });
+    const [result, bindingResult] = await Promise.all([
+      fetchJson("/notification/channels", { method: "GET", auth: true, raw: true }),
+      fetchJson("/notification/line-bindings", { method: "GET", auth: true, raw: true }).catch(() => null),
+    ]);
     state.notificationChannels = Array.isArray(result.data) ? result.data : [];
-    state.notificationProviderStatus = result.provider_status || null;
+    state.notificationProviderStatus = result.provider_status || bindingResult?.provider_status || null;
+    state.notificationLineBinding = bindingResult?.data || null;
     renderNotificationSettingsPage();
     showTemporaryStatus(`已讀取 ${formatNumber(state.notificationChannels.length)} 個通知通道。`, "success");
   } catch (error) {
     state.notificationChannels = [];
     state.notificationProviderStatus = null;
+    state.notificationLineBinding = null;
     setContentSummary([
       { label: "讀取狀態", value: "失敗" },
       { label: "錯誤訊息", value: error.message },
@@ -6871,6 +6937,32 @@ async function loadNotificationSettings() {
       </article>
     `;
     showStatus(`通知外送讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleLineBindingCreate() {
+  if (!isAuthenticated()) {
+    showStatus("請先登入 Google 帳號，才能產生 LINE 綁定碼。", "error");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const result = await fetchJson("/notification/line-bindings", {
+      method: "POST",
+      auth: true,
+      raw: true,
+      body: { channel_name: "LINE 自動綁定" },
+    });
+    state.notificationLineBinding = result.data || null;
+    state.notificationProviderStatus = result.provider_status || state.notificationProviderStatus;
+    renderNotificationSettingsPage();
+    showTemporaryStatus(result.message || "LINE 綁定碼已產生。", "success");
+  } catch (error) {
+    showStatus(`產生 LINE 綁定碼失敗：${escapeHtml(error.message)}`, "error");
   } finally {
     setLoading(false);
   }
@@ -7796,6 +7888,18 @@ stockList.addEventListener("click", (event) => {
       state.strategyStockHistoryCode = code;
       switchPage("strategyStockHistory");
     }
+    return;
+  }
+
+  const lineBindingCreateButton = event.target.closest("[data-line-binding-create]");
+  if (lineBindingCreateButton) {
+    handleLineBindingCreate();
+    return;
+  }
+
+  const notificationRefreshButton = event.target.closest("[data-notification-refresh]");
+  if (notificationRefreshButton) {
+    loadNotificationSettings();
     return;
   }
 

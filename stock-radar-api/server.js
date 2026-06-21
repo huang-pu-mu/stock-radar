@@ -159,7 +159,11 @@ async function requireAuth(req, res, next) {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buffer) => {
+    req.rawBody = buffer?.toString("utf8") || "";
+  },
+}));
 
 function toBigIntValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -247,16 +251,31 @@ function getLineChannelAccessToken() {
   return String(process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
 }
 
+function getLineChannelSecret() {
+  return String(process.env.LINE_CHANNEL_SECRET || "").trim();
+}
+
 function getNotificationProviderStatus() {
   const lineToken = getLineChannelAccessToken();
+  const lineSecret = getLineChannelSecret();
+  const isConfigured = Boolean(lineToken);
+  const webhookConfigured = Boolean(lineSecret);
+
   return {
     line: {
       provider: "LINE Messaging API",
-      is_configured: Boolean(lineToken),
+      is_configured: isConfigured,
+      configured: isConfigured,
+      webhook_configured: webhookConfigured,
       token_masked: lineToken ? maskSecretText(lineToken, 8, 6) : "",
+      secret_masked: lineSecret ? maskSecretText(lineSecret, 6, 4) : "",
       required_env: "LINE_CHANNEL_ACCESS_TOKEN",
-      note: lineToken
-        ? "已設定 LINE_CHANNEL_ACCESS_TOKEN，可測試推播。"
+      webhook_required_env: "LINE_CHANNEL_SECRET",
+      webhook_path: "/line/webhook",
+      note: isConfigured
+        ? (webhookConfigured
+            ? "已設定 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_CHANNEL_SECRET，可推播並支援綁定碼。"
+            : "已設定 LINE_CHANNEL_ACCESS_TOKEN，可測試推播；若要使用綁定碼，請再設定 LINE_CHANNEL_SECRET。")
         : "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，只能保存收件目標，不能實際發送。",
     },
   };
@@ -402,6 +421,153 @@ async function sendLinePushMessage(destinationId, messageText) {
   return {
     status: response.status,
     body: responseJson,
+  };
+}
+
+function normalizeLineBindingCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}
+
+function createLineBindingCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function buildLineWebhookUrl(req) {
+  const configuredBaseUrl = String(process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (configuredBaseUrl) return `${configuredBaseUrl}/line/webhook`;
+
+  const host = req.get("x-forwarded-host") || req.get("host") || "";
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  return host ? `${proto}://${host}/line/webhook` : "/line/webhook";
+}
+
+function verifyLineWebhookSignature(req) {
+  const secret = getLineChannelSecret();
+  if (!secret) {
+    throw new Error("尚未設定 LINE_CHANNEL_SECRET，無法驗證 LINE Webhook 簽章。請先到 Vercel / .env 設定 LINE Messaging API Channel secret。");
+  }
+
+  const signature = String(req.headers["x-line-signature"] || "").trim();
+  if (!signature) {
+    throw new Error("LINE Webhook 缺少 x-line-signature。 ");
+  }
+
+  const body = req.rawBody || JSON.stringify(req.body || {});
+  const expected = crypto.createHmac("sha256", secret).update(body).digest("base64");
+  const received = Buffer.from(signature);
+  const calculated = Buffer.from(expected);
+
+  if (received.length !== calculated.length || !crypto.timingSafeEqual(received, calculated)) {
+    throw new Error("LINE Webhook 簽章驗證失敗。 ");
+  }
+}
+
+function getLineBindingCommandText(code) {
+  return `綁定 ${normalizeLineBindingCode(code)}`;
+}
+
+function getLineDestinationFromEventSource(source = {}) {
+  const sourceType = String(source.type || "user").toLowerCase();
+
+  if (sourceType === "group" && source.groupId) {
+    return { destinationType: "group", destinationId: source.groupId, userId: source.userId || "" };
+  }
+
+  if (sourceType === "room" && source.roomId) {
+    return { destinationType: "room", destinationId: source.roomId, userId: source.userId || "" };
+  }
+
+  return { destinationType: "user", destinationId: source.userId || "", userId: source.userId || "" };
+}
+
+async function sendLineReplyMessage(replyToken, messageText) {
+  const token = getLineChannelAccessToken();
+  if (!token) {
+    throw new Error("尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法回覆 LINE 訊息。");
+  }
+
+  if (!replyToken) {
+    throw new Error("LINE Webhook 缺少 replyToken，無法回覆訊息。");
+  }
+
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [
+        {
+          type: "text",
+          text: String(messageText || "").slice(0, 900),
+        },
+      ],
+    }),
+  });
+
+  const responseText = await response.text();
+  let responseJson = null;
+  try {
+    responseJson = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    responseJson = { raw: responseText.slice(0, 500) };
+  }
+
+  if (!response.ok) {
+    const message = responseJson?.message || responseJson?.details?.[0]?.message || responseText || `LINE API 回覆失敗，HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return { status: response.status, body: responseJson };
+}
+
+async function getLatestLineBindingForUser(userId) {
+  const rows = await query(
+    `
+    SELECT
+      id,
+      user_id,
+      binding_code,
+      channel_name,
+      status,
+      destination_type,
+      destination_id,
+      line_user_id,
+      DATE_FORMAT(expires_at, '%Y-%m-%d %H:%i:%s') AS expires_at,
+      DATE_FORMAT(bound_at, '%Y-%m-%d %H:%i:%s') AS bound_at,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM notification_line_bindings
+    WHERE user_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+    `,
+    [userId],
+  );
+
+  return rows[0] || null;
+}
+
+function mapLineBindingRow(row, req) {
+  if (!row) return null;
+  const code = normalizeLineBindingCode(row.binding_code);
+  return {
+    id: Number(row.id),
+    binding_code: code,
+    command_text: getLineBindingCommandText(code),
+    channel_name: row.channel_name || "LINE 自動綁定",
+    status: row.status || "pending",
+    destination_type: row.destination_type || null,
+    destination_type_label: row.destination_type ? formatLineDestinationType(row.destination_type) : "待綁定",
+    destination_id_masked: row.destination_id ? maskSecretText(row.destination_id, 8, 5) : "尚未綁定",
+    line_user_id_masked: row.line_user_id ? maskSecretText(row.line_user_id, 8, 5) : "尚未取得",
+    expires_at: row.expires_at || null,
+    bound_at: row.bound_at || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    webhook_url: req ? buildLineWebhookUrl(req) : "/line/webhook",
   };
 }
 
@@ -971,8 +1137,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.3";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v57";
+const API_VERSION = "stock-radar-api-v1.4.8.4";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v58";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -991,6 +1157,7 @@ const V13_FEATURE_TABLES = [
   { name: "strategy_backtest_results", label: "策略回測結果", date_column: "signal_trade_date" },
   { name: "notification_channels", label: "通知外送設定", date_column: "updated_at" },
   { name: "notification_send_logs", label: "通知外送紀錄", date_column: "created_at" },
+  { name: "notification_line_bindings", label: "LINE 綁定碼", date_column: "created_at" },
 ];
 
 const V14_FEATURE_TABLES = [
@@ -1025,10 +1192,10 @@ const V14_MODULES = [
   {
     key: "line_notification_delivery",
     name: "LINE 通知外送",
-    progress: 65,
-    status: "first_version",
-    required_tables: ["notification_channels", "notification_send_logs"],
-    required_apis: ["GET /notification/channels", "POST /notification/channels/:channelId/test"],
+    progress: 85,
+    status: "enhanced",
+    required_tables: ["notification_channels", "notification_send_logs", "notification_line_bindings"],
+    required_apis: ["GET /notification/channels", "POST /notification/channels/:channelId/test", "POST /notification/line-bindings", "POST /line/webhook"],
   },
   {
     key: "daily_strategy_report",
@@ -1067,8 +1234,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.3",
-      "service-worker.js 快取版本為 stock-radar-pwa-v57",
+      "GET /health 回傳 stock-radar-api-v1.4.8.4",
+      "service-worker.js 快取版本為 stock-radar-pwa-v58",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -1185,6 +1352,9 @@ const V13_MODULES = [
       "PATCH /notification/channels/:channelId",
       "DELETE /notification/channels/:channelId",
       "POST /notification/channels/:channelId/test",
+      "POST /notification/line-bindings",
+      "GET /notification/line-bindings",
+      "POST /line/webhook",
     ],
   },
 ];
@@ -1549,6 +1719,24 @@ async function getV14FeatureSnapshot() {
     snapshot.notification_send_logs = rows?.[0] || null;
   } else {
     snapshot.notification_send_logs = null;
+  }
+
+  if (await checkTableExists("notification_line_bindings")) {
+    const rows = await safeQuery(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN status = 'pending' AND expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS active_pending_count,
+        SUM(CASE WHEN status = 'bound' THEN 1 ELSE 0 END) AS bound_count,
+        DATE_FORMAT(MAX(updated_at), '%Y-%m-%d %H:%i:%s') AS latest_updated_at
+      FROM notification_line_bindings
+      `,
+      [],
+      [{ total_count: 0, active_pending_count: 0, bound_count: 0, latest_updated_at: null }],
+    );
+    snapshot.notification_line_bindings = rows?.[0] || null;
+  } else {
+    snapshot.notification_line_bindings = null;
   }
 
   snapshot.backtest_result_count = await getStrategyBacktestResultCount();
@@ -2929,15 +3117,17 @@ app.get("/v14/status", async (req, res) => {
     const strategyPresetCount = Number(featureSnapshot.strategy_parameter_presets?.active_count || featureSnapshot.strategy_parameter_presets?.total_count || 0);
     const completedRunCount = Number(featureSnapshot.completed_backtest_run_count || 0);
     const backtestResultCount = Number(featureSnapshot.backtest_result_count || 0);
-    const lineTokenConfigured = Boolean(featureSnapshot.line_provider?.configured);
+    const lineTokenConfigured = Boolean(featureSnapshot.line_provider?.configured || featureSnapshot.line_provider?.is_configured);
+    const lineSecretConfigured = Boolean(featureSnapshot.line_provider?.webhook_configured);
     const lineChannelCount = Number(featureSnapshot.notification_channels?.line_count || 0);
+    const lineBindingCount = Number(featureSnapshot.notification_line_bindings?.bound_count || 0);
 
     const checks = [
       buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.3" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v57" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.4" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v58" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -2973,12 +3163,14 @@ app.get("/v14/status", async (req, res) => {
       ),
       buildCheck(
         "line_notification",
-        "LINE 通知外送",
-        lineTokenConfigured ? (lineChannelCount > 0 ? "pass" : "warn") : "warn",
+        "LINE 通知外送 / 綁定碼",
+        lineTokenConfigured ? (lineChannelCount > 0 || lineBindingCount > 0 ? "pass" : "warn") : "warn",
         lineTokenConfigured
-          ? (lineChannelCount > 0 ? "LINE token 與通知通道已設定。" : "LINE token 已設定，但尚未建立 LINE 通知通道。")
+          ? (lineSecretConfigured
+              ? (lineChannelCount > 0 || lineBindingCount > 0 ? "LINE token、webhook secret 與通知通道已設定，綁定碼流程可用。" : "LINE token 與 webhook secret 已設定，但尚未建立 LINE 通知通道。")
+              : "LINE token 已設定；若要使用綁定碼，請再設定 LINE_CHANNEL_SECRET。")
           : "尚未設定 LINE_CHANNEL_ACCESS_TOKEN，LINE 實際外送會失敗。",
-        { provider: featureSnapshot.line_provider, channels: featureSnapshot.notification_channels },
+        { provider: featureSnapshot.line_provider, channels: featureSnapshot.notification_channels, bindings: featureSnapshot.notification_line_bindings },
       ),
       buildCheck(
         "daily_strategy_report",
@@ -3046,7 +3238,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.3。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.4。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",
@@ -7667,6 +7859,226 @@ app.post("/strategy-daily-report/send-line", requireAuth, async (req, res) => {
       error: error.message,
       provider_status: getNotificationProviderStatus(),
     });
+  }
+});
+
+// ==============================
+// V1.4.8.4 LINE 綁定流程：查詢最近綁定碼
+// GET /notification/line-bindings
+// ==============================
+app.get("/notification/line-bindings", requireAuth, async (req, res) => {
+  try {
+    const row = await getLatestLineBindingForUser(req.user.id);
+    res.json({
+      success: true,
+      provider_status: getNotificationProviderStatus(),
+      data: mapLineBindingRow(row, req),
+    });
+  } catch (error) {
+    console.error("查詢 LINE 綁定碼失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "查詢 LINE 綁定碼失敗，請確認是否已執行 npm run notifications:setup。",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4.8.4 LINE 綁定流程：產生綁定碼
+// POST /notification/line-bindings
+// body: { channel_name }
+// ==============================
+app.post("/notification/line-bindings", requireAuth, async (req, res) => {
+  try {
+    const channelName = normalizeNotificationName(req.body?.channel_name || "LINE 自動綁定");
+    let bindingCode = createLineBindingCode();
+
+    for (let i = 0; i < 6; i += 1) {
+      const existing = await query(
+        `
+        SELECT id
+        FROM notification_line_bindings
+        WHERE binding_code = ?
+        LIMIT 1
+        `,
+        [bindingCode],
+      );
+      if (existing.length === 0) break;
+      bindingCode = createLineBindingCode();
+    }
+
+    await query(
+      `
+      UPDATE notification_line_bindings
+      SET status = 'expired',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = ?
+        AND status = 'pending'
+        AND expires_at > CURRENT_TIMESTAMP
+      `,
+      [req.user.id],
+    );
+
+    await query(
+      `
+      INSERT INTO notification_line_bindings (
+        user_id,
+        binding_code,
+        channel_name,
+        status,
+        expires_at
+      ) VALUES (?, ?, ?, 'pending', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))
+      `,
+      [req.user.id, bindingCode, channelName],
+    );
+
+    const row = await getLatestLineBindingForUser(req.user.id);
+
+    res.json({
+      success: true,
+      message: "LINE 綁定碼已產生，請到 LINE 傳送綁定指令。",
+      provider_status: getNotificationProviderStatus(),
+      data: mapLineBindingRow(row, req),
+    });
+  } catch (error) {
+    console.error("產生 LINE 綁定碼失敗：", error);
+    res.status(500).json({
+      success: false,
+      message: "產生 LINE 綁定碼失敗，請確認是否已執行 npm run notifications:setup。",
+      error: error.message,
+    });
+  }
+});
+
+// ==============================
+// V1.4.8.4 LINE Webhook：接收綁定指令
+// POST /line/webhook
+// ==============================
+app.post("/line/webhook", async (req, res) => {
+  try {
+    verifyLineWebhookSignature(req);
+
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+
+    for (const event of events) {
+      if (event.type !== "message" || event.message?.type !== "text") continue;
+
+      const text = String(event.message.text || "").trim();
+      const match = text.match(/^(?:綁定|bind)\s+([A-Za-z0-9]{4,12})$/i);
+      if (!match) continue;
+
+      const bindingCode = normalizeLineBindingCode(match[1]);
+      const bindingRows = await query(
+        `
+        SELECT
+          id,
+          user_id,
+          binding_code,
+          channel_name
+        FROM notification_line_bindings
+        WHERE binding_code = ?
+          AND status = 'pending'
+          AND expires_at > CURRENT_TIMESTAMP
+        LIMIT 1
+        `,
+        [bindingCode],
+      );
+
+      if (bindingRows.length === 0) {
+        if (event.replyToken) {
+          await sendLineReplyMessage(event.replyToken, "找不到有效的綁定碼，可能已過期。請回到雷達之星 APP 重新產生綁定碼。").catch((error) => console.warn("LINE 綁定失敗回覆送出失敗：", error.message));
+        }
+        continue;
+      }
+
+      const binding = bindingRows[0];
+      const destination = getLineDestinationFromEventSource(event.source || {});
+
+      if (!destination.destinationId) {
+        if (event.replyToken) {
+          await sendLineReplyMessage(event.replyToken, "這次 LINE 事件沒有提供可用的收件 ID，請改用個人聊天室傳送綁定碼。").catch((error) => console.warn("LINE 綁定失敗回覆送出失敗：", error.message));
+        }
+        continue;
+      }
+
+      await query(
+        `
+        INSERT INTO notification_channels (
+          user_id,
+          channel_type,
+          channel_name,
+          destination_type,
+          destination_id,
+          is_enabled,
+          config_json
+        ) VALUES (?, 'line', ?, ?, ?, 1, JSON_OBJECT('provider', 'LINE Messaging API', 'binding_code', ?, 'binding_source', 'webhook'))
+        ON DUPLICATE KEY UPDATE
+          channel_name = VALUES(channel_name),
+          destination_type = VALUES(destination_type),
+          is_enabled = 1,
+          config_json = VALUES(config_json),
+          last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [binding.user_id, binding.channel_name || "LINE 自動綁定", destination.destinationType, destination.destinationId, bindingCode],
+      );
+
+      const channelRows = await query(
+        `
+        SELECT id
+        FROM notification_channels
+        WHERE user_id = ?
+          AND channel_type = 'line'
+          AND destination_id = ?
+        LIMIT 1
+        `,
+        [binding.user_id, destination.destinationId],
+      );
+      const channelId = Number(channelRows?.[0]?.id || 0) || null;
+
+      await query(
+        `
+        UPDATE notification_line_bindings
+        SET status = 'bound',
+            destination_type = ?,
+            destination_id = ?,
+            line_user_id = ?,
+            channel_id = ?,
+            bound_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        `,
+        [destination.destinationType, destination.destinationId, destination.userId || null, channelId, binding.id],
+      );
+
+      await insertNotificationSendLog({
+        userId: binding.user_id,
+        channelId,
+        channelType: "line",
+        templateKey: "line_binding",
+        title: "LINE 綁定成功",
+        messageText: `LINE 綁定成功：${formatLineDestinationType(destination.destinationType)} ${maskSecretText(destination.destinationId, 8, 5)}`,
+        status: "sent",
+      }).catch(() => {});
+
+      if (event.replyToken) {
+        await sendLineReplyMessage(
+          event.replyToken,
+          [
+            "雷達之星 LINE 綁定成功",
+            `通道：${binding.channel_name || "LINE 自動綁定"}`,
+            `類型：${formatLineDestinationType(destination.destinationType)}`,
+            "你現在可以回到 APP 按重新整理，然後發送測試通知。",
+          ].join("\n"),
+        ).catch((error) => console.warn("LINE 綁定成功回覆送出失敗：", error.message));
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("LINE Webhook 處理失敗：", error);
+    res.status(400).json({ success: false, message: "LINE Webhook 處理失敗", error: error.message });
   }
 });
 

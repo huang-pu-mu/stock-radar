@@ -1,4 +1,4 @@
-const CACHE_NAME = "stock-radar-pwa-v57";
+const CACHE_NAME = "stock-radar-pwa-v58";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
