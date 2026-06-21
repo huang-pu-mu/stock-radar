@@ -5188,3 +5188,137 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+/* V1.4.8.3：每日策略報告補強 */
+.daily-report-highlight-card,
+.daily-report-optimization-card {
+  border-color: rgba(93, 224, 255, 0.28);
+}
+
+.daily-report-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.daily-report-highlight-item {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(15, 35, 60, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.daily-report-highlight-item span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-report-highlight-item strong {
+  color: var(--text);
+  font-size: 1.08rem;
+}
+
+.daily-report-highlight-item small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.daily-report-focus-list {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(94, 234, 212, 0.08);
+  border: 1px solid rgba(94, 234, 212, 0.18);
+}
+
+.daily-report-focus-list p {
+  margin: 0 0 8px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.daily-report-focus-list p:last-child {
+  margin-bottom: 0;
+}
+
+.daily-report-recommendation-box {
+  margin-top: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(94, 234, 212, 0.2), rgba(253, 224, 71, 0.14));
+  border: 1px solid rgba(94, 234, 212, 0.24);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.daily-report-recommendation-box span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.daily-report-recommendation-box strong {
+  color: var(--text);
+  font-size: 1.35rem;
+}
+
+.daily-report-recommendation-box small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.daily-report-preset-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.daily-report-preset-mini-grid article {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(15, 35, 60, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.daily-report-preset-mini-grid span,
+.daily-report-preset-mini-grid small {
+  color: var(--muted);
+}
+
+.daily-report-preset-mini-grid strong {
+  color: var(--text);
+  font-size: 1.2rem;
+}
+
+.daily-report-strategy-best-list {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+}
+
+.daily-report-strategy-best-list strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.daily-report-strategy-best-list p {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.daily-report-strategy-best-list p:last-child {
+  margin-bottom: 0;
+}

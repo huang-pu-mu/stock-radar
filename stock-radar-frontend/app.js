@@ -75,6 +75,7 @@ const state = {
   strategyDailyReport: null,
   strategyDailyReportDate: "",
   strategyDailyReportLimit: 10,
+  strategyDailyReportMetric: "5d",
   strategyDailyReportLastSendResult: null,
   strategyTrendMetric: "5d",
   strategyTrendStrategy: "",
@@ -7000,6 +7001,7 @@ function renderStrategyDailyReportFilter(report = null) {
   const channels = getEnabledLineChannels();
   const selectedDate = state.strategyDailyReportDate || report?.trade_date || "";
   const selectedLimit = state.strategyDailyReportLimit || 10;
+  const selectedMetric = state.strategyDailyReportMetric || report?.metric || "5d";
   const channelOptions = channels.map((channel) => `
     <option value="${escapeHtml(String(channel.id))}">${escapeHtml(channel.channel_name || "LINE 通知")}｜${escapeHtml(channel.destination_type_label || "個人")}</option>
   `).join("");
@@ -7024,6 +7026,17 @@ function renderStrategyDailyReportFilter(report = null) {
             ${[5, 10, 15, 20, 30].map((value) => `<option value="${value}" ${Number(selectedLimit) === value ? "selected" : ""}>前 ${value} 筆</option>`).join("")}
           </select>
         </label>
+        <label class="filter-field">
+          <span>報告績效指標</span>
+          <select name="metric">
+            ${[
+              ["1d", "1 日報酬"],
+              ["3d", "3 日報酬"],
+              ["5d", "5 日報酬"],
+              ["current", "目前報酬"],
+            ].map(([value, label]) => `<option value="${value}" ${selectedMetric === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
         <div class="strategy-track-filter-actions">
           <button class="search-btn" type="submit">產生報告</button>
         </div>
@@ -7038,6 +7051,83 @@ function renderStrategyDailyReportFilter(report = null) {
         <button class="detail-btn" type="button" data-strategy-daily-report-send-line ${channels.length && report?.trade_date ? "" : "disabled"}>外送到 LINE</button>
       </div>
       <p class="muted-text">Email / Telegram 已依需求延後，本版只接已完成的 LINE 通道。</p>
+    </section>
+  `;
+}
+
+function renderDailyReportHighlights(report) {
+  const highlights = Array.isArray(report?.highlights) ? report.highlights : [];
+  const focusSummary = Array.isArray(report?.focus_summary) ? report.focus_summary : [];
+
+  return `
+    <section class="strategy-dashboard-card daily-report-highlight-card">
+      <div class="ranking-section-title">
+        <h4>今日重點摘要</h4>
+        <span>自動整理最高分訊號、主力策略、最佳參數與資金流向</span>
+      </div>
+      <div class="daily-report-highlight-grid">
+        ${highlights.map((item) => `
+          <article class="daily-report-highlight-item">
+            <span>${escapeHtml(item.label || "重點")}</span>
+            <strong>${escapeHtml(item.value || "-")}</strong>
+            <small>${escapeHtml(item.note || "")}</small>
+          </article>
+        `).join("") || `<p class="muted-text">目前沒有足夠資料產生今日重點。</p>`}
+      </div>
+      ${focusSummary.length ? `
+        <div class="daily-report-focus-list">
+          ${focusSummary.slice(0, 4).map((text) => `<p>${escapeHtml(text)}</p>`).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderDailyReportOptimizationSummary(optimization = null) {
+  if (!optimization) {
+    return `
+      <section class="strategy-dashboard-card daily-report-optimization-card">
+        <div class="ranking-section-title">
+          <h4>回測最佳參數</h4>
+          <span>資料不足</span>
+        </div>
+        <p class="muted-text">尚無足夠回測比較資料，請先產生保守 / 平衡 / 積極 Run。</p>
+      </section>
+    `;
+  }
+
+  const recommended = optimization.recommended || {};
+  const presets = Array.isArray(optimization.presets) ? optimization.presets : [];
+  const strategies = Array.isArray(optimization.strategy_best_presets) ? optimization.strategy_best_presets : [];
+
+  return `
+    <section class="strategy-dashboard-card daily-report-optimization-card">
+      <div class="ranking-section-title">
+        <h4>回測最佳參數</h4>
+        <span>${escapeHtml(optimization.metric_label || "5 日報酬")}</span>
+      </div>
+      <div class="daily-report-recommendation-box">
+        <span>目前推薦</span>
+        <strong>${escapeHtml(recommended.preset_name || "資料不足")}</strong>
+        <small>勝率 ${formatPercent(recommended.win_rate)}｜平均報酬 ${formatPercent(recommended.avg_return)}｜樣本 ${formatNumber(recommended.available_count)}</small>
+      </div>
+      <div class="daily-report-preset-mini-grid">
+        ${presets.map((item) => `
+          <article>
+            <span>${escapeHtml(item.preset_name || item.preset_key || "參數")}</span>
+            <strong>${formatPercent(item.win_rate)}</strong>
+            <small>平均 ${formatPercent(item.avg_return)}｜樣本 ${formatNumber(item.available_count)}</small>
+          </article>
+        `).join("") || `<p class="muted-text">尚無參數比較資料。</p>`}
+      </div>
+      ${strategies.length ? `
+        <div class="daily-report-strategy-best-list">
+          <strong>策略別最佳參數</strong>
+          ${strategies.slice(0, 4).map((item) => `
+            <p>${escapeHtml(item.strategy_name || "策略")}：${escapeHtml(item.best_preset_name || "-")}｜勝率 ${formatPercent(item.best_win_rate)}</p>
+          `).join("")}
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -7167,6 +7257,8 @@ function renderStrategyDailyReportPage() {
     { label: "強籌碼", value: `${formatNumber(summary.strong_chip_count)} 檔` },
     { label: "法人合計", value: formatReportLots(summary.total_net_lots) },
     { label: "平均籌碼", value: formatNumber(summary.avg_chip_score) },
+    { label: "推薦參數", value: report.optimization?.recommended?.preset_name || "資料不足" },
+    { label: "績效指標", value: report.metric_label || "5 日報酬" },
   ], state.strategyDailyReportLastSendResult || "此報告為策略摘要，不是買賣建議。 ");
 
   setResultHeader({
@@ -7183,6 +7275,8 @@ function renderStrategyDailyReportPage() {
   stockList.innerHTML = [
     renderStrategyDailyReportFilter(report),
     sendResult,
+    renderDailyReportHighlights(report),
+    renderDailyReportOptimizationSummary(report.optimization),
     renderDailyReportStrategySummary(strategies),
     `<section class="strategy-ranking-section daily-report-signal-section">
       <div class="ranking-section-title">
@@ -7215,6 +7309,7 @@ async function loadStrategyDailyReport() {
     if (state.market) params.set("market", state.market);
     if (state.strategyDailyReportDate) params.set("date", state.strategyDailyReportDate);
     params.set("limit", String(state.strategyDailyReportLimit || 10));
+    params.set("metric", state.strategyDailyReportMetric || "5d");
 
     const result = await fetchJson(`/strategy-daily-report?${params.toString()}`, { method: "GET", raw: true });
     state.strategyDailyReport = result.data || null;
@@ -7244,6 +7339,7 @@ function handleStrategyDailyReportSubmit(form) {
   const formData = new FormData(form);
   state.strategyDailyReportDate = String(formData.get("date") || "").trim();
   state.strategyDailyReportLimit = Number(formData.get("limit")) || 10;
+  state.strategyDailyReportMetric = String(formData.get("metric") || "5d");
   state.strategyDailyReportLastSendResult = null;
   loadStrategyDailyReport();
 }
@@ -7275,6 +7371,7 @@ async function handleStrategyDailyReportSendLine(button) {
         date: state.strategyDailyReportDate || state.strategyDailyReport?.trade_date || "",
         market: state.market || "",
         limit: state.strategyDailyReportLimit || 10,
+        metric: state.strategyDailyReportMetric || state.strategyDailyReport?.metric || "5d",
       },
     });
     state.notificationChannels = Array.isArray(result.data) ? result.data : state.notificationChannels;

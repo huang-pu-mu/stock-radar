@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.2";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v56";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.3";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v57";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4.8.2", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v56", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v56", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4.8.3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v57", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v57", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -259,6 +259,13 @@ async function main() {
   checks.push(createCheck("V1.4.8.2 策略", "策略最佳化回測比較路由", hasRoute(serverSource, "get", "/strategy-optimization/backtest-comparison"), "backtest comparison api"));
   checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較前端", appSource.includes("renderStrategyOptimizationComparison") && appSource.includes("data-strategy-optimization-comparison-metric"), "comparison panel"));
   checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較樣式", styleSource.includes(".strategy-optimization-comparison-card") && styleSource.includes(".optimization-preset-compare-card"), "comparison css"));
+
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告今日重點後端", serverSource.includes("buildDailyReportHighlights") && serverSource.includes("buildDailyReportFocusSummary"), "daily report highlights"));
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告最佳參數後端", serverSource.includes("normalizeDailyReportOptimization") && serverSource.includes("optimization = normalizeDailyReportOptimization"), "daily report optimization"));
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告績效指標參數", serverSource.includes("metric: req.query.metric") && appSource.includes('name="metric"') && appSource.includes("strategyDailyReportMetric"), "daily report metric"));
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告今日重點前端", appSource.includes("renderDailyReportHighlights") && appSource.includes("daily-report-highlight-card"), "highlights panel"));
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告最佳參數前端", appSource.includes("renderDailyReportOptimizationSummary") && appSource.includes("daily-report-optimization-card"), "optimization panel"));
+  checks.push(createCheck("V1.4.8.3 報告", "每日報告補強樣式", styleSource.includes(".daily-report-highlight-grid") && styleSource.includes(".daily-report-recommendation-box"), "enhanced report css"));
 
   if (apiBaseUrl) {
     const health = await fetchJson(`${apiBaseUrl}/health`).catch((error) => ({ ok: false, status: 0, error: error.message }));

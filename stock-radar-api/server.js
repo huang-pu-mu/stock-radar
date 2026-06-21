@@ -711,6 +711,120 @@ async function queryDailyReportMarketSummary(tradeDate, market) {
   return rows?.[0] || {};
 }
 
+function pickDailyReportBestStrategy(strategySummary = []) {
+  return [...strategySummary]
+    .filter((item) => Number(item.signal_count || 0) > 0)
+    .sort((a, b) => {
+      const scoreDiff = Number(b.max_strategy_score || 0) - Number(a.max_strategy_score || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return Number(b.signal_count || 0) - Number(a.signal_count || 0);
+    })[0] || null;
+}
+
+function normalizeDailyReportOptimization(comparison = null) {
+  if (!comparison || !comparison.summary) return null;
+
+  const presets = Array.isArray(comparison.presets) ? comparison.presets.slice(0, 3) : [];
+  const strategyComparison = Array.isArray(comparison.strategy_comparison) ? comparison.strategy_comparison.slice(0, 6) : [];
+
+  return {
+    metric: comparison.metric || "5d",
+    metric_label: comparison.metric_label || "5 日報酬",
+    summary: comparison.summary || {},
+    recommended: {
+      preset_key: comparison.summary.recommended_preset_key || "",
+      preset_name: comparison.summary.recommended_preset_name || "",
+      win_rate: comparison.summary.recommended_win_rate ?? null,
+      avg_return: comparison.summary.recommended_avg_return ?? null,
+      available_count: Number(comparison.summary.recommended_available_count || 0),
+    },
+    presets,
+    strategy_best_presets: strategyComparison.map((item) => ({
+      strategy_key: item.strategy_key || "",
+      strategy_name: item.strategy_name || "策略",
+      best_preset_key: item.best_preset_key || "",
+      best_preset_name: item.best_preset_name || "",
+      best_win_rate: item.best_win_rate ?? null,
+      best_avg_return: item.best_avg_return ?? null,
+    })),
+  };
+}
+
+function buildDailyReportHighlights(report) {
+  const summary = report.summary || {};
+  const topSignal = Array.isArray(report.top_signals) ? report.top_signals[0] : null;
+  const bestStrategy = pickDailyReportBestStrategy(report.strategy_summary || []);
+  const topIndustry = Array.isArray(report.industry_flows) ? report.industry_flows[0] : null;
+  const optimization = report.optimization || null;
+  const recommended = optimization?.recommended || null;
+  const highlights = [];
+
+  if (topSignal) {
+    highlights.push({
+      key: "top_signal",
+      label: "今日最高分訊號",
+      value: `${topSignal.stock_code || "-"} ${topSignal.stock_name || ""}`.trim(),
+      note: `${topSignal.strategy_name || "策略訊號"}｜${formatReportNumber(topSignal.strategy_score)} 分`,
+      priority: 1,
+    });
+  }
+
+  if (bestStrategy) {
+    highlights.push({
+      key: "best_strategy",
+      label: "今日主力策略",
+      value: bestStrategy.strategy_name || "策略訊號",
+      note: `${formatReportNumber(bestStrategy.signal_count)} 筆訊號｜最高分 ${formatReportNumber(bestStrategy.max_strategy_score)}`,
+      priority: 2,
+    });
+  }
+
+  if (recommended?.preset_name) {
+    const winRateText = recommended.win_rate === null || recommended.win_rate === undefined
+      ? "勝率資料不足"
+      : `${formatReportNumber(recommended.win_rate, 2)}% 勝率`;
+    const avgReturnText = recommended.avg_return === null || recommended.avg_return === undefined
+      ? "平均報酬待累積"
+      : `平均 ${formatReportNumber(recommended.avg_return, 2)}%`;
+    highlights.push({
+      key: "recommended_preset",
+      label: "回測推薦參數",
+      value: recommended.preset_name,
+      note: `${optimization.metric_label || "5 日報酬"}｜${winRateText}｜${avgReturnText}`,
+      priority: 3,
+    });
+  }
+
+  if (topIndustry) {
+    highlights.push({
+      key: "industry_flow",
+      label: "資金流入產業",
+      value: topIndustry.industry || "未分類",
+      note: `${formatReportLots(topIndustry.total_net_lots)}｜買超 ${formatReportNumber(topIndustry.net_buy_stock_count)} 檔`,
+      priority: 4,
+    });
+  }
+
+  if (!highlights.length) {
+    highlights.push({
+      key: "empty",
+      label: "今日重點",
+      value: "資料累積中",
+      note: `策略訊號 ${formatReportNumber(summary.total_signal_count)} 筆，請先確認每日匯入與回測資料。`,
+      priority: 9,
+    });
+  }
+
+  return highlights;
+}
+
+function buildDailyReportFocusSummary(report) {
+  const highlights = Array.isArray(report.highlights) ? report.highlights : [];
+  const top = highlights.slice(0, 4).map((item) => `${item.label}：${item.value}${item.note ? `（${item.note}）` : ""}`);
+  if (top.length) return top;
+  return ["目前沒有足夠策略訊號，建議確認資料更新與回測任務。"];
+}
+
 function buildDailyReportLineMessage(report) {
   const summary = report.summary || {};
   const topSignals = Array.isArray(report.top_signals) ? report.top_signals.slice(0, 8) : [];
@@ -722,6 +836,16 @@ function buildDailyReportLineMessage(report) {
     `日期：${report.trade_date || "-"}｜市場：${report.market || "全部"}`,
     `策略訊號：${formatReportNumber(summary.total_signal_count)} 筆｜強籌碼：${formatReportNumber(summary.strong_chip_count)} 檔`,
     `法人合計：${formatReportLots(summary.total_net_lots)}｜平均籌碼：${formatReportNumber(summary.avg_chip_score, 2)}`,
+    "",
+    "今日重點：",
+    ...((Array.isArray(report.highlights) && report.highlights.length)
+      ? report.highlights.slice(0, 4).map((item) => `- ${item.label}：${item.value}${item.note ? `｜${item.note}` : ""}`)
+      : ["- 今日重點資料累積中"]),
+    "",
+    "最佳參數：",
+    ...(report.optimization?.recommended?.preset_name
+      ? [`- ${report.optimization.recommended.preset_name}｜${report.optimization.metric_label || "5 日報酬"}｜勝率 ${formatReportNumber(report.optimization.recommended.win_rate, 2)}%｜平均 ${formatReportNumber(report.optimization.recommended.avg_return, 2)}%`]
+      : ["- 尚無足夠回測比較資料"]),
     "",
     "策略分布：",
     ...(strategySummary.length
@@ -748,6 +872,7 @@ async function buildDailyStrategyReport(options = {}) {
   const market = parseMarket(options.market);
   const queryDate = pickReportDate(options.date);
   const limit = normalizeReportLimit(options.limit, 10);
+  const metric = getBacktestMetric(options.metric || "5d");
   const tradeDate = await getLatestReportTradeDate(market, queryDate);
 
   if (!tradeDate) {
@@ -755,6 +880,8 @@ async function buildDailyStrategyReport(options = {}) {
       trade_date: null,
       requested_date: queryDate,
       market: market || "全部",
+      metric: metric.key,
+      metric_label: metric.label,
       summary: {
         total_signal_count: 0,
         top_signal_count: 0,
@@ -763,6 +890,9 @@ async function buildDailyStrategyReport(options = {}) {
       strategy_summary: [],
       top_signals: [],
       industry_flows: [],
+      optimization: null,
+      highlights: [],
+      focus_summary: ["目前沒有可用資料。"],
       line_message: "雷達之星 每日策略報告\n目前沒有可用資料。",
     };
   }
@@ -801,11 +931,25 @@ async function buildDailyStrategyReport(options = {}) {
     })
     .slice(0, limit);
 
+  let optimization = null;
+  try {
+    const comparison = await buildStrategyOptimizationBacktestComparison({
+      metricKey: metric.key,
+      market,
+      limit: 60,
+    });
+    optimization = normalizeDailyReportOptimization(comparison);
+  } catch (error) {
+    console.warn("每日策略報告：回測比較資料讀取失敗", error.message);
+  }
+
   const report = {
     trade_date: tradeDate,
     requested_date: queryDate,
     generated_at: nowTaipeiText(),
     market: market || "全部",
+    metric: metric.key,
+    metric_label: metric.label,
     limit,
     summary: {
       ...summary,
@@ -816,16 +960,19 @@ async function buildDailyStrategyReport(options = {}) {
     strategy_summary: strategySummary,
     top_signals: topSignals,
     industry_flows: industryFlows,
+    optimization,
   };
 
+  report.highlights = buildDailyReportHighlights(report);
+  report.focus_summary = buildDailyReportFocusSummary(report);
   report.line_message = buildDailyReportLineMessage(report);
   return convertBigIntToString(report);
 }
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.2";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v56";
+const API_VERSION = "stock-radar-api-v1.4.8.3";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v57";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -886,10 +1033,10 @@ const V14_MODULES = [
   {
     key: "daily_strategy_report",
     name: "每日策略報告",
-    progress: 70,
-    status: "first_version",
+    progress: 85,
+    status: "enhanced",
     required_tables: ["daily_prices", "institutional_trades", "chip_scores"],
-    required_apis: ["GET /strategy-daily-report", "POST /strategy-daily-report/send-line"],
+    required_apis: ["GET /strategy-daily-report", "POST /strategy-daily-report/send-line", "GET /strategy-optimization/backtest-comparison"],
   },
   {
     key: "strategy_win_rate_trend",
@@ -920,8 +1067,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.2",
-      "service-worker.js 快取版本為 stock-radar-pwa-v56",
+      "GET /health 回傳 stock-radar-api-v1.4.8.3",
+      "service-worker.js 快取版本為 stock-radar-pwa-v57",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -2790,7 +2937,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.2" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v56" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.3" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v57" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -2899,7 +3046,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.2。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.3。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",
@@ -7397,6 +7544,7 @@ app.get("/strategy-daily-report", async (req, res) => {
       date: req.query.date,
       market: req.query.market,
       limit: req.query.limit,
+      metric: req.query.metric,
     });
 
     res.json({
@@ -7447,6 +7595,7 @@ app.post("/strategy-daily-report/send-line", requireAuth, async (req, res) => {
       date: req.body?.date,
       market: req.body?.market,
       limit: req.body?.limit,
+      metric: req.body?.metric,
     });
 
     const messageText = report.line_message || buildDailyReportLineMessage(report);
