@@ -3619,3 +3619,250 @@ body.chart-zoom-open {
     flex-direction: column;
   }
 }
+
+/* V1.4-1-2：桌機 / 平板左側功能列 + 右側內容區 */
+:root {
+  --sidebar-width: 304px;
+}
+
+.app-shell.v14-layout {
+  width: min(1460px, 100%);
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  padding: 20px clamp(14px, 2.4vw, 28px) 56px;
+}
+
+.app-main {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: rgba(8, 19, 34, 0.92);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow);
+}
+
+.app-sidebar-header {
+  display: grid;
+  gap: 16px;
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-sidebar .brand-block h1 {
+  margin-bottom: 8px;
+  font-size: 32px;
+}
+
+.app-sidebar .subtitle {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.app-sidebar .header-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.app-sidebar .auth-mini-card,
+.app-sidebar .install-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.side-nav {
+  min-height: 0;
+  padding: 14px 14px 18px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(86, 214, 255, 0.5) rgba(255, 255, 255, 0.06);
+}
+
+.side-nav::-webkit-scrollbar {
+  width: 8px;
+}
+
+.side-nav::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.055);
+  border-radius: 99px;
+}
+
+.side-nav::-webkit-scrollbar-thumb {
+  background: rgba(86, 214, 255, 0.48);
+  border-radius: 99px;
+}
+
+.side-nav-section {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.038);
+}
+
+.side-nav-section + .side-nav-section {
+  margin-top: 12px;
+}
+
+.side-nav-title {
+  margin: 0 0 10px;
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.side-nav-list.tab-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.side-nav-btn.tab-btn {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 16px;
+  padding: 11px 12px;
+  color: #c7d8ec;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.side-nav-btn.tab-btn:hover {
+  border-color: rgba(86, 214, 255, 0.26);
+  background: rgba(86, 214, 255, 0.075);
+}
+
+.side-nav-btn.tab-btn.active {
+  color: #06111e;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 10px 24px rgba(86, 214, 255, 0.18);
+}
+
+.side-nav-icon {
+  flex: 0 0 auto;
+  width: 24px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.side-nav-btn .tab-count-badge {
+  margin-left: auto;
+}
+
+.main-control-panel {
+  display: grid;
+  gap: 15px;
+}
+
+.main-control-panel .search-panel,
+.main-control-panel .market-row,
+.main-control-panel .help-card {
+  margin-top: 0;
+}
+
+.stock-list,
+.status-box {
+  min-width: 0;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  :root {
+    --sidebar-width: 274px;
+  }
+
+  .app-shell.v14-layout {
+    gap: 16px;
+    padding-inline: 16px;
+  }
+
+  .app-sidebar .brand-block h1 {
+    font-size: 28px;
+  }
+
+  .side-nav-section {
+    padding: 10px;
+  }
+
+  .side-nav-btn.tab-btn {
+    min-height: 48px;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell.v14-layout {
+    width: min(760px, 100%);
+    display: block;
+    padding: 14px 12px 96px;
+  }
+
+  .app-sidebar {
+    position: static;
+    max-height: none;
+    margin-bottom: 14px;
+    border-radius: 26px;
+  }
+
+  .app-sidebar-header {
+    padding: 16px;
+  }
+
+  .app-sidebar .brand-block h1 {
+    font-size: 32px;
+  }
+
+  .side-nav {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 12px 12px 14px;
+    scroll-snap-type: x proximity;
+  }
+
+  .side-nav-section {
+    min-width: min(255px, 78vw);
+    scroll-snap-align: start;
+  }
+
+  .side-nav-list.tab-row {
+    gap: 8px;
+  }
+
+  .side-nav-btn.tab-btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  .main-control-panel {
+    gap: 12px;
+  }
+}

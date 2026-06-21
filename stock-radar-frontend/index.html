@@ -14,21 +14,63 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <header class="app-header">
-      <div class="brand-block">
-        <p class="eyebrow">每日股票觀察</p>
-        <h1>雷達之星</h1>
-        <p class="subtitle">用大字卡片顯示籌碼強弱，先看重點，再看明細。</p>
-      </div>
-      <div class="header-actions">
-        <button id="authMiniCard" class="auth-mini-card" type="button">登入</button>
-        <button id="installBtn" class="install-btn hidden" type="button">安裝 APP</button>
-      </div>
-    </header>
+  <div class="app-shell v14-layout">
+    <aside class="app-sidebar" aria-label="主要功能列">
+      <header class="app-header app-sidebar-header">
+        <div class="brand-block">
+          <p class="eyebrow">每日股票觀察</p>
+          <h1>雷達之星</h1>
+          <p class="subtitle">用大字卡片顯示籌碼強弱，先看重點，再看明細。</p>
+        </div>
+        <div class="header-actions">
+          <button id="authMiniCard" class="auth-mini-card" type="button">登入</button>
+          <button id="installBtn" class="install-btn hidden" type="button">安裝 APP</button>
+        </div>
+      </header>
 
-    <main>
-      <section class="panel" aria-label="股票雷達功能區">
+      <nav class="side-nav" aria-label="功能分類">
+        <section class="side-nav-section" aria-label="市場雷達">
+          <p class="side-nav-title">市場雷達</p>
+          <div class="tab-row side-nav-list" role="tablist" aria-label="市場雷達功能切換">
+            <button class="tab-btn side-nav-btn active" type="button" data-page="radar"><span class="side-nav-icon">📡</span><span>今日雷達</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="foreign"><span class="side-nav-icon">🌐</span><span>外資排行</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="foreignStreak"><span class="side-nav-icon">📈</span><span>外資連買</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="trust"><span class="side-nav-icon">🏦</span><span>投信排行</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="syncBuy"><span class="side-nav-icon">🤝</span><span>法人同步</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="industryFlow"><span class="side-nav-icon">🏭</span><span>產業資金</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="majorHolder"><span class="side-nav-icon">🐋</span><span>主力籌碼</span></button>
+          </div>
+        </section>
+
+        <section class="side-nav-section" aria-label="個股與自選">
+          <p class="side-nav-title">個股與自選</p>
+          <div class="tab-row side-nav-list" role="tablist" aria-label="個股與自選功能切換">
+            <button class="tab-btn side-nav-btn" type="button" data-page="search"><span class="side-nav-icon">🔎</span><span>個股查詢</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="watchlist"><span class="side-nav-icon">⭐</span><span>自選股</span></button>
+            <button class="tab-btn side-nav-btn alert-tab-btn" type="button" data-page="alerts"><span class="side-nav-icon">🔔</span><span>提醒</span> <span id="alertsTabBadge" class="tab-count-badge hidden">0</span></button>
+          </div>
+        </section>
+
+        <section class="side-nav-section" aria-label="策略中心">
+          <p class="side-nav-title">策略中心</p>
+          <div class="tab-row side-nav-list" role="tablist" aria-label="策略中心功能切換">
+            <button class="tab-btn side-nav-btn" type="button" data-page="strategies"><span class="side-nav-icon">🧭</span><span>策略選股</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="strategyTracks"><span class="side-nav-icon">📌</span><span>策略追蹤</span></button>
+            <button class="tab-btn side-nav-btn" type="button" data-page="strategyBacktests"><span class="side-nav-icon">🧪</span><span>策略回測</span></button>
+          </div>
+        </section>
+
+        <section class="side-nav-section" aria-label="系統">
+          <p class="side-nav-title">系統</p>
+          <div class="tab-row side-nav-list" role="tablist" aria-label="系統功能切換">
+            <button class="tab-btn side-nav-btn" type="button" data-page="account"><span class="side-nav-icon">👤</span><span>我的</span></button>
+          </div>
+        </section>
+      </nav>
+    </aside>
+
+    <main class="app-main">
+      <section class="panel main-control-panel" aria-label="股票雷達功能區">
         <div class="section-title-row">
           <div>
             <p class="section-kicker">目前頁面</p>
@@ -36,23 +78,6 @@
             <p id="pageDesc">依籌碼分數排序，顯示全市場高分股</p>
           </div>
           <button id="refreshBtn" class="ghost-btn" type="button">重新整理</button>
-        </div>
-
-        <div class="tab-row" role="tablist" aria-label="功能切換">
-          <button class="tab-btn active" type="button" data-page="radar">今日雷達</button>
-          <button class="tab-btn" type="button" data-page="foreign">外資排行</button>
-          <button class="tab-btn" type="button" data-page="foreignStreak">外資連買</button>
-          <button class="tab-btn" type="button" data-page="trust">投信排行</button>
-          <button class="tab-btn" type="button" data-page="syncBuy">法人同步</button>
-          <button class="tab-btn" type="button" data-page="industryFlow">產業資金</button>
-          <button class="tab-btn" type="button" data-page="majorHolder">主力籌碼</button>
-          <button class="tab-btn" type="button" data-page="search">個股查詢</button>
-          <button class="tab-btn" type="button" data-page="watchlist">自選股</button>
-          <button class="tab-btn" type="button" data-page="strategies">策略選股</button>
-          <button class="tab-btn" type="button" data-page="strategyTracks">策略追蹤</button>
-          <button class="tab-btn" type="button" data-page="strategyBacktests">策略回測</button>
-          <button class="tab-btn alert-tab-btn" type="button" data-page="alerts">提醒 <span id="alertsTabBadge" class="tab-count-badge hidden">0</span></button>
-          <button class="tab-btn" type="button" data-page="account">我的</button>
         </div>
 
         <form id="searchPanel" class="search-panel hidden" aria-label="個股查詢" novalidate>
