@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.1";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v55";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.8.2";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v56";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-8", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v55", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v55", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4.8.2", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v56", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v56", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -145,6 +145,7 @@ async function main() {
     ["get", "/strategies"],
     ["get", "/strategies/definitions"],
     ["get", "/strategy-optimization/presets"],
+    ["get", "/strategy-optimization/backtest-comparison"],
     ["get", "/strategy-watchlist"],
     ["get", "/strategy-watchlist/performance"],
     ["get", "/strategy-watchlist/rankings"],
@@ -183,6 +184,7 @@ async function main() {
     ["V1.4 狀態 API", 'fetchJson("/v14/status"'],
     ["策略回測 API", 'strategy-backtests'],
     ["策略最佳化 API", 'strategy-optimization'],
+    ["策略最佳化回測比較 API", 'strategy-optimization/backtest-comparison'],
     ["策略追蹤停利停損", 'risk-settings'],
     ["通知外送 API", 'notification/channels'],
     ["每日策略報告 API", 'strategy-daily-report'],
@@ -214,6 +216,9 @@ async function main() {
     ["策略最佳化前端 JS", appSource.includes("renderStrategyOptimizationPage") && appSource.includes("buildStrategyOptimizationQueryString")],
     ["策略最佳化樣式 CSS", styleSource.includes(".strategy-optimization-card") && styleSource.includes(".strategy-optimization-param-grid")],
     ["策略最佳化 API 參數", serverSource.includes("STRATEGY_OPTIMIZATION_PRESETS") && serverSource.includes("applyStrategyOptimizationParams")],
+    ["策略最佳化回測比較 API", serverSource.includes("buildStrategyOptimizationBacktestComparison") && serverSource.includes('app.get("/strategy-optimization/backtest-comparison"')],
+    ["策略最佳化回測比較前端", appSource.includes("renderStrategyOptimizationComparison") && appSource.includes("strategyOptimizationComparison")],
+    ["策略最佳化回測比較樣式", styleSource.includes(".strategy-optimization-comparison-card") && styleSource.includes(".optimization-preset-compare-grid")],
     ["回測條件調整 CLI", readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("parseStrategyOptimizationParamsFromArgs") && readText("stock-radar-api/scripts/generateStrategyBacktests.js").includes("applyStrategyOptimizationParams")],
     ["回測條件調整前端", appSource.includes("renderStrategyBacktestConditionPanel") && appSource.includes("buildStrategyBacktestGenerateCommand")],
     ["回測條件調整樣式", styleSource.includes(".strategy-backtest-condition-card") && styleSource.includes(".backtest-command-box")],
@@ -250,6 +255,10 @@ async function main() {
   checks.push(createCheck("V1.4.8.1 UI", "桌機版左側功能列修正標記", styleSource.includes("V1.4.8.1：桌機版左側功能列版面修正"), "desktop sidebar override"));
   checks.push(createCheck("V1.4.8.1 UI", "桌機版 app-main-layout 強制 grid", styleSource.includes("body .app-main-layout") && styleSource.includes("grid-template-columns: 300px minmax(0, 1fr)"), "desktop grid override"));
   checks.push(createCheck("V1.4.8.1 UI", "桌機版隱藏手機導航", styleSource.includes("body .mobile-section-nav") && styleSource.includes("body .mobile-bottom-nav"), "desktop hides mobile nav"));
+
+  checks.push(createCheck("V1.4.8.2 策略", "策略最佳化回測比較路由", hasRoute(serverSource, "get", "/strategy-optimization/backtest-comparison"), "backtest comparison api"));
+  checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較前端", appSource.includes("renderStrategyOptimizationComparison") && appSource.includes("data-strategy-optimization-comparison-metric"), "comparison panel"));
+  checks.push(createCheck("V1.4.8.2 策略", "策略最佳化比較樣式", styleSource.includes(".strategy-optimization-comparison-card") && styleSource.includes(".optimization-preset-compare-card"), "comparison css"));
 
   if (apiBaseUrl) {
     const health = await fetchJson(`${apiBaseUrl}/health`).catch((error) => ({ ok: false, status: 0, error: error.message }));

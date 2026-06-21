@@ -824,8 +824,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.1";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v55";
+const API_VERSION = "stock-radar-api-v1.4.8.2";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v56";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -862,16 +862,16 @@ const V14_MODULES = [
   {
     key: "strategy_parameter_optimization",
     name: "策略參數最佳化",
-    progress: 55,
-    status: "first_version",
+    progress: 85,
+    status: "enhanced",
     required_tables: ["strategy_parameter_presets"],
-    required_apis: ["GET /strategy-optimization/presets", "GET /strategies"],
+    required_apis: ["GET /strategy-optimization/presets", "GET /strategy-optimization/backtest-comparison", "GET /strategies"],
   },
   {
     key: "backtest_condition_adjustment",
     name: "回測條件調整",
-    progress: 60,
-    status: "first_version",
+    progress: 85,
+    status: "enhanced",
     required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
     required_apis: ["GET /strategy-backtests/runs", "GET /strategy-backtests/results", "CLI strategy-backtests:generate"],
   },
@@ -894,8 +894,8 @@ const V14_MODULES = [
   {
     key: "strategy_win_rate_trend",
     name: "策略勝率趨勢",
-    progress: 70,
-    status: "first_version",
+    progress: 80,
+    status: "enhanced",
     required_tables: ["strategy_backtest_runs", "strategy_backtest_results"],
     required_apis: ["GET /strategy-backtests/trends"],
   },
@@ -920,8 +920,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.1",
-      "service-worker.js 快取版本為 stock-radar-pwa-v55",
+      "GET /health 回傳 stock-radar-api-v1.4.8.2",
+      "service-worker.js 快取版本為 stock-radar-pwa-v56",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -938,6 +938,7 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
     group: "策略功能",
     items: [
       "策略最佳化可讀取保守 / 平衡 / 積極參數",
+      "策略最佳化可比較保守 / 平衡 / 積極三組回測勝率",
       "回測條件調整可產生 npm 回測指令",
       "策略勝率趨勢可顯示最近 Run 勝率變化",
       "個股策略歷史可用股票代號查詢歷史訊號",
@@ -2789,7 +2790,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.1" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v55" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.2" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v56" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -2898,7 +2899,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.1。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.2。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",
@@ -6037,6 +6038,327 @@ function parseBacktestParamsPreset(paramsJson) {
   }
 }
 
+function getStrategyOptimizationPresetMeta(key) {
+  const normalizedKey = String(key || "").trim() || "unknown";
+  const preset = STRATEGY_OPTIMIZATION_PRESETS.find((item) => item.key === normalizedKey);
+  if (preset) {
+    return {
+      key: preset.key,
+      name: preset.name,
+      badge: preset.badge || "參數",
+      description: preset.description || "",
+    };
+  }
+
+  return {
+    key: normalizedKey,
+    name: normalizedKey === "unknown" ? "未標示參數" : normalizedKey,
+    badge: "未分類",
+    description: "舊版或手動產生的回測 Run 沒有標示參數預設。",
+  };
+}
+
+function safeBacktestAverage(value, decimals = 4) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? Number(numberValue.toFixed(decimals)) : null;
+}
+
+function createEmptyPresetAggregate(key) {
+  const meta = getStrategyOptimizationPresetMeta(key);
+  return {
+    preset_key: meta.key,
+    preset_name: meta.name,
+    preset_badge: meta.badge,
+    preset_description: meta.description,
+    run_count: 0,
+    signal_count: 0,
+    available_count: 0,
+    positive_count: 0,
+    negative_count: 0,
+    pending_count: 0,
+    weighted_return_sum: 0,
+    latest_run: null,
+    best_run: null,
+  };
+}
+
+function finalizePresetAggregate(item) {
+  const availableCount = Number(item.available_count || 0);
+  const winRate = availableCount > 0 ? (Number(item.positive_count || 0) / availableCount) * 100 : null;
+  const avgReturn = availableCount > 0 ? Number(item.weighted_return_sum || 0) / availableCount : null;
+  const sampleScore = Math.min(10, Math.log10(Math.max(Number(item.available_count || 0), 1)) * 4);
+  const qualityScore = winRate === null ? null : Number((winRate + (avgReturn || 0) * 2 + sampleScore).toFixed(4));
+
+  return {
+    preset_key: item.preset_key,
+    preset_name: item.preset_name,
+    preset_badge: item.preset_badge,
+    preset_description: item.preset_description,
+    run_count: Number(item.run_count || 0),
+    signal_count: Number(item.signal_count || 0),
+    available_count: availableCount,
+    positive_count: Number(item.positive_count || 0),
+    negative_count: Number(item.negative_count || 0),
+    pending_count: Number(item.pending_count || 0),
+    win_rate: winRate === null ? null : Number(winRate.toFixed(4)),
+    avg_return: avgReturn === null ? null : Number(avgReturn.toFixed(4)),
+    quality_score: qualityScore,
+    latest_run: item.latest_run,
+    best_run: item.best_run,
+  };
+}
+
+function normalizeOptimizationRunRow(row, field) {
+  const presetKey = parseBacktestParamsPreset(row.params_json) || "unknown";
+  return {
+    run_id: Number(row.run_id),
+    run_name: row.run_name,
+    start_date: row.start_date,
+    end_date: row.end_date,
+    market_type: row.market_type || "全部",
+    strategy_key: row.strategy_key || "全部",
+    limit_per_strategy: Number(row.limit_per_strategy || 0),
+    trading_days_count: Number(row.trading_days_count || 0),
+    preset_key: presetKey,
+    preset_name: getStrategyOptimizationPresetMeta(presetKey).name,
+    completed_at: row.completed_at || "",
+    created_at: row.created_at || "",
+    signal_count: Number(row.signal_count || 0),
+    available_count: Number(row.available_count || 0),
+    avg_return: row.avg_return === null ? null : safeBacktestAverage(row.avg_return),
+    win_rate: row.win_rate === null ? null : safeBacktestAverage(row.win_rate),
+    positive_count: Number(row.positive_count || 0),
+    negative_count: Number(row.negative_count || 0),
+    pending_count: Number(row.pending_count || 0),
+    selected_metric_field: field,
+  };
+}
+
+async function buildStrategyOptimizationBacktestComparison({ metricKey = "5d", strategyKey = "", market = "", limit = 60 } = {}) {
+  const metric = getBacktestMetric(metricKey);
+  const field = metric.field;
+  const strategy = normalizeStrategyKeyValue(strategyKey);
+  const marketType = parseMarket(market);
+  const safeLimit = parsePositiveInteger(limit, 60, 3, 120);
+
+  const resultJoinConditions = ["r.run_id = br.id"];
+  const resultJoinParams = [];
+
+  if (marketType) {
+    resultJoinConditions.push("r.market_type = ?");
+    resultJoinParams.push(marketType);
+  }
+
+  if (strategy) {
+    resultJoinConditions.push("r.strategy_key = ?");
+    resultJoinParams.push(strategy);
+  }
+
+  const runRows = await query(
+    `
+    SELECT
+      br.id AS run_id,
+      br.run_name,
+      DATE_FORMAT(br.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(br.end_date, '%Y-%m-%d') AS end_date,
+      br.market_type,
+      br.strategy_key,
+      br.limit_per_strategy,
+      br.trading_days_count,
+      br.params_json,
+      DATE_FORMAT(br.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+      DATE_FORMAT(br.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      COUNT(r.id) AS signal_count,
+      SUM(r.${field} IS NOT NULL) AS available_count,
+      AVG(r.${field}) AS avg_return,
+      AVG(CASE WHEN r.${field} IS NULL THEN NULL WHEN r.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+      SUM(CASE WHEN r.${field} > 0 THEN 1 ELSE 0 END) AS positive_count,
+      SUM(CASE WHEN r.${field} < 0 THEN 1 ELSE 0 END) AS negative_count,
+      SUM(CASE WHEN r.id IS NOT NULL AND r.${field} IS NULL THEN 1 ELSE 0 END) AS pending_count
+    FROM (
+      SELECT *
+      FROM strategy_backtest_runs
+      WHERE status = 'completed'
+      ORDER BY completed_at DESC, id DESC
+      LIMIT ?
+    ) br
+    LEFT JOIN strategy_backtest_results r
+      ON ${resultJoinConditions.join(" AND ")}
+    GROUP BY br.id
+    ORDER BY br.completed_at DESC, br.id DESC
+    `,
+    [safeLimit, ...resultJoinParams],
+  );
+
+  const normalizedRuns = runRows.map((row) => normalizeOptimizationRunRow(row, field));
+  const presetMap = new Map(STRATEGY_OPTIMIZATION_PRESETS.map((preset) => [preset.key, createEmptyPresetAggregate(preset.key)]));
+
+  for (const run of normalizedRuns) {
+    if (!presetMap.has(run.preset_key)) {
+      presetMap.set(run.preset_key, createEmptyPresetAggregate(run.preset_key));
+    }
+    const item = presetMap.get(run.preset_key);
+    item.run_count += 1;
+    item.signal_count += run.signal_count;
+    item.available_count += run.available_count;
+    item.positive_count += run.positive_count;
+    item.negative_count += run.negative_count;
+    item.pending_count += run.pending_count;
+    if (run.avg_return !== null && run.available_count > 0) {
+      item.weighted_return_sum += Number(run.avg_return) * Number(run.available_count);
+    }
+    if (!item.latest_run || Number(run.run_id) > Number(item.latest_run.run_id || 0)) item.latest_run = run;
+    if (run.win_rate !== null && (!item.best_run || Number(run.win_rate) > Number(item.best_run.win_rate || -9999))) item.best_run = run;
+  }
+
+  const presetComparison = Array.from(presetMap.values())
+    .map(finalizePresetAggregate)
+    .sort((a, b) => {
+      const scoreDiff = Number(b.quality_score ?? -9999) - Number(a.quality_score ?? -9999);
+      if (scoreDiff !== 0) return scoreDiff;
+      return Number(b.available_count || 0) - Number(a.available_count || 0);
+    })
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      recommendation_label: index === 0 && item.quality_score !== null ? "目前最佳" : item.available_count > 0 ? "可觀察" : "資料不足",
+    }));
+
+  const runIds = normalizedRuns.map((row) => row.run_id).filter((id) => Number.isFinite(id) && id > 0);
+  let strategyComparison = [];
+
+  if (runIds.length > 0) {
+    const placeholders = runIds.map(() => "?").join(", ");
+    const strategyConditions = [`r.run_id IN (${placeholders})`];
+    const strategyParams = [...runIds];
+
+    if (marketType) {
+      strategyConditions.push("r.market_type = ?");
+      strategyParams.push(marketType);
+    }
+
+    if (strategy) {
+      strategyConditions.push("r.strategy_key = ?");
+      strategyParams.push(strategy);
+    }
+
+    const strategyRows = await query(
+      `
+      SELECT
+        r.run_id,
+        br.params_json,
+        r.strategy_key,
+        r.strategy_name,
+        COUNT(*) AS signal_count,
+        SUM(r.${field} IS NOT NULL) AS available_count,
+        AVG(r.${field}) AS avg_return,
+        AVG(CASE WHEN r.${field} IS NULL THEN NULL WHEN r.${field} > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+        SUM(CASE WHEN r.${field} > 0 THEN 1 ELSE 0 END) AS positive_count,
+        SUM(CASE WHEN r.${field} < 0 THEN 1 ELSE 0 END) AS negative_count,
+        SUM(CASE WHEN r.${field} IS NULL THEN 1 ELSE 0 END) AS pending_count
+      FROM strategy_backtest_results r
+      INNER JOIN strategy_backtest_runs br ON br.id = r.run_id
+      WHERE ${strategyConditions.join(" AND ")}
+      GROUP BY r.run_id, br.params_json, r.strategy_key, r.strategy_name
+      `,
+      strategyParams,
+    );
+
+    const strategyMap = new Map();
+    for (const row of strategyRows) {
+      const strategyKey = row.strategy_key || "unknown";
+      const presetKey = parseBacktestParamsPreset(row.params_json) || "unknown";
+      const mapKey = `${strategyKey}::${presetKey}`;
+      if (!strategyMap.has(mapKey)) {
+        strategyMap.set(mapKey, {
+          strategy_key: strategyKey,
+          strategy_name: row.strategy_name || getStrategyDefinition(strategyKey).name || strategyKey,
+          preset_key: presetKey,
+          preset_name: getStrategyOptimizationPresetMeta(presetKey).name,
+          signal_count: 0,
+          available_count: 0,
+          positive_count: 0,
+          negative_count: 0,
+          pending_count: 0,
+          weighted_return_sum: 0,
+        });
+      }
+      const item = strategyMap.get(mapKey);
+      const availableCount = Number(row.available_count || 0);
+      item.signal_count += Number(row.signal_count || 0);
+      item.available_count += availableCount;
+      item.positive_count += Number(row.positive_count || 0);
+      item.negative_count += Number(row.negative_count || 0);
+      item.pending_count += Number(row.pending_count || 0);
+      if (row.avg_return !== null && availableCount > 0) {
+        item.weighted_return_sum += Number(row.avg_return) * availableCount;
+      }
+    }
+
+    const groupedByStrategy = new Map();
+    for (const item of strategyMap.values()) {
+      const winRate = item.available_count > 0 ? (item.positive_count / item.available_count) * 100 : null;
+      const avgReturn = item.available_count > 0 ? item.weighted_return_sum / item.available_count : null;
+      const point = {
+        preset_key: item.preset_key,
+        preset_name: item.preset_name,
+        signal_count: item.signal_count,
+        available_count: item.available_count,
+        win_rate: winRate === null ? null : Number(winRate.toFixed(4)),
+        avg_return: avgReturn === null ? null : Number(avgReturn.toFixed(4)),
+        positive_count: item.positive_count,
+        negative_count: item.negative_count,
+        pending_count: item.pending_count,
+      };
+      if (!groupedByStrategy.has(item.strategy_key)) {
+        groupedByStrategy.set(item.strategy_key, {
+          strategy_key: item.strategy_key,
+          strategy_name: item.strategy_name,
+          preset_points: [],
+        });
+      }
+      groupedByStrategy.get(item.strategy_key).preset_points.push(point);
+    }
+
+    strategyComparison = Array.from(groupedByStrategy.values()).map((item) => {
+      const points = item.preset_points.sort((a, b) => Number(b.win_rate ?? -9999) - Number(a.win_rate ?? -9999));
+      const best = points[0] || null;
+      return {
+        ...item,
+        preset_points: points,
+        best_preset_key: best?.preset_key || "",
+        best_preset_name: best?.preset_name || "",
+        best_win_rate: best?.win_rate ?? null,
+        best_avg_return: best?.avg_return ?? null,
+      };
+    }).sort((a, b) => Number(b.best_win_rate ?? -9999) - Number(a.best_win_rate ?? -9999));
+  }
+
+  const recommended = presetComparison.find((item) => item.quality_score !== null) || presetComparison[0] || null;
+
+  return convertBigIntToString({
+    metric: metric.key,
+    metric_label: metric.label,
+    limit: safeLimit,
+    filters: {
+      strategy: strategy || "全部",
+      market: marketType || "全部",
+    },
+    summary: {
+      preset_count: presetComparison.length,
+      run_count: normalizedRuns.length,
+      recommended_preset_key: recommended?.preset_key || "",
+      recommended_preset_name: recommended?.preset_name || "",
+      recommended_win_rate: recommended?.win_rate ?? null,
+      recommended_avg_return: recommended?.avg_return ?? null,
+      recommended_available_count: recommended?.available_count || 0,
+    },
+    presets: presetComparison,
+    strategy_comparison: strategyComparison,
+    recent_runs: normalizedRuns.slice(0, Math.min(12, normalizedRuns.length)),
+  });
+}
+
 function createBacktestTrendDirection(points = []) {
   const validPoints = points
     .map((point) => ({ ...point, win_rate: Number(point.win_rate) }))
@@ -6281,6 +6603,30 @@ async function buildBacktestWinRateTrend({ metricKey = "5d", strategyKey = "", m
     strategy_trends: strategyTrends,
   });
 }
+
+// ==============================
+// V1.4.8.2：策略最佳化與回測整合補強
+// GET /strategy-optimization/backtest-comparison?metric=5d&strategy=legal_strength&market=上市&limit=60
+// ==============================
+app.get("/strategy-optimization/backtest-comparison", async (req, res) => {
+  try {
+    const comparison = await buildStrategyOptimizationBacktestComparison({
+      metricKey: req.query.metric,
+      strategyKey: req.query.strategy,
+      market: req.query.market,
+      limit: req.query.limit,
+    });
+
+    res.json({
+      success: true,
+      data: comparison,
+    });
+  } catch (error) {
+    console.error("查詢策略最佳化回測比較失敗：", error);
+    res.status(500).json({ success: false, message: "查詢策略最佳化回測比較失敗", error: error.message });
+  }
+});
+
 
 // ==============================
 // V1.4-6：策略勝率趨勢

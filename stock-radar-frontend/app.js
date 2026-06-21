@@ -53,6 +53,10 @@ const state = {
   strategyOptimizationFields: [],
   strategyOptimizationPresets: [],
   strategyOptimizationSummary: null,
+  strategyOptimizationComparison: null,
+  strategyOptimizationComparisonError: "",
+  strategyOptimizationComparisonMetric: "5d",
+  strategyOptimizationComparisonLimit: 60,
   strategyBacktestRunId: "",
   strategyBacktestMetric: "5d",
   strategyBacktestRankingMode: "overview",
@@ -664,6 +668,143 @@ function renderStrategyOptimizationForm() {
   `;
 }
 
+function buildStrategyOptimizationComparisonQueryString() {
+  const params = new URLSearchParams();
+  params.set("metric", state.strategyOptimizationComparisonMetric || "5d");
+  params.set("limit", String(state.strategyOptimizationComparisonLimit || 60));
+  if (state.strategyOptimizationStrategyKey) params.set("strategy", state.strategyOptimizationStrategyKey);
+  if (state.market) params.set("market", state.market);
+  return params.toString();
+}
+
+function renderOptimizationMetricOptions(selectedKey = state.strategyOptimizationComparisonMetric) {
+  return STRATEGY_BACKTEST_METRICS.map((item) => `
+    <option value="${escapeHtml(item.key)}" ${item.key === selectedKey ? "selected" : ""}>${escapeHtml(item.label)}</option>
+  `).join("");
+}
+
+function renderStrategyOptimizationComparison() {
+  const comparison = state.strategyOptimizationComparison;
+  const metricLabel = comparison?.metric_label || getBacktestMetric(state.strategyOptimizationComparisonMetric).label;
+
+  if (state.strategyOptimizationComparisonError) {
+    return `
+      <section class="strategy-dashboard-card strategy-optimization-comparison-card error-card">
+        <div class="alerts-dashboard-header strategy-dashboard-header">
+          <div>
+            <p class="section-kicker">V1.4.8.2 回測比較</p>
+            <h3>回測比較讀取失敗</h3>
+            <p>${escapeHtml(state.strategyOptimizationComparisonError)}</p>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  if (!comparison) {
+    return `
+      <section class="strategy-dashboard-card strategy-optimization-comparison-card">
+        <div class="alerts-dashboard-header strategy-dashboard-header">
+          <div>
+            <p class="section-kicker">V1.4.8.2 回測比較</p>
+            <h3>保守 / 平衡 / 積極比較讀取中</h3>
+            <p>系統正在彙整最近回測 Run 的勝率、平均報酬與訊號數。</p>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  const presets = Array.isArray(comparison.presets) ? comparison.presets : [];
+  const strategies = Array.isArray(comparison.strategy_comparison) ? comparison.strategy_comparison : [];
+  const recommendedKey = comparison.summary?.recommended_preset_key || "";
+
+  return `
+    <section class="strategy-dashboard-card strategy-optimization-comparison-card">
+      <div class="alerts-dashboard-header strategy-dashboard-header">
+        <div>
+          <p class="section-kicker">V1.4.8.2 策略最佳化與回測整合</p>
+          <h3>保守 / 平衡 / 積極回測比較</h3>
+          <p>依 ${escapeHtml(metricLabel)} 比較不同參數預設的勝率、平均報酬與樣本數，協助判斷目前哪組參數較適合。</p>
+        </div>
+        <div class="strategy-meta-box">
+          <span>建議：${escapeHtml(comparison.summary?.recommended_preset_name || "資料不足")}</span>
+          <span>Run：${formatNumber(comparison.summary?.run_count || 0)}</span>
+        </div>
+      </div>
+
+      <form class="strategy-optimization-compare-filter" data-strategy-optimization-compare-form>
+        <label class="filter-field">
+          <span>比較指標</span>
+          <select name="comparisonMetric" data-strategy-optimization-comparison-metric>
+            ${renderOptimizationMetricOptions(comparison.metric || state.strategyOptimizationComparisonMetric)}
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>最近 Run 數</span>
+          <input name="comparisonLimit" type="number" min="3" max="120" step="1" value="${escapeHtml(comparison.limit || state.strategyOptimizationComparisonLimit || 60)}" />
+        </label>
+        <button class="ghost-btn" type="submit">更新比較</button>
+      </form>
+
+      <div class="optimization-recommendation-card">
+        <span>目前推薦參數</span>
+        <strong>${escapeHtml(comparison.summary?.recommended_preset_name || "資料不足")}</strong>
+        <small>勝率 ${comparison.summary?.recommended_win_rate === null || comparison.summary?.recommended_win_rate === undefined ? "待資料" : formatPercent(comparison.summary.recommended_win_rate)} ｜ 平均報酬 ${formatReturnPercent(comparison.summary?.recommended_avg_return)} ｜ 樣本 ${formatNumber(comparison.summary?.recommended_available_count || 0)} 筆</small>
+      </div>
+
+      <div class="optimization-preset-compare-grid">
+        ${presets.map((item) => `
+          <article class="optimization-preset-compare-card ${item.preset_key === recommendedKey ? "recommended" : ""}">
+            <div class="compare-card-head">
+              <span>${escapeHtml(item.preset_badge || "參數")}</span>
+              <strong>${escapeHtml(item.preset_name || item.preset_key)}</strong>
+            </div>
+            <div class="compare-metric-row">
+              <div><small>勝率</small><strong>${item.win_rate === null || item.win_rate === undefined ? "待資料" : formatPercent(item.win_rate)}</strong></div>
+              <div><small>平均報酬</small><strong class="${getReturnClass(item.avg_return)}">${formatReturnPercent(item.avg_return)}</strong></div>
+              <div><small>有效樣本</small><strong>${formatNumber(item.available_count || 0)}</strong></div>
+              <div><small>Run 數</small><strong>${formatNumber(item.run_count || 0)}</strong></div>
+            </div>
+            <p>${escapeHtml(item.recommendation_label || "可觀察")}｜訊號 ${formatNumber(item.signal_count || 0)} 筆，正報酬 ${formatNumber(item.positive_count || 0)} 筆。</p>
+            ${item.latest_run ? `<small>最近 Run：#${escapeHtml(item.latest_run.run_id)}｜${escapeHtml(item.latest_run.completed_at || "-")}</small>` : `<small>尚無回測 Run。</small>`}
+          </article>
+        `).join("")}
+      </div>
+
+      ${strategies.length ? `
+        <div class="optimization-strategy-compare-table-wrap">
+          <h4>策略別最佳參數</h4>
+          <table class="optimization-strategy-compare-table">
+            <thead>
+              <tr>
+                <th>策略</th>
+                <th>最佳參數</th>
+                <th>勝率</th>
+                <th>平均報酬</th>
+                <th>參數比較</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${strategies.map((item) => `
+                <tr>
+                  <td><strong>${escapeHtml(item.strategy_name || item.strategy_key)}</strong></td>
+                  <td>${escapeHtml(item.best_preset_name || "-")}</td>
+                  <td>${item.best_win_rate === null || item.best_win_rate === undefined ? "待資料" : formatPercent(item.best_win_rate)}</td>
+                  <td class="${getReturnClass(item.best_avg_return)}">${formatReturnPercent(item.best_avg_return)}</td>
+                  <td>${(item.preset_points || []).map((point) => `${escapeHtml(point.preset_name)} ${point.win_rate === null || point.win_rate === undefined ? "待資料" : formatPercent(point.win_rate)}`).join("｜")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div class="strategy-result-note">目前沒有足夠的策略別回測資料。請先分別產生 balanced / conservative / aggressive 的回測 Run。</div>
+      `}
+    </section>
+  `;
+}
+
 function renderStrategyOptimizationPage() {
   const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
   const activeStrategy = getStrategyOption(state.strategyOptimizationStrategyKey);
@@ -676,7 +817,8 @@ function renderStrategyOptimizationPage() {
     { label: "符合筆數", value: `${formatNumber(rows.length)} 筆` },
     { label: "平均分數", value: avgScore },
     { label: "市場", value: state.market || "全部" },
-  ], "策略最佳化先用不同門檻預覽候選清單；後續會把參數接到回測條件與勝率比較。");
+    { label: "回測推薦", value: state.strategyOptimizationComparison?.summary?.recommended_preset_name || "待資料" },
+  ], "策略最佳化會同時預覽候選清單，並比較保守 / 平衡 / 積極三組參數的回測表現。");
 
   setResultHeader({
     title: "策略最佳化結果",
@@ -687,6 +829,7 @@ function renderStrategyOptimizationPage() {
 
   stockList.innerHTML = `
     ${renderStrategyOptimizationForm()}
+    ${renderStrategyOptimizationComparison()}
     <div class="strategy-result-note">
       目前套用 <strong>${escapeHtml(activeStrategy.name)}</strong> + <strong>${escapeHtml(preset.name)}</strong>。
       這是參數預覽清單，請再搭配策略回測與個股明細確認。
@@ -703,6 +846,10 @@ function renderStrategyOptimizationPage() {
 
 function handleStrategyOptimizationSubmit(form) {
   const formData = new FormData(form);
+  const comparisonMetric = String(formData.get("comparisonMetric") || "").trim();
+  const comparisonLimit = Number(formData.get("comparisonLimit"));
+  if (comparisonMetric) state.strategyOptimizationComparisonMetric = comparisonMetric;
+  if (Number.isFinite(comparisonLimit) && comparisonLimit >= 3) state.strategyOptimizationComparisonLimit = comparisonLimit;
   const strategy = String(formData.get("strategy") || "").trim();
   state.strategyOptimizationStrategyKey = getStrategyOptions().some((item) => item.key === strategy) ? strategy : "legal_strength";
 
@@ -726,6 +873,15 @@ function handleStrategyOptimizationPreset(button) {
   loadStrategyOptimization();
 }
 
+function handleStrategyOptimizationCompareSubmit(form) {
+  const formData = new FormData(form);
+  const comparisonMetric = String(formData.get("comparisonMetric") || "5d").trim();
+  const comparisonLimit = Number(formData.get("comparisonLimit"));
+  state.strategyOptimizationComparisonMetric = STRATEGY_BACKTEST_METRICS.some((item) => item.key === comparisonMetric) ? comparisonMetric : "5d";
+  state.strategyOptimizationComparisonLimit = Number.isFinite(comparisonLimit) ? Math.max(3, Math.min(comparisonLimit, 120)) : 60;
+  loadStrategyOptimization();
+}
+
 async function loadStrategyOptimization() {
   setLoading(true);
   renderLoadingCards();
@@ -740,8 +896,18 @@ async function loadStrategyOptimization() {
       state.strategyOptimizationParams = { ...(getStrategyOptimizationPreset().params || {}) };
     }
 
-    const result = await fetchJson(`/strategies?${buildStrategyOptimizationQueryString()}`, { method: "GET", raw: true });
+    const [result, comparisonResult] = await Promise.all([
+      fetchJson(`/strategies?${buildStrategyOptimizationQueryString()}`, { method: "GET", raw: true }),
+      fetchJson(`/strategy-optimization/backtest-comparison?${buildStrategyOptimizationComparisonQueryString()}`, { method: "GET", raw: true }).catch((error) => ({ success: false, error: error.message })),
+    ]);
     state.latestRows = Array.isArray(result.data) ? result.data : [];
+    if (comparisonResult?.success) {
+      state.strategyOptimizationComparison = comparisonResult.data || null;
+      state.strategyOptimizationComparisonError = "";
+    } else {
+      state.strategyOptimizationComparison = null;
+      state.strategyOptimizationComparisonError = comparisonResult?.error || comparisonResult?.message || "策略最佳化回測比較暫時無法讀取。";
+    }
     state.strategyOptimizationSummary = {
       strategy: result.strategy,
       strategy_name: result.strategy_name,
@@ -7404,6 +7570,8 @@ function switchPage(page) {
   }
   if (page === "strategyOptimize") {
     state.strategyOptimizationSummary = null;
+    state.strategyOptimizationComparison = null;
+    state.strategyOptimizationComparisonError = "";
   }
   if (page === "strategyBacktests") {
     state.strategyBacktestSummary = null;
@@ -7472,6 +7640,13 @@ stockList.addEventListener("submit", (event) => {
   if (strategyBacktestConditionForm) {
     event.preventDefault();
     handleStrategyBacktestConditionSubmit(strategyBacktestConditionForm);
+    return;
+  }
+
+  const strategyOptimizationCompareForm = event.target.closest("[data-strategy-optimization-compare-form]");
+  if (strategyOptimizationCompareForm) {
+    event.preventDefault();
+    handleStrategyOptimizationCompareSubmit(strategyOptimizationCompareForm);
     return;
   }
 
