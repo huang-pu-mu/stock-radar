@@ -73,17 +73,29 @@
       </aside>
 
       <main class="content-shell">
-      <section class="panel" aria-label="股票雷達功能區">
-        <div class="section-title-row">
-          <div>
-            <p class="section-kicker">目前頁面</p>
-            <h2 id="pageTitle">今日雷達</h2>
-            <p id="pageDesc">依籌碼分數排序，顯示全市場高分股</p>
+        <section class="panel page-control-panel" aria-label="股票雷達功能區">
+          <div class="section-title-row page-title-row">
+            <div class="page-title-copy">
+              <p class="section-kicker">目前頁面</p>
+              <h2 id="pageTitle">今日雷達</h2>
+              <p id="pageDesc">依籌碼分數排序，顯示全市場高分股</p>
+              <div id="pageMetaBar" class="page-meta-bar" aria-label="頁面狀態摘要"></div>
+            </div>
+            <div class="page-action-stack">
+              <button id="refreshBtn" class="ghost-btn" type="button">重新整理</button>
+            </div>
           </div>
-          <button id="refreshBtn" class="ghost-btn" type="button">重新整理</button>
-        </div>
 
-        <nav id="mobileSectionNav" class="mobile-section-nav" aria-label="頁內次功能切換">
+          <div id="contentFilterShell" class="content-filter-shell" aria-label="篩選與操作">
+            <div class="content-filter-header">
+              <div>
+                <p class="section-kicker">篩選列</p>
+                <h3 id="contentFilterTitle">篩選與操作</h3>
+                <p id="contentFilterDesc">切換市場或功能後，下方清單會自動更新。</p>
+              </div>
+            </div>
+
+            <nav id="mobileSectionNav" class="mobile-section-nav" aria-label="頁內次功能切換">
           <div class="mobile-subnav-group" data-mobile-subnav-group="market">
             <button class="tab-btn mobile-subnav-btn active" type="button" data-page="radar">今日</button>
             <button class="tab-btn mobile-subnav-btn" type="button" data-page="foreign">外資</button>
@@ -134,14 +146,17 @@
           <button class="market-btn" type="button" data-market="上櫃">上櫃</button>
         </div>
 
-        <div id="helpCard" class="help-card" aria-label="使用說明">
-          <strong>簡單看法：</strong>
-          <span>分數越高代表籌碼越強；點「看明細」可以查看外資、投信、成交量。</span>
+          <div id="helpCard" class="help-card" aria-label="使用說明">
+            <strong>簡單看法：</strong>
+            <span>分數越高代表籌碼越強；點「看明細」可以查看外資、投信、成交量。</span>
+          </div>
         </div>
       </section>
 
-      <section id="statusBox" class="status-box hidden"></section>
-      <section id="stockList" class="stock-list" aria-label="股票列表"></section>
+        <section id="contentSummaryBar" class="content-summary-bar hidden" aria-label="統計摘要"></section>
+        <section id="resultHeader" class="result-header-card hidden" aria-label="清單摘要"></section>
+        <section id="statusBox" class="status-box hidden"></section>
+        <section id="stockList" class="stock-list" aria-label="股票列表"></section>
       </main>
     </div>
   </div>

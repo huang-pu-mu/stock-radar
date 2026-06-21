@@ -227,8 +227,8 @@ function isValidDateText(value) {
 }
 
 
-const API_VERSION = "stock-radar-api-v1.4.1.8";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v46";
+const API_VERSION = "stock-radar-api-v1.4.1.9";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v47";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },

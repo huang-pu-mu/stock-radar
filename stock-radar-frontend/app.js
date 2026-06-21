@@ -90,6 +90,12 @@ const installBtn = document.getElementById("installBtn");
 const authMiniCard = document.getElementById("authMiniCard");
 const alertsTabBadges = document.querySelectorAll(".alerts-tab-badge");
 const backToTopBtn = document.getElementById("backToTopBtn");
+const pageMetaBar = document.getElementById("pageMetaBar");
+const contentFilterShell = document.getElementById("contentFilterShell");
+const contentFilterTitle = document.getElementById("contentFilterTitle");
+const contentFilterDesc = document.getElementById("contentFilterDesc");
+const contentSummaryBar = document.getElementById("contentSummaryBar");
+const resultHeader = document.getElementById("resultHeader");
 
 
 
@@ -133,6 +139,161 @@ function updateNavigationState(page = state.page) {
 
   mobileSubnavGroups.forEach((group) => {
     group.classList.toggle("hidden", group.dataset.mobileSubnavGroup !== activeGroup);
+  });
+}
+
+const PAGE_CONTENT_CONFIG = {
+  radar: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換上市 / 上櫃後，今日雷達清單會重新整理。", resultTitle: "今日雷達清單", resultDesc: "依籌碼分數排序，優先看高分與狀態偏多的股票。" },
+  foreign: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，外資買超排行會重新整理。", resultTitle: "外資買超清單", resultDesc: "依外資今日買超張數排序。" },
+  foreignStreak: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，外資連買排行會重新整理。", resultTitle: "外資連買清單", resultDesc: "依外資連續買超與累計買超排序。" },
+  trust: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，投信連買排行會重新整理。", resultTitle: "投信連買清單", resultDesc: "依投信連續買超與累計買超排序。" },
+  syncBuy: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，法人同步買超清單會重新整理。", resultTitle: "法人同步買超清單", resultDesc: "找出外資與投信同向買超的股票。" },
+  industryFlow: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，產業資金流向會重新整理。", resultTitle: "產業資金流向清單", resultDesc: "依產業彙總法人買賣超，快速看資金流向。" },
+  majorHolder: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，主力籌碼清單會重新整理。", resultTitle: "主力籌碼清單", resultDesc: "依 TDCC 大戶持股變化觀察籌碼集中度。" },
+  search: { groupLabel: "個股與自選", filterTitle: "個股查詢", filterDesc: "輸入股票代號後，下方會顯示行情、法人與籌碼資料。", resultTitle: "個股查詢結果", resultDesc: "查詢後會顯示股票目前資料。" },
+  watchlist: { groupLabel: "個股與自選", filterTitle: "自選股操作", filterDesc: "登入後可查看與調整自己的自選股清單。", resultTitle: "自選股清單", resultDesc: "顯示你目前保存的股票，並可調整順序或移除。" },
+  alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
+  strategies: { groupLabel: "策略中心", filterTitle: "策略與市場篩選", filterDesc: "選擇策略與市場後，下方會顯示符合條件的股票。", resultTitle: "策略選股清單", resultDesc: "依策略分數排序，快速整理觀察名單。" },
+  strategyTracks: { groupLabel: "策略中心", filterTitle: "策略追蹤篩選", filterDesc: "依股票、策略、狀態與報酬排序追蹤後續表現。", resultTitle: "策略追蹤清單", resultDesc: "檢查加入追蹤後的報酬與停利停損狀態。" },
+  strategyBacktests: { groupLabel: "策略中心", filterTitle: "回測條件", filterDesc: "依 Run ID、策略、結果、排序與搜尋條件查看歷史訊號。", resultTitle: "策略回測清單", resultDesc: "顯示歷史策略訊號與後續 1 / 3 / 5 日績效。" },
+  account: { groupLabel: "系統", filterTitle: "帳號與系統狀態", filterDesc: "查看登入狀態、自選股統計與系統驗收結果。", resultTitle: "我的狀態卡片", resultDesc: "確認 API、PWA、提醒與策略功能是否正常。" },
+};
+
+function getPageContentConfig(page = state.page) {
+  return PAGE_CONTENT_CONFIG[page] || PAGE_CONTENT_CONFIG.radar;
+}
+
+function renderOverviewChip(label, value, extraClass = "") {
+  return `
+    <span class="overview-chip ${extraClass}">
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(value)}</strong>
+    </span>
+  `;
+}
+
+function updatePageMetaBar(extraItems = []) {
+  if (!pageMetaBar) return;
+  const config = getPageContentConfig();
+  const marketLabel = state.market || "全部";
+  const items = [
+    { label: "分類", value: config.groupLabel },
+    { label: "市場", value: marketLabel },
+    ...extraItems,
+  ];
+
+  pageMetaBar.innerHTML = items.map((item) => renderOverviewChip(item.label, item.value, item.className || "")).join("");
+}
+
+function updateContentFilterHeader() {
+  const config = getPageContentConfig();
+  if (contentFilterTitle) contentFilterTitle.textContent = config.filterTitle;
+  if (contentFilterDesc) contentFilterDesc.textContent = config.filterDesc;
+  if (contentFilterShell) {
+    contentFilterShell.dataset.page = state.page;
+    contentFilterShell.dataset.group = getPageGroup();
+  }
+}
+
+function setContentSummary(items = [], note = "") {
+  if (!contentSummaryBar) return;
+  const safeItems = items.filter((item) => item && item.value !== undefined && item.value !== null && String(item.value) !== "");
+  if (safeItems.length === 0 && !note) {
+    contentSummaryBar.classList.add("hidden");
+    contentSummaryBar.innerHTML = "";
+    return;
+  }
+
+  contentSummaryBar.classList.remove("hidden");
+  contentSummaryBar.innerHTML = `
+    <div class="summary-metric-grid">
+      ${safeItems.map((item) => `
+        <div class="summary-metric-card ${item.className || ""}">
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${escapeHtml(item.value)}</strong>
+        </div>
+      `).join("")}
+    </div>
+    ${note ? `<p class="summary-note">${escapeHtml(note)}</p>` : ""}
+  `;
+}
+
+function setResultHeader(options = {}) {
+  if (!resultHeader) return;
+  const config = getPageContentConfig();
+  const title = options.title || config.resultTitle;
+  const desc = options.desc || config.resultDesc;
+  const badge = options.badge || "清單";
+  const countText = options.countText || "";
+
+  resultHeader.classList.remove("hidden");
+  resultHeader.innerHTML = `
+    <div>
+      <p class="section-kicker">${escapeHtml(options.kicker || "內容區")}</p>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(desc)}</p>
+    </div>
+    <div class="result-header-meta">
+      ${countText ? `<span class="summary-pill score-mid">${escapeHtml(countText)}</span>` : ""}
+      <span class="summary-pill">${escapeHtml(badge)}</span>
+    </div>
+  `;
+}
+
+function clearContentOverview() {
+  setContentSummary();
+  if (resultHeader) {
+    resultHeader.classList.add("hidden");
+    resultHeader.innerHTML = "";
+  }
+}
+
+function getFirstNonEmptyRowValue(rows, keys) {
+  for (const row of rows || []) {
+    const value = pick(row, keys, "");
+    if (value !== undefined && value !== null && String(value).trim()) return value;
+  }
+  return "";
+}
+
+function averageNumericValue(rows, keys) {
+  const values = (rows || [])
+    .map((row) => toNumber(pick(row, keys, null)))
+    .filter((value) => value !== null);
+
+  if (values.length === 0) return "-";
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return Number.isInteger(average) ? formatNumber(average) : average.toFixed(1);
+}
+
+function getTopRowLabel(rows) {
+  const first = Array.isArray(rows) ? rows[0] : null;
+  if (!first) return "-";
+  const code = pick(first, ["stock_code", "code", "industry"], "-");
+  const name = pick(first, ["stock_name", "name", "industry"], code);
+  return `${name} ${code}`.trim();
+}
+
+function updateListOverview(rows = [], options = {}) {
+  const count = Array.isArray(rows) ? rows.length : 0;
+  const marketLabel = state.market || options.market || "全部";
+  const dateValue = getFirstNonEmptyRowValue(rows, ["trade_date", "date", "signal_trade_date", "reference_date", "week_date", "created_at"]);
+  const averageScore = averageNumericValue(rows, ["chip_score", "total_score", "score", "strategy_score", "flow_score", "major_holder_score"]);
+  const countUnit = options.countUnit || (state.page === "industryFlow" ? "個產業" : "筆");
+
+  setContentSummary([
+    { label: "目前市場", value: marketLabel },
+    { label: "清單數量", value: `${formatNumber(count)} ${countUnit}` },
+    { label: "資料日", value: dateValue ? formatDate(dateValue) : "-" },
+    { label: options.topLabel || "清單第一筆", value: getTopRowLabel(rows) },
+    { label: "平均分數", value: averageScore },
+  ], options.note || "右側內容區已整理為：上方看條件與摘要，下方看清單 / 卡片 / 統計。");
+
+  setResultHeader({
+    title: options.title,
+    desc: options.desc,
+    badge: options.badge || (state.market || "全部"),
+    countText: `${formatNumber(count)} ${countUnit}`,
   });
 }
 
@@ -926,6 +1087,9 @@ function updatePageText() {
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
   marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
+  updateContentFilterHeader();
+  updatePageMetaBar();
+  setResultHeader({ badge: "待更新" });
 
 
 
@@ -1487,6 +1651,12 @@ function renderTechnicalCharts(enrichedRows) {
 }
 
 function renderLoadingCards() {
+  setContentSummary([
+    { label: "讀取狀態", value: "讀取中" },
+    { label: "目前市場", value: state.market || "全部" },
+    { label: "目前功能", value: pageTitle?.textContent || getPageContentConfig().resultTitle },
+  ], "正在從 API 取得資料，完成後會更新統計摘要與清單標題。");
+  setResultHeader({ title: "資料讀取中", desc: "正在更新右側內容區，請稍候。", badge: "Loading" });
   stockList.innerHTML = Array.from({ length: 4 })
     .map(
       () => `
@@ -1505,6 +1675,12 @@ function renderLoadingCards() {
 }
 
 function renderSearchIntro() {
+  setContentSummary([
+    { label: "查詢狀態", value: "等待輸入" },
+    { label: "最近查詢", value: `${formatNumber(getRecentSearches().length)} 筆` },
+    { label: "建議範例", value: "2330 / 2317 / 0050" },
+  ], "輸入股票代號後，右側清單會改為個股資料卡片與統計摘要。");
+  setResultHeader({ title: "請輸入股票代號", desc: "查詢結果會顯示在這個區塊，包含行情、法人、籌碼與分數拆解。", badge: "等待查詢" });
   stockList.innerHTML = `
     <article class="search-intro-card">
       <div class="intro-icon">🔎</div>
@@ -1603,7 +1779,11 @@ function rerenderCurrentContent() {
     return;
   }
 
-  if (["radar", "foreign", "foreignStreak", "trust", "syncBuy"].includes(state.page) && state.latestRows.length > 0) {
+  if (["radar", "foreign", "foreignStreak", "trust", "syncBuy", "industryFlow", "majorHolder", "watchlist"].includes(state.page) && state.latestRows.length > 0) {
+    updateListOverview(state.latestRows, {
+      countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
+      badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
+    });
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
     return;
   }
@@ -1634,6 +1814,11 @@ function rerenderCurrentContent() {
 }
 
 function renderWatchlistLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "自選股", value: "需登入後讀取" },
+  ], "自選股清單會依 Google 帳號分開保存。");
+  setResultHeader({ title: "請先登入", desc: "登入後才能查看自己的自選股清單與提醒設定。", badge: "需要登入" });
   stockList.innerHTML = `
     <article class="search-intro-card watchlist-login-card">
       <div class="intro-icon">⭐</div>
@@ -1647,6 +1832,11 @@ function renderWatchlistLoginPrompt() {
 }
 
 function renderEmptyWatchlist() {
+  setContentSummary([
+    { label: "自選股數量", value: "0 檔" },
+    { label: "建議動作", value: "先加入自選" },
+  ], "可以從今日雷達、策略選股或個股查詢把股票加入自選股。");
+  setResultHeader({ title: "自選股清單", desc: "目前沒有自選股。", badge: "空清單", countText: "0 檔" });
   stockList.innerHTML = `
     <article class="search-intro-card watchlist-empty-card">
       <div class="intro-icon">⭐</div>
@@ -2131,6 +2321,11 @@ async function handleStrategyRiskSettingSubmit(form) {
 }
 
 function renderStrategyTrackingLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "策略追蹤", value: "需登入後讀取" },
+  ], "策略追蹤清單會依 Google 帳號分開保存。");
+  setResultHeader({ title: "請先登入", desc: "登入後才能查看策略追蹤與後續績效。", badge: "需要登入" });
   stockList.innerHTML = `
     <article class="search-intro-card watchlist-login-card">
       <div class="intro-icon">📌</div>
@@ -2201,6 +2396,11 @@ function renderStrategyTrackingFilters(resultCount = 0) {
 
 function renderEmptyStrategyTracking() {
   const hasFilters = hasStrategyTrackFilters();
+  setContentSummary([
+    { label: "追蹤筆數", value: "0 筆" },
+    { label: "篩選狀態", value: hasFilters ? "已套用" : "未套用" },
+  ], hasFilters ? "目前沒有符合篩選條件的策略追蹤。" : "目前還沒有策略追蹤，請先從策略選股加入。");
+  setResultHeader({ title: "策略追蹤清單", desc: hasFilters ? "目前沒有符合篩選條件的追蹤資料。" : "目前尚未加入策略追蹤。", badge: "空清單", countText: "0 筆" });
   stockList.innerHTML = `
     ${renderStrategyTrackingFilters(0)}
     <article class="search-intro-card strategies-empty-card">
@@ -2470,6 +2670,15 @@ function renderStrategyTrackingPage() {
     return;
   }
 
+  updateListOverview(rows, {
+    title: "策略追蹤清單",
+    desc: "依目前篩選條件顯示已加入追蹤的股票與績效。",
+    badge: "追蹤",
+    countUnit: "筆",
+    topLabel: "追蹤第一筆",
+    note: "這裡只表示追蹤後的統計結果，不是買賣建議。",
+  });
+
   stockList.innerHTML = `
     ${renderStrategyTrackingFilters(rows.length)}
     ${renderStrategyTrackingSummary(rows)}
@@ -2505,6 +2714,11 @@ async function loadStrategyTracking() {
     showTemporaryStatus(`已更新 ${state.latestRows.length} 筆策略追蹤。`, "success");
   } catch (error) {
     state.latestRows = [];
+    setContentSummary([
+      { label: "讀取狀態", value: "策略追蹤失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認登入狀態、API 與策略追蹤資料表是否正常。");
+    setResultHeader({ title: "策略追蹤讀取失敗", desc: "目前無法取得策略追蹤績效資料。", badge: "讀取失敗" });
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
         <div class="intro-icon">⚠️</div>
@@ -2669,8 +2883,15 @@ function renderStrategyCard(row, index) {
 
 function renderStrategiesPage() {
   const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+  const activeStrategy = getStrategyOption();
 
   if (rows.length === 0) {
+    setContentSummary([
+      { label: "目前策略", value: activeStrategy.name },
+      { label: "目前市場", value: state.market || "全部" },
+      { label: "符合筆數", value: "0 筆" },
+    ], "目前沒有符合條件的股票，可以切換策略或市場後再查看。");
+    setResultHeader({ title: "策略選股清單", desc: "目前沒有符合策略條件的股票。", badge: "空清單", countText: "0 筆" });
     stockList.innerHTML = `
       ${renderStrategyButtons()}
       <article class="search-intro-card strategies-empty-card">
@@ -2682,6 +2903,15 @@ function renderStrategiesPage() {
     `;
     return;
   }
+
+  updateListOverview(rows, {
+    title: "策略選股清單",
+    desc: `${activeStrategy.name} 的符合股票清單，依策略分數排序。`,
+    badge: activeStrategy.short_name || activeStrategy.name,
+    countUnit: "筆",
+    topLabel: "策略第一名",
+    note: "策略清單用途是快速篩選觀察股，不代表一定會上漲。",
+  });
 
   stockList.innerHTML = `
     ${renderStrategyButtons()}
@@ -2785,6 +3015,11 @@ function getAlertFilterQuery() {
 }
 
 function renderAlertsLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "提醒中心", value: "需登入後讀取" },
+  ], "提醒中心會依自選股產生提醒，因此需要先登入。");
+  setResultHeader({ title: "請先登入", desc: "登入後才能查看提醒清單與提醒規則。", badge: "需要登入" });
   stockList.innerHTML = `
     <article class="search-intro-card alerts-login-card">
       <div class="intro-icon">🔔</div>
@@ -2826,6 +3061,17 @@ function renderAlertSummaryCards(summary = {}) {
       ${createInfoItem("最新提醒日", formatDate(latestDate))}
     </div>
   `;
+}
+
+function getAlertFilterLabel(filter) {
+  const map = {
+    unread: "未讀",
+    all: "全部",
+    read: "已讀",
+    high: "高重要性",
+  };
+
+  return map[filter] || "未讀";
 }
 
 function renderAlertFilterButton(filter, label) {
@@ -2930,6 +3176,14 @@ function renderAlertsPage(result = null) {
   state.latestRows = rows;
   state.alertSummary = summary;
   state.alertUnreadCount = Number(summary.unread_count || state.alertUnreadCount || 0);
+
+  setContentSummary([
+    { label: "目前篩選", value: getAlertFilterLabel(state.alertFilter) },
+    { label: "顯示筆數", value: `${formatNumber(rows.length)} 筆` },
+    { label: "未讀提醒", value: `${formatNumber(summary.unread_count ?? state.alertUnreadCount ?? 0)} 筆` },
+    { label: "高重要性", value: `${formatNumber(summary.high_count ?? 0)} 筆` },
+  ], "提醒清單可用未讀 / 已讀 / 高重要性快速切換，下方卡片可標記已讀。");
+  setResultHeader({ title: state.alertMode === "rules" ? "提醒設定" : "提醒清單", desc: state.alertMode === "rules" ? "調整自選股提醒條件。" : "顯示自選股產生的最新提醒。", badge: getAlertFilterLabel(state.alertFilter), countText: `${formatNumber(rows.length)} 筆` });
 
   stockList.innerHTML = [
     renderAlertsToolbar(summary),
@@ -3036,6 +3290,12 @@ function renderRuleCard(rule) {
 function renderAlertRulesPage(result = null) {
   const rows = Array.isArray(result?.data) ? result.data : [];
   state.alertRules = rows;
+
+  setContentSummary([
+    { label: "設定股票", value: `${formatNumber(rows.length)} 檔` },
+    { label: "模式", value: "提醒規則" },
+  ], "每檔自選股可以分別調整提醒條件與門檻。");
+  setResultHeader({ title: "提醒設定", desc: "調整每檔自選股的法人、主力、量能、分數與行事曆提醒。", badge: "設定", countText: `${formatNumber(rows.length)} 檔` });
 
   stockList.innerHTML = [
     `
@@ -3165,6 +3425,11 @@ async function loadAlerts() {
     await updateAlertsBadge();
     showTemporaryStatus(`已更新 ${Number(result.count || 0)} 筆提醒。`, "success");
   } catch (error) {
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 是否正常啟動，或稍後重新整理。");
+    setResultHeader({ title: `${getPageContentConfig().resultTitle}讀取失敗`, desc: "目前無法取得這個頁面的資料。", badge: "讀取失敗" });
     stockList.innerHTML = "";
     showStatus(`提醒讀取失敗：${escapeHtml(error.message)}`, "error");
   } finally {
@@ -3524,6 +3789,14 @@ async function loadV13Status({ force = false } = {}) {
 
 function renderAccountPage() {
   hideStatus();
+
+  setContentSummary([
+    { label: "登入狀態", value: state.user ? "已登入" : "尚未登入" },
+    { label: "自選股", value: `${formatNumber(state.watchlistCodes?.size || 0)} 檔` },
+    { label: "未讀提醒", value: `${formatNumber(state.alertUnreadCount || 0)} 筆` },
+    { label: "V1.3 狀態", value: state.v13StatusLoading ? "檢查中" : (state.v13Status?.overall_status || state.v13StatusError || "尚未檢查") },
+  ], "我的頁已整理成帳號狀態、功能入口與系統狀態卡片。");
+  setResultHeader({ title: "我的狀態卡片", desc: "查看登入、自選股、提醒與系統檢查狀態。", badge: state.user ? "已登入" : "未登入" });
 
   if (state.user) {
     const picture = state.user.picture_url
@@ -4200,6 +4473,15 @@ function renderSearchResult(summaryData) {
   const dealerNet = pick(summaryData, ["dealer_net", "dealer_buy_sell", "dealer_net_buy", "dealer_net_buy_sell"], "-");
   const totalNet = pick(summaryData, ["total_net"], "-");
 
+  setContentSummary([
+    { label: "股票", value: `${name} ${code}` },
+    { label: "市場 / 產業", value: `${market} / ${industry}` },
+    { label: "籌碼分數", value: formatNumber(score), className: scoreClass },
+    { label: "資料日", value: formatDate(tradeDate) },
+    { label: "法人合計", value: formatNumber(totalNet) },
+  ], "個股查詢結果已整理為行情、法人、籌碼狀態與分數拆解四個區塊。");
+  setResultHeader({ title: `查詢結果：${name} ${code}`, desc: "下方卡片顯示此股票目前資料，若要看策略歷史訊號，後續 V1.4-7 會新增個股策略歷史紀錄。", badge: "個股查詢", countText: "1 檔" });
+
   stockList.innerHTML = `
     <article class="stock-card search-result-card">
       <div class="stock-top">
@@ -4335,6 +4617,11 @@ async function searchStock(codeFromButton = "") {
   stockSearchInput.value = stockCode;
   hideStatus();
   setSearchLoading(true);
+  setContentSummary([
+    { label: "查詢狀態", value: "查詢中" },
+    { label: "股票代號", value: stockCode },
+  ], "正在查詢個股摘要資料。");
+  setResultHeader({ title: `查詢中：${stockCode}`, desc: "正在取得行情、法人與籌碼資料。", badge: "查詢中" });
   stockList.innerHTML = `
     <article class="stock-card loading-card">
       <div class="skeleton skeleton-title"></div>
@@ -4362,6 +4649,11 @@ async function searchStock(codeFromButton = "") {
     showTemporaryStatus(`已查到 ${escapeHtml(pick(summaryData, ["stock_name", "name"], stockCode))}。`, "success");
   } catch (error) {
     const isNotFound = String(error.message).toLowerCase().includes("not found");
+    setContentSummary([
+      { label: "查詢狀態", value: "查無資料" },
+      { label: "股票代號", value: stockCode },
+    ], "請確認股票代號是否正確，或檢查資料庫是否已匯入這檔股票。");
+    setResultHeader({ title: `查不到：${stockCode}`, desc: "目前沒有找到這檔股票的摘要資料。", badge: "查無資料" });
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
         <div class="intro-icon">⚠️</div>
@@ -4806,6 +5098,12 @@ function renderStrategyBacktestResultsSection(rows) {
 }
 
 function renderStrategyBacktestEmpty() {
+  setContentSummary([
+    { label: "Run ID", value: state.strategyBacktestRunId || "-" },
+    { label: "搜尋", value: state.strategyBacktestSearch || "未搜尋" },
+    { label: "結果筆數", value: "0 筆" },
+  ], "目前沒有符合條件的回測資料，可以清除篩選或重新產生回測結果。");
+  setResultHeader({ title: "策略回測清單", desc: "目前沒有符合條件的回測資料。", badge: "空清單", countText: "0 筆" });
   stockList.innerHTML = `
     ${renderStrategyBacktestFilters()}
     <article class="search-intro-card">
@@ -4821,13 +5119,23 @@ function renderStrategyBacktestEmpty() {
 
 function renderStrategyBacktestPage() {
   const rows = Array.isArray(state.latestRows) ? state.latestRows : [];
+  const hasSearch = Boolean(String(state.strategyBacktestSearch || "").trim());
+  const totalCount = Number(state.strategyBacktestResultCount || rows.length || 0);
 
   if (!state.strategyBacktestSummary && rows.length === 0) {
     renderStrategyBacktestEmpty();
     return;
   }
 
-  const hasSearch = Boolean(String(state.strategyBacktestSearch || "").trim());
+  setContentSummary([
+    { label: "Run ID", value: state.strategyBacktestRunId || "-" },
+    { label: "目前搜尋", value: hasSearch ? state.strategyBacktestSearch : "未搜尋" },
+    { label: "結果筆數", value: `${formatNumber(totalCount)} 筆` },
+    { label: "績效指標", value: getBacktestMetric().label },
+    { label: "排行榜", value: "不受搜尋影響" },
+  ], hasSearch ? "搜尋後會優先顯示回測結果清單，排行榜仍維持整個 Run 的統計。" : "先看排行榜與總覽，再往下看回測結果清單。");
+  setResultHeader({ title: hasSearch ? `搜尋結果：${state.strategyBacktestSearch}` : "策略回測清單", desc: hasSearch ? `共找到 ${formatNumber(totalCount)} 筆回測訊號。` : "顯示歷史策略訊號與後續績效。", badge: hasSearch ? "搜尋結果" : "回測", countText: `${formatNumber(totalCount)} 筆` });
+
   const resultsSection = renderStrategyBacktestResultsSection(rows);
   const rankingPanel = renderStrategyBacktestRankingPanel();
 
@@ -4985,9 +5293,21 @@ async function loadList() {
         return;
       }
 
+      updateListOverview(state.latestRows, {
+        title: "自選股清單",
+        desc: "顯示登入帳號保存的自選股票，可調整順序、移除或查看明細。",
+        badge: "自選股",
+        countUnit: "檔",
+        topLabel: "第一檔自選股",
+      });
       stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
       showTemporaryStatus(`已更新 ${state.latestRows.length} 檔自選股。`, "success");
     } catch (error) {
+      setContentSummary([
+        { label: "讀取狀態", value: "自選股失敗" },
+        { label: "錯誤訊息", value: error.message },
+      ], "請確認登入狀態與自選股 API 是否正常。");
+      setResultHeader({ title: "自選股讀取失敗", desc: "目前無法取得自選股清單。", badge: "讀取失敗" });
       stockList.innerHTML = "";
       showStatus(`自選股讀取失敗：${escapeHtml(error.message)}`, "error");
     } finally {
@@ -5015,14 +5335,29 @@ async function loadList() {
     state.latestRows = latestRows;
 
     if (state.latestRows.length === 0) {
+      setContentSummary([
+        { label: "目前市場", value: state.market || "全部" },
+        { label: "清單數量", value: "0 筆" },
+      ], "目前沒有股票資料，請確認後端 API 是否已有匯入資料。");
+      setResultHeader({ title: getPageContentConfig().resultTitle, desc: "目前沒有可顯示的資料。", badge: "空清單", countText: "0 筆" });
       stockList.innerHTML = "";
       showStatus("目前沒有股票資料，請確認後端 API 是否已有匯入資料。", "error");
       return;
     }
 
+    updateListOverview(state.latestRows, {
+      badge: state.market || "全部",
+      countUnit: state.page === "industryFlow" ? "個產業" : "檔",
+      topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
+    });
     stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
+    setContentSummary([
+      { label: "讀取狀態", value: "失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認 API 是否正常啟動，或稍後重新整理。");
+    setResultHeader({ title: `${getPageContentConfig().resultTitle}讀取失敗`, desc: "目前無法取得這個頁面的資料。", badge: "讀取失敗" });
     stockList.innerHTML = "";
     showStatus(
       `

@@ -3950,3 +3950,243 @@ body.chart-zoom-open {
     font-size: 17px;
   }
 }
+
+/* V1.4-1-5：右側內容區標題、篩選列、統計摘要與清單標題重整 */
+.page-control-panel {
+  overflow: hidden;
+}
+
+.page-title-row {
+  padding-bottom: 15px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.page-title-copy {
+  min-width: 0;
+}
+
+.page-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.page-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.overview-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid rgba(86, 214, 255, 0.18);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--muted);
+  background: rgba(86, 214, 255, 0.075);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.overview-chip small {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.overview-chip strong {
+  color: var(--text);
+  font-weight: 950;
+}
+
+.content-filter-shell {
+  margin-top: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.content-filter-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.content-filter-header h3 {
+  margin: 0 0 5px;
+  font-size: 19px;
+}
+
+.content-filter-header p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.content-filter-shell .market-row,
+.content-filter-shell .search-panel,
+.content-filter-shell .help-card,
+.content-filter-shell .mobile-section-nav {
+  margin-top: 12px;
+}
+
+.content-summary-bar,
+.result-header-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(13, 27, 47, 0.88);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.content-summary-bar {
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.summary-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-metric-card {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.summary-metric-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted-2);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.summary-metric-card strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-metric-card.score-high strong,
+.summary-metric-card.score-mid strong,
+.summary-metric-card.score-low strong {
+  color: #06111e;
+}
+
+.summary-metric-card.score-high {
+  border-color: transparent;
+  background: rgba(248, 214, 109, 0.92);
+}
+
+.summary-metric-card.score-mid {
+  border-color: transparent;
+  background: rgba(86, 214, 255, 0.92);
+}
+
+.summary-metric-card.score-low {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.summary-note {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.result-header-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 15px 17px;
+}
+
+.result-header-card h3 {
+  margin: 0 0 5px;
+  font-size: 22px;
+}
+
+.result-header-card p:not(.section-kicker) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.result-header-meta {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1120px) {
+  .summary-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .page-title-row,
+  .content-filter-header,
+  .result-header-card {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .page-action-stack,
+  .result-header-meta {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .page-meta-bar {
+    gap: 7px;
+  }
+
+  .overview-chip {
+    flex: 1 1 calc(50% - 7px);
+    justify-content: space-between;
+  }
+
+  .summary-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-metric-card strong {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 460px) {
+  .overview-chip {
+    flex-basis: 100%;
+  }
+
+  .summary-metric-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}

@@ -8,8 +8,8 @@ const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const frontendDir = path.join(projectRoot, "stock-radar-frontend");
 
-const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.8";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v46";
+const EXPECTED_API_VERSION = "stock-radar-api-v1.4.1.9";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v47";
 
 const args = process.argv.slice(2);
 const apiArg = args.find((arg) => arg.startsWith("--api="));
@@ -87,9 +87,9 @@ async function main() {
     packageJson = {};
   }
 
-  checks.push(createCheck("版本", "API 版本為 V1.4-1-3", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v46", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v46", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V1.4-1-5", serverSource.includes(EXPECTED_API_VERSION), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v47", serverSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v47", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "alerts:setup",
@@ -176,6 +176,10 @@ async function main() {
     ["左側功能列 CSS", styleSource.includes(".desktop-sidebar") && styleSource.includes(".side-nav-btn")],
     ["底部主導航 CSS", styleSource.includes(".mobile-bottom-nav") && styleSource.includes(".mobile-bottom-btn")],
     ["手機頁內次功能 CSS", styleSource.includes(".mobile-section-nav") && styleSource.includes(".mobile-subnav-btn")],
+    ["右側內容區頁首摘要 HTML", indexSource.includes("pageMetaBar") && indexSource.includes("contentFilterShell")],
+    ["右側統計摘要 HTML", indexSource.includes("contentSummaryBar") && indexSource.includes("resultHeader")],
+    ["右側內容區摘要 JS", appSource.includes("updateListOverview") && appSource.includes("setContentSummary") && appSource.includes("setResultHeader")],
+    ["右側內容區版面 CSS", styleSource.includes(".content-summary-bar") && styleSource.includes(".result-header-card") && styleSource.includes(".summary-metric-grid")],
   ];
 
   for (const [label, ok] of v14UiMarkers) {
