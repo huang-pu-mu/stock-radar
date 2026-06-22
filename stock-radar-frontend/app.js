@@ -1543,11 +1543,13 @@ function buildListPath() {
 
   if (state.page === "foreignStreak") {
     params.set("limit", "100");
+    if (state.market) params.set("market", state.market);
     return `/radar/foreign-buy-ranking?${params.toString()}`;
   }
 
   if (state.page === "trust") {
     params.set("limit", "100");
+    if (state.market) params.set("market", state.market);
     return `/radar/investment-trust-ranking?${params.toString()}`;
   }
 

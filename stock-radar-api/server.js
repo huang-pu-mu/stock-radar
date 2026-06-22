@@ -3927,21 +3927,18 @@ app.get("/radar/today", async (req, res) => {
 
 app.get("/radar/foreign-buy-ranking", async (req, res) => {
   try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
-    const optimization = parseStrategyOptimizationParams(req.query);
-    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
 
-    let targetDate = queryDate;
-
-    if (!targetDate) {
-      const latestDateRows = await query(`
-        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
-        FROM institutional_trades
-      `);
-
-      targetDate = latestDateRows[0].latest_date;
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
     }
+
+    const targetDate = await getLatestTradeDateFrom("institutional_trades", "trade_date", market, queryDate);
 
     if (!targetDate) {
       return res.json({
@@ -3965,9 +3962,10 @@ app.get("/radar/foreign-buy-ranking", async (req, res) => {
       LEFT JOIN stocks s
         ON it.stock_code = s.stock_code
       WHERE it.trade_date <= ?
+        ${market ? "AND s.market_type = ?" : ""}
       ORDER BY it.stock_code ASC, it.trade_date DESC
       `,
-      [targetDate],
+      market ? [targetDate, market] : [targetDate],
     );
 
     const stockMap = new Map();
@@ -4067,21 +4065,18 @@ app.get("/radar/foreign-buy-ranking", async (req, res) => {
 
 app.get("/radar/investment-trust-ranking", async (req, res) => {
   try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
     const queryDate = req.query.date || null;
-    const optimization = parseStrategyOptimizationParams(req.query);
-    const sqlLimit = Math.min(Math.max(limit * 5, limit), 300);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
 
-    let targetDate = queryDate;
-
-    if (!targetDate) {
-      const latestDateRows = await query(`
-        SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date
-        FROM institutional_trades
-      `);
-
-      targetDate = latestDateRows[0].latest_date;
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
     }
+
+    const targetDate = await getLatestTradeDateFrom("institutional_trades", "trade_date", market, queryDate);
 
     if (!targetDate) {
       return res.json({
@@ -4105,9 +4100,10 @@ app.get("/radar/investment-trust-ranking", async (req, res) => {
       LEFT JOIN stocks s
         ON it.stock_code = s.stock_code
       WHERE it.trade_date <= ?
+        ${market ? "AND s.market_type = ?" : ""}
       ORDER BY it.stock_code ASC, it.trade_date DESC
       `,
-      [targetDate],
+      market ? [targetDate, market] : [targetDate],
     );
 
     const stockMap = new Map();
