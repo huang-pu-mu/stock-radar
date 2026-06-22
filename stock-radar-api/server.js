@@ -670,6 +670,15 @@ function normalizeIndustryName(value) {
   const text = String(value ?? "").trim();
   if (!text || text === "-" || text === "未分類") return text || "未分類";
 
+  const separatedCodeParts = text.split(/[\s,，、/]+/).filter(Boolean);
+  if (separatedCodeParts.length > 1 && separatedCodeParts.every((part) => /^\d+$/.test(part))) {
+    const names = separatedCodeParts.map((part) => {
+      const code = normalizeIndustryCodeText(part);
+      return TWSE_INDUSTRY_CODE_NAME_MAP.get(part) || TWSE_INDUSTRY_CODE_NAME_MAP.get(code) || part;
+    });
+    return names.join("、");
+  }
+
   if (/^\d+$/.test(text)) {
     const normalizedCode = normalizeIndustryCodeText(text);
     const mapped = TWSE_INDUSTRY_CODE_NAME_MAP.get(text) || TWSE_INDUSTRY_CODE_NAME_MAP.get(normalizedCode);
@@ -1264,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.5";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v59";
+const API_VERSION = "stock-radar-api-v1.4.8.6";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v60";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1361,8 +1370,8 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
   {
     group: "版本",
     items: [
-      "GET /health 回傳 stock-radar-api-v1.4.8.5",
-      "service-worker.js 快取版本為 stock-radar-pwa-v59",
+      "GET /health 回傳 stock-radar-api-v1.4.8.6",
+      "service-worker.js 快取版本為 stock-radar-pwa-v60",
       "前端重新部署後手機與桌機都不再讀到舊快取",
     ],
   },
@@ -3254,7 +3263,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.5" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v59" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v1.4.8.6" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -3365,7 +3374,7 @@ app.get("/v14/status", async (req, res) => {
         { key: "telegram_notification", name: "Telegram 通知", status: "deferred", note: "依需求先不開發。" },
       ],
       next_actions: [
-        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.5。",
+        "確認 /health 可正常回傳 stock-radar-api-v1.4.8.6。",
         "確認 /v14/status 的 overall_status 為 pass 或可接受的 warn。",
         "執行 npm run v14:check 做本機靜態驗收。",
         "逐頁驗收 UI、策略最佳化、回測條件、LINE 通知、每日報告、勝率趨勢與個股歷史。",
@@ -4645,17 +4654,23 @@ app.get("/radar/industry-flow", async (req, res) => {
     const leadersByIndustry = new Map();
 
     leaderRows.forEach((row) => {
-      if (!leadersByIndustry.has(row.industry)) {
-        leadersByIndustry.set(row.industry, []);
+      const rawIndustry = String(row.industry || "").trim();
+      const industryName = normalizeIndustryName(rawIndustry) || "未分類";
+      const industryCode = /^\d+$/.test(rawIndustry) ? rawIndustry : null;
+
+      if (!leadersByIndustry.has(industryName)) {
+        leadersByIndustry.set(industryName, []);
       }
 
-      const leaders = leadersByIndustry.get(row.industry);
+      const leaders = leadersByIndustry.get(industryName);
       if (leaders.length >= 3) return;
 
       leaders.push({
         stock_code: row.stock_code,
         stock_name: row.stock_name,
         market_type: row.market_type,
+        industry: industryName,
+        industry_code: industryCode,
         close_price: row.close_price,
         price_change: row.price_change,
         chip_score: row.chip_score,
@@ -4668,6 +4683,9 @@ app.get("/radar/industry-flow", async (req, res) => {
     });
 
     const data = industryRows.map((row, index) => {
+      const rawIndustry = String(row.industry || "").trim();
+      const industryName = normalizeIndustryName(rawIndustry) || "未分類";
+      const industryCode = /^\d+$/.test(rawIndustry) ? rawIndustry : null;
       const totalNet = toBigIntValue(row.total_net_lots);
       const foreignTrustNet = toBigIntValue(row.foreign_trust_net_lots);
       const stockCount = Number(row.stock_count || 0);
@@ -4688,7 +4706,9 @@ app.get("/radar/industry-flow", async (req, res) => {
       return {
         rank: index + 1,
         trade_date: row.trade_date,
-        industry: row.industry,
+        industry: industryName,
+        industry_code: industryCode,
+        raw_industry: rawIndustry,
         market_types: row.market_types || market || "全部",
         stock_count: stockCount,
         net_buy_stock_count: netBuyStockCount,
@@ -4707,7 +4727,7 @@ app.get("/radar/industry-flow", async (req, res) => {
         net_buy_ratio: Number((netBuyRatio * 100).toFixed(1)),
         flow_direction: flowDirection,
         flow_strength: flowStrength,
-        top_stocks: leadersByIndustry.get(row.industry) || [],
+        top_stocks: leadersByIndustry.get(industryName) || [],
       };
     });
 

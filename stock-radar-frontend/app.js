@@ -17,6 +17,84 @@ const API_BASE_URL = resolveApiBaseUrl();
 const RECENT_SEARCH_STORAGE_KEY = "STOCK_RADAR_RECENT_SEARCHES";
 const AUTH_TOKEN_STORAGE_KEY = "STOCK_RADAR_AUTH_TOKEN";
 
+const TWSE_INDUSTRY_CODE_NAME_MAP = new Map([
+  ["1", "水泥工業"],
+  ["2", "食品工業"],
+  ["3", "塑膠工業"],
+  ["4", "紡織纖維"],
+  ["5", "電機機械"],
+  ["6", "電器電纜"],
+  ["7", "化學生技醫療"],
+  ["8", "玻璃陶瓷"],
+  ["9", "造紙工業"],
+  ["10", "鋼鐵工業"],
+  ["11", "橡膠工業"],
+  ["12", "汽車工業"],
+  ["14", "建材營造"],
+  ["15", "航運業"],
+  ["16", "觀光事業"],
+  ["17", "金融保險"],
+  ["18", "貿易百貨"],
+  ["20", "其他"],
+  ["21", "化學工業"],
+  ["22", "生技醫療業"],
+  ["23", "油電燃氣業"],
+  ["24", "半導體業"],
+  ["25", "電腦及週邊設備業"],
+  ["26", "光電業"],
+  ["27", "通信網路業"],
+  ["28", "電子零組件業"],
+  ["29", "電子通路業"],
+  ["30", "資訊服務業"],
+  ["31", "其他電子業"],
+  ["32", "文化創意業"],
+  ["33", "農業科技業"],
+  ["34", "電子商務"],
+  ["35", "綠能環保"],
+  ["36", "數位雲端"],
+  ["37", "運動休閒"],
+  ["38", "居家生活"],
+]);
+
+function normalizeIndustryCodeText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text.replace(/^0+/, "") || "0";
+}
+
+function normalizeIndustryDisplayName(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-" || text === "未分類") return text || "未分類";
+
+  const separatedCodeParts = text.split(/[\s,，、/]+/).filter(Boolean);
+  if (separatedCodeParts.length > 1 && separatedCodeParts.every((part) => /^\d+$/.test(part))) {
+    const names = separatedCodeParts.map((part) => {
+      const code = normalizeIndustryCodeText(part);
+      return TWSE_INDUSTRY_CODE_NAME_MAP.get(part) || TWSE_INDUSTRY_CODE_NAME_MAP.get(code) || part;
+    });
+    return names.join("、");
+  }
+
+  if (/^\d+$/.test(text)) {
+    const normalizedCode = normalizeIndustryCodeText(text);
+    const mapped = TWSE_INDUSTRY_CODE_NAME_MAP.get(text) || TWSE_INDUSTRY_CODE_NAME_MAP.get(normalizedCode);
+    if (mapped) return mapped;
+
+    if (text.length >= 4 && text.length % 2 === 0) {
+      const names = [];
+      for (let index = 0; index < text.length; index += 2) {
+        const code = normalizeIndustryCodeText(text.slice(index, index + 2));
+        const name = TWSE_INDUSTRY_CODE_NAME_MAP.get(code);
+        if (!name) return text;
+        names.push(name);
+      }
+      return names.join("、");
+    }
+  }
+
+  return text;
+}
+
 const state = {
   page: "radar",
   market: "",
@@ -4786,7 +4864,7 @@ function renderIndustryTopStocks(topStocks) {
 }
 
 function renderIndustryFlowCard(row, index) {
-  const industry = pick(row, ["industry"], "未分類");
+  const industry = normalizeIndustryDisplayName(pick(row, ["industry", "industry_code", "raw_industry"], "未分類"));
   const tradeDate = pick(row, ["trade_date", "date"], "-");
   const marketTypes = pick(row, ["market_types", "market_type", "market"], "全部");
   const stockCount = pick(row, ["stock_count"], "-");
@@ -7287,7 +7365,7 @@ function renderDailyReportIndustryFlows(items = []) {
         ${items.map((item, index) => `
           <div class="daily-report-industry-row">
             <span class="rank-badge">${index + 1}</span>
-            <strong>${escapeHtml(item.industry || "未分類")}</strong>
+            <strong>${escapeHtml(normalizeIndustryDisplayName(item.industry || item.industry_code || "未分類"))}</strong>
             <span>${formatReportLots(item.total_net_lots)}</span>
             <small>買超 ${formatNumber(item.net_buy_stock_count)} 檔｜平均籌碼 ${formatNumber(item.avg_chip_score)}</small>
           </div>
