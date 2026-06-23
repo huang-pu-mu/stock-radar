@@ -52,7 +52,14 @@ async function main() {
 
     console.log("");
     console.log("步驟 3：補齊上市＋上櫃產業分類");
-    await runCommand(["scripts/updateIndustries.js"]);
+    try {
+      await runCommand(["scripts/updateIndustries.js"]);
+    } catch (error) {
+      console.log(
+        "產業分類補齊失敗，先沿用 stocks 既有產業資料，不中斷每日流程。原因：" +
+          error.message,
+      );
+    }
 
     console.log("");
     console.log("步驟 4：匯入 TDCC 集保大戶籌碼資料");

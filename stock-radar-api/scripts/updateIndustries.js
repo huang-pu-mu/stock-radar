@@ -278,12 +278,24 @@ async function main() {
 
     const results = [];
 
+    const failures = [];
+
     for (const source of SOURCES) {
       console.log(`讀取：${source.label}`);
-      const result = await updateSource(conn, source);
-      results.push(result);
-      console.log(`完成：${result.marketType}，更新 ${result.updated} 筆，略過 ${result.skipped} 筆`);
-      console.log(`來源：${result.url}`);
+
+      try {
+        const result = await updateSource(conn, source);
+        results.push(result);
+        console.log(`完成：${result.marketType}，更新 ${result.updated} 筆，略過 ${result.skipped} 筆`);
+        console.log(`來源：${result.url}`);
+      } catch (error) {
+        failures.push({ source, error });
+        console.log(`警告：${source.marketType} 產業分類來源暫時不可用，先略過。原因：${error.message}`);
+      }
+    }
+
+    if (results.length === 0) {
+      throw new Error(failures.map((item) => `${item.source.marketType}：${item.error.message}`).join("；"));
     }
 
     const stats = await getIndustryStats(conn);
@@ -291,7 +303,13 @@ async function main() {
     console.log("");
     console.log("產業分類統計：");
     console.table(stats);
-    console.log("補齊股票產業分類完成");
+    if (failures.length > 0) {
+      console.log(
+        `補齊股票產業分類完成，但有 ${failures.length} 個來源暫時失敗；每日流程可繼續執行。`,
+      );
+    } else {
+      console.log("補齊股票產業分類完成");
+    }
   } catch (error) {
     console.error("補齊股票產業分類失敗：", error.message);
     process.exitCode = 1;
