@@ -135,6 +135,14 @@ const state = {
   dailyWarRoomSections: {},
   dailyWarRoomHistory: [],
   dailyWarRoomLastResult: null,
+  tradingAssistSummary: null,
+  tradingAssistRecommendations: [],
+  tradingAssistPlans: [],
+  tradingAssistLastResult: null,
+  preTradeSummary: null,
+  preTradeChecklists: [],
+  preTradePlans: [],
+  preTradeLastResult: null,
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
@@ -257,6 +265,8 @@ const PAGE_GROUP_MAP = {
   positions: "personal",
   portfolio: "personal",
   trades: "personal",
+  tradingAssist: "personal",
+  preTrade: "personal",
   aiFeedback: "strategy",
   strategies: "strategy",
   strategyTracks: "strategy",
@@ -310,6 +320,8 @@ const PAGE_CONTENT_CONFIG = {
   positions: { groupLabel: "個股與自選", filterTitle: "持股與風控操作", filterDesc: "登入後可新增持股，系統會估算損益、風險狀態與 AI 建議動作。", resultTitle: "我的持股清單", resultDesc: "顯示持股成本、現價、市值、未實現損益與風控提醒。" },
   portfolio: { groupLabel: "個股與自選", filterTitle: "部位模擬操作", filterDesc: "登入後可設定總資金、現金比例、單檔上限、產業上限與市場模式。", resultTitle: "部位模擬清單", resultDesc: "顯示部位比例、現金比例、集中度與風險曝險。" },
   trades: { groupLabel: "個股與自選", filterTitle: "交易紀錄操作", filterDesc: "登入後可新增買進 / 賣出紀錄，系統會統計已實現損益、勝率與策略來源績效。", resultTitle: "交易績效清單", resultDesc: "顯示交易紀錄、已實現損益、勝率、平均獲利與平均虧損。" },
+  tradingAssist: { groupLabel: "個股與自選", filterTitle: "交易輔助操作", filterDesc: "依每日作戰室與 AI 多因子建立交易候選、減碼檢查與人工確認清單。", resultTitle: "交易輔助清單", resultDesc: "顯示買進候選、減碼檢查、風險檢查與人工確認提醒。" },
+  preTrade: { groupLabel: "個股與自選", filterTitle: "交易前準備操作", filterDesc: "依交易輔助建議產生買進、減碼、風險與觀察檢查清單。", resultTitle: "交易前準備清單", resultDesc: "顯示交易條件、風控計畫、人工確認與操作紀錄提醒。" },
   aiFeedback: { groupLabel: "策略中心", filterTitle: "AI 回饋學習", filterDesc: "追蹤 AI 推薦後 1 / 3 / 5 / 10 日報酬，整理成功率、因子績效與權重建議。", resultTitle: "AI 推薦回饋學習", resultDesc: "顯示推薦成功 / 失敗標記、因子表現與權重調整建議。" },
   alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
   notifications: { groupLabel: "個股與自選", filterTitle: "通知外送設定", filterDesc: "設定 LINE Messaging API 收件目標，並發送測試通知。", resultTitle: "通知外送通道", resultDesc: "管理 LINE 通知通道，後續每日報告與提醒會共用這裡的設定。" },
@@ -2136,6 +2148,8 @@ function updatePageText() {
   const isWatchlistPage = state.page === "watchlist";
   const isPositionsPage = state.page === "positions";
   const isTradesPage = state.page === "trades";
+  const isTradingAssistPage = state.page === "tradingAssist";
+  const isPreTradePage = state.page === "preTrade";
   const isAlertsPage = state.page === "alerts";
   const isNotificationsPage = state.page === "notifications";
   const isStrategiesPage = state.page === "strategies";
@@ -2147,7 +2161,7 @@ function updatePageText() {
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isTradesPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isTradesPage || isTradingAssistPage || isPreTradePage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
   updateContentFilterHeader();
   updatePageMetaBar();
@@ -2249,6 +2263,21 @@ function updatePageText() {
     return;
   }
 
+  if (state.page === "tradingAssist") {
+    pageTitle.textContent = "交易輔助";
+    pageDesc.textContent = "V3.0 實戰交易輔助系統，建立交易候選、模擬下單草稿與人工確認流程，不做自動下單。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看買進候選與風險檢查；所有計畫都要人工確認，系統只輔助整理，不會自動下單。</span>`;
+    return;
+  }
+
+  if (state.page === "preTrade") {
+    pageTitle.textContent = "交易前準備";
+    pageDesc.textContent = "V3.1 半自動交易前置準備，建立交易前檢查清單、風控計畫、人工確認與操作紀錄。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先逐項檢查市場、個股、風控與人工確認；這裡只做交易前準備，不串券商、不自動下單。</span>`;
+    return;
+  }
+
+
   if (state.page === "aiFeedback") {
     pageTitle.textContent = "AI 回饋學習";
     pageDesc.textContent = "V2.3 AI 推薦回饋學習，追蹤推薦後表現、因子績效與權重調整建議。";
@@ -2265,7 +2294,7 @@ function updatePageText() {
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股、每日作戰室、我的持股、部位模擬、交易績效，並檢查 V2.5 每日作戰室、V2.4 部位風險、V2.3 AI 回饋學習、V2.2 交易績效、V2.1 持股風控、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
+    pageDesc.textContent = "管理登入、自選股、每日作戰室、交易輔助、交易前準備、我的持股、部位模擬、交易績效，並檢查 V3.1 交易前準備、V3.0 交易輔助、V2.5 每日作戰室、V2.4 部位風險、V2.3 AI 回饋學習、V2.2 交易績效、V2.1 持股風控、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -4776,36 +4805,36 @@ function renderV13CheckCard(check) {
 function renderV13FeatureCards() {
   const snapshot = state.v13Status?.snapshot || {};
   const reports = snapshot.reports || {};
-  const items = snapshot.items || {};
-  const risks = snapshot.risk_snapshots || {};
+  const recommendations = snapshot.recommendations || {};
+  const plans = snapshot.plans || {};
   const tables = Array.isArray(state.v13Status?.tables) ? state.v13Status.tables : [];
 
   return `
     <div class="v13-feature-grid v14-feature-grid">
       <div class="v13-feature-card">
-        <span>作戰室報告</span>
+        <span>交易輔助報告</span>
         <strong>${formatV13Count(reports.total_count || 0)} 份</strong>
         <small>最新 ${formatDate(reports.latest_report_date || "-")}</small>
       </div>
       <div class="v13-feature-card">
-        <span>作戰項目</span>
-        <strong>${formatV13Count(items.total_count || 0)} 筆</strong>
-        <small>最新 ${formatDate(items.latest_item_date || "-")}</small>
+        <span>交易輔助建議</span>
+        <strong>${formatV13Count(recommendations.total_count || 0)} 筆</strong>
+        <small>最新 ${formatDate(recommendations.latest_recommendation_date || "-")}</small>
       </div>
       <div class="v13-feature-card">
         <span>整合範圍</span>
-        <strong>市場 / AI / 持股</strong>
-        <small>作戰室每日彙總</small>
+        <strong>AI / 作戰室 / 風控</strong>
+        <small>交易前人工確認</small>
       </div>
       <div class="v13-feature-card">
         <span>目前模式</span>
-        <strong>V2.5</strong>
-        <small>每日投資作戰室</small>
+        <strong>V3.0</strong>
+        <small>實戰交易輔助</small>
       </div>
       <div class="v13-feature-card">
         <span>資料表狀態</span>
         <strong>${formatV13Count(tables.filter((item) => item.exists).length)} / ${formatV13Count(tables.length)}</strong>
-        <small>daily_war_room_reports / items</small>
+        <small>trading_assistant_* / trading_plans</small>
       </div>
       <div class="v13-feature-card">
         <span>相容功能</span>
@@ -4823,8 +4852,8 @@ function renderV14ModuleProgress() {
   return `
     <div class="v13-subsection v14-module-section">
       <div class="v13-subsection-title">
-        <strong>V2.5 功能完成度</strong>
-        <span>每日作戰室、市場風險、AI 觀察與 UI 狀態同步</span>
+        <strong>V3.1 功能完成度</strong>
+        <span>交易輔助、人工確認、模擬草稿與 UI 狀態同步</span>
       </div>
       <div class="v14-module-grid">
         ${modules.map((module) => `
@@ -4844,13 +4873,13 @@ function renderV14ModuleProgress() {
 
 function renderV14AcceptanceSummary() {
   const nextActions = Array.isArray(state.v13Status?.next_actions) ? state.v13Status.next_actions : [];
-  const advice = state.v13Status?.ai_selection?.advice || "V2.5 已整合市場、全球、AI 觀察、持股續抱、減碼檢查與風控提醒。";
+  const advice = state.v13Status?.ai_selection?.advice || "V3.1 已整合交易前檢查清單、人工確認、操作紀錄與 V3.0 交易輔助。";
 
   return `
     <div class="v13-subsection v14-acceptance-section">
       <div class="v13-subsection-title">
         <strong>驗收與維護重點</strong>
-        <span>/v25/status + npm run v25:test</span>
+        <span>/v31/status + npm run v30:test</span>
       </div>
       <div class="v14-acceptance-grid">
         <div class="v13-empty-note">
@@ -4875,7 +4904,7 @@ function renderV13BacktestStats() {
   if (!topSignals.length) {
     return `
       <div class="v13-empty-note">
-        尚未讀到每日作戰室；如果剛完成產生，請按「重新檢查 V2.5」。
+        尚未讀到每日作戰室；如果剛完成產生，請按「重新檢查 V3.1」。
       </div>
     `;
   }
@@ -4903,9 +4932,9 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V2.5 系統狀態</p>
-            <h3>正在檢查每日作戰室功能</h3>
-            <p>正在讀取 /health 與 /v25/status。</p>
+            <p class="eyebrow">V3.1 系統狀態</p>
+            <h3>正在檢查交易輔助功能</h3>
+            <p>正在讀取 /health 與 /v31/status。</p>
           </div>
           <span class="v13-status-pill warn">檢查中</span>
         </div>
@@ -4919,14 +4948,14 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card error-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V2.5 系統狀態</p>
+            <p class="eyebrow">V3.1 系統狀態</p>
             <h3>狀態檢查失敗</h3>
             <p>${escapeHtml(state.v13StatusError)}</p>
           </div>
           <span class="v13-status-pill fail">異常</span>
         </div>
         <div class="account-actions">
-          <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.5</button>
+          <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V3.1</button>
         </div>
       </article>
     `;
@@ -4940,8 +4969,8 @@ function renderV13StatusCard() {
     findV13Check("database"),
     findV13Check("versions"),
     findV13Check("tables"),
-    findV13Check("plans"),
-    findV13Check("risk_snapshots"),
+    findV13Check("recommendations"),
+    findV13Check("reports"),
   ].filter(Boolean);
   const summary = status.snapshot?.reports || {};
 
@@ -4949,8 +4978,8 @@ function renderV13StatusCard() {
     <article class="account-card v13-status-card v14-status-card ${meta.className}">
       <div class="v13-status-header">
         <div>
-          <p class="eyebrow">V2.5 系統狀態</p>
-          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V2.5 每日作戰室狀態檢查完成")}</h3>
+          <p class="eyebrow">V3.1 系統狀態</p>
+          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V3.1 交易前準備狀態檢查完成")}</h3>
           <p>檢查時間：${escapeHtml(status.checked_at || "-")}</p>
         </div>
         <span class="v13-status-pill ${meta.className}">${meta.label}</span>
@@ -4961,7 +4990,7 @@ function renderV13StatusCard() {
         ${createInfoItem("PWA 預期版本", escapeHtml(status.pwa_expected_version || "-"))}
         ${createInfoItem("資料庫", escapeHtml(status.database?.database_name || "-"))}
         ${createInfoItem("報告日期", formatDate(summary.latest_report_date))}
-        ${createInfoItem("V2.5 完成度", formatPercent(status.progress_percent))}
+        ${createInfoItem("V3.1 完成度", formatPercent(status.progress_percent))}
       </div>
 
       <div class="v13-check-grid">
@@ -4974,14 +5003,15 @@ function renderV13StatusCard() {
 
       <div class="v13-subsection">
         <div class="v13-subsection-title">
-          <strong>每日作戰室摘要</strong>
-          <span>取最新作戰室與觀察項目</span>
+          <strong>交易輔助摘要</strong>
+          <span>取最新交易輔助建議與人工確認狀態</span>
         </div>
         ${renderV13BacktestStats()}
       </div>
 
       <div class="account-actions v13-actions">
-        <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.5</button>
+        <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V3.1</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="tradingAssist">看交易輔助</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="warRoom">看每日作戰室</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="portfolio">看部位模擬</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyBacktests">看策略回測</button>
@@ -5001,10 +5031,10 @@ async function loadV13Status({ force = false } = {}) {
   if (state.page === "account") renderAccountPage();
 
   try {
-    const result = await fetchJson("/v25/status", { method: "GET", raw: true });
+    const result = await fetchJson("/v31/status", { method: "GET", raw: true });
     state.v13Status = result;
   } catch (error) {
-    state.v13StatusError = error.message || "V2.5 狀態檢查失敗。";
+    state.v13StatusError = error.message || "V3.0 狀態檢查失敗。";
   } finally {
     state.v13StatusLoading = false;
     if (state.page === "account") renderAccountPage();
@@ -9385,6 +9415,346 @@ async function handleDailyWarRoomGenerate(button) {
   }
 }
 
+
+function getTradingAssistTypeLabel(type = "") {
+  const map = { BUY_PLAN: "買進候選", REDUCE: "減碼檢查", RISK_CHECK: "風險檢查", WATCH: "觀察" };
+  return map[String(type || "").toUpperCase()] || type || "-";
+}
+
+function renderTradingAssistSummaryCards(summary = {}) {
+  const cards = [
+    ["建議總數", formatNumber(summary.recommendation_count || 0)],
+    ["買進候選", formatNumber(summary.buy_plan_count || 0)],
+    ["減碼檢查", formatNumber(summary.reduce_plan_count || 0)],
+    ["風險檢查", formatNumber(summary.risk_check_count || 0)],
+    ["人工確認", formatNumber(summary.manual_confirm_count || 0)],
+    ["市場模式", summary.market_mode || "RANGE"],
+  ];
+  return `
+    <section class="position-summary-grid">
+      ${cards.map(([label, value]) => `
+        <article class="position-summary-card">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderTradingAssistRecommendations(rows = []) {
+  if (!rows.length) {
+    return `<article class="empty-state"><strong>尚未有交易輔助建議</strong><span>請先按「產生交易輔助」，或在 API 執行 npm run trading-assist:generate。</span></article>`;
+  }
+  return `
+    <div class="v13-subsection-title"><strong>交易輔助建議</strong><span>/trade-assist/recommendations</span></div>
+    ${rows.map((row, index) => `
+      <article class="position-card trade-card">
+        <div class="position-card-header">
+          <div>
+            <p class="section-kicker">${escapeHtml(getTradingAssistTypeLabel(row.recommendation_type))} #${index + 1}</p>
+            <h3>${escapeHtml([row.stock_code, row.stock_name].filter(Boolean).join(" ") || "市場建議")}</h3>
+            <p>${escapeHtml(row.industry || row.source_module || "V3.0 交易輔助")}</p>
+          </div>
+          <span class="score-badge ${getScoreClass(row.ai_strength_score)}">${formatNumber(row.ai_strength_score || 0)}</span>
+        </div>
+        <div class="position-metrics-grid">
+          ${createInfoItem("類型", getTradingAssistTypeLabel(row.recommendation_type))}
+          ${createInfoItem("市場", row.market_mode || "RANGE")}
+          ${createInfoItem("日期", formatDate(row.recommendation_date))}
+          ${createInfoItem("優先", formatNumber(row.priority || 0))}
+        </div>
+        <div class="strategy-reason-grid">
+          <div><strong>建議動作</strong><span>${escapeHtml(row.suggested_action || "等待人工確認。")}</span></div>
+          <div><strong>風險提醒</strong><span>${escapeHtml(row.risk_note || "需檢查市場模式、停損線與部位比例。")}</span></div>
+          <div><strong>計畫備註</strong><span>${escapeHtml(row.plan_note || "不自動下單，僅作為交易前檢查清單。")}</span></div>
+        </div>
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderTradingAssistPlans(rows = []) {
+  if (!state.authToken) {
+    return `<article class="position-alert-card"><strong>交易計畫：</strong>登入後可建立自己的交易計畫與模擬下單草稿。</article>`;
+  }
+  if (!rows.length) {
+    return `<article class="empty-state"><strong>尚未建立交易計畫</strong><span>V3.0 初版先提供資料層與人工確認流程，後續可把建議轉成計畫。</span></article>`;
+  }
+  return `
+    <div class="v13-subsection-title"><strong>我的交易計畫</strong><span>/trade-assist/plans</span></div>
+    ${rows.map((row) => `
+      <article class="position-card">
+        <div class="position-card-header">
+          <div>
+            <p class="section-kicker">${escapeHtml(row.plan_type || "WATCH")} / ${escapeHtml(row.plan_status || "PLANNED")}</p>
+            <h3>${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</h3>
+            <p>${escapeHtml(row.strategy_source || "AI_MULTI_FACTOR")}</p>
+          </div>
+          <span class="summary-pill">${row.user_confirmed ? "已確認" : "待確認"}</span>
+        </div>
+        <div class="position-metrics-grid">
+          ${createInfoItem("計畫日", formatDate(row.plan_date))}
+          ${createInfoItem("計畫價", formatNumber(row.planned_price))}
+          ${createInfoItem("股數", formatNumber(row.planned_shares))}
+          ${createInfoItem("風險金額", `$${formatNumber(row.risk_amount || 0)}`)}
+        </div>
+        ${row.note ? `<p class="position-note">${escapeHtml(row.note)}</p>` : ""}
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderTradingAssistPage() {
+  const summary = state.tradingAssistSummary || {};
+  const recommendations = Array.isArray(state.tradingAssistRecommendations) ? state.tradingAssistRecommendations : [];
+  const plans = Array.isArray(state.tradingAssistPlans) ? state.tradingAssistPlans : [];
+
+  setContentSummary([
+    { label: "建議總數", value: `${formatNumber(summary.recommendation_count || recommendations.length)} 筆` },
+    { label: "買進候選", value: formatNumber(summary.buy_plan_count || 0) },
+    { label: "人工確認", value: formatNumber(summary.manual_confirm_count || 0) },
+    { label: "市場模式", value: summary.market_mode || "RANGE" },
+  ], "V3.0 是交易輔助與人工確認流程，不串券商、不自動下單。 ");
+
+  setResultHeader({
+    title: "實戰交易輔助系統",
+    desc: recommendations.length ? "已讀取最新交易輔助建議。" : "目前尚未產生交易輔助建議。",
+    badge: "V3.0 交易輔助",
+    countText: `${formatNumber(summary.recommendation_count || recommendations.length)} 筆`,
+  });
+
+  stockList.innerHTML = `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V3.0 實戰交易輔助系統</p>
+          <h3>更新交易輔助建議</h3>
+          <p>會依每日作戰室與 AI 多因子產生買進候選、減碼檢查與風險檢查；所有動作都要人工確認。</p>
+        </div>
+        <button class="detail-btn" type="button" data-trading-assist-generate="true">產生交易輔助</button>
+      </div>
+    </article>
+    ${state.tradingAssistLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.tradingAssistLastResult)}</article>` : ""}
+    ${summary.action_summary ? `<article class="position-alert-card"><strong>作戰摘要：</strong>${escapeHtml(summary.action_summary)}</article>` : ""}
+    ${renderTradingAssistSummaryCards(summary)}
+    ${renderTradingAssistRecommendations(recommendations)}
+    ${renderTradingAssistPlans(plans)}
+  `;
+}
+
+async function loadTradingAssist() {
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, recommendationResult, planResult] = await Promise.all([
+      fetchJson("/trade-assist/summary", { raw: true }),
+      fetchJson("/trade-assist/recommendations", { raw: true }),
+      state.authToken ? fetchJson("/trade-assist/plans", { auth: true, raw: true }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+    ]);
+    state.tradingAssistSummary = summaryResult.summary || {};
+    state.tradingAssistRecommendations = Array.isArray(recommendationResult.data) ? recommendationResult.data : Array.isArray(summaryResult.recommendations) ? summaryResult.recommendations : [];
+    state.tradingAssistPlans = Array.isArray(planResult.data) ? planResult.data : [];
+    renderTradingAssistPage();
+    showTemporaryStatus(`已更新交易輔助建議：${formatNumber(state.tradingAssistRecommendations.length)} 筆。`, "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "交易輔助失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run trading-assist:setup。 ");
+    setResultHeader({ title: "交易輔助讀取失敗", desc: "目前無法取得 V3.0 交易輔助資料。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`交易輔助讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleTradingAssistGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/trade-assist/generate", { method: "POST", body: {}, raw: true });
+    state.tradingAssistLastResult = result.message || "已產生 V3.0 交易輔助建議。";
+    await loadTradingAssist();
+  } catch (error) {
+    showStatus(`產生交易輔助失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+
+function getPreTradeTypeLabel(type = "") {
+  const map = { BUY_PLAN: "買進計畫", REDUCE: "減碼檢查", RISK_CHECK: "風險檢查", WATCH: "觀察清單" };
+  return map[String(type || "").toUpperCase()] || type || "-";
+}
+
+function renderPreTradeSummaryCards(summary = {}) {
+  const cards = [
+    ["清單總數", formatNumber(summary.total_count || 0)],
+    ["買進計畫", formatNumber(summary.buy_plan_count || 0)],
+    ["減碼檢查", formatNumber(summary.reduce_count || 0)],
+    ["風險檢查", formatNumber(summary.risk_check_count || 0)],
+    ["待人工確認", formatNumber(summary.pending_count || 0)],
+    ["已確認", formatNumber(summary.confirmed_count || 0)],
+  ];
+  return `
+    <section class="position-summary-grid">
+      ${cards.map(([label, value]) => `
+        <article class="position-summary-card">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderPreTradeChecklists(rows = []) {
+  if (!rows.length) {
+    return `<article class="empty-state"><strong>尚未有交易前準備清單</strong><span>請先按「產生交易前準備」，或在 API 執行 npm run pre-trade:generate。</span></article>`;
+  }
+
+  return `
+    <div class="v13-subsection-title"><strong>交易前檢查清單</strong><span>/pre-trade/checklists</span></div>
+    ${rows.map((row, index) => `
+      <article class="position-card trade-card">
+        <div class="position-card-header">
+          <div>
+            <p class="section-kicker">${escapeHtml(getPreTradeTypeLabel(row.plan_type))} #${index + 1}</p>
+            <h3>${escapeHtml([row.stock_code, row.stock_name].filter(Boolean).join(" ") || "市場計畫")}</h3>
+            <p>${escapeHtml(row.industry || row.source_module || "V3.1 交易前準備")}</p>
+          </div>
+          <span class="summary-pill">${row.user_confirmed ? "已確認" : escapeHtml(row.confirmation_status || "PENDING")}</span>
+        </div>
+        <div class="position-metrics-grid">
+          ${createInfoItem("計畫日", formatDate(row.plan_date))}
+          ${createInfoItem("類型", getPreTradeTypeLabel(row.plan_type))}
+          ${createInfoItem("部位%", row.position_size_pct === null || row.position_size_pct === undefined ? "-" : `${formatNumber(row.position_size_pct)}%`)}
+          ${createInfoItem("比對狀態", row.compare_status || "WAITING")}
+        </div>
+        <div class="strategy-reason-grid">
+          <div><strong>進場條件</strong><span>${escapeHtml(row.entry_condition || "等待條件符合後再人工確認。")}</span></div>
+          <div><strong>風控計畫</strong><span>${escapeHtml(row.risk_control_plan || "確認停損、停利、部位比例與最大虧損。")}</span></div>
+          <div><strong>安全邊界</strong><span>不串券商、不自動下單，必須人工確認。</span></div>
+        </div>
+        <ul class="position-alert-list">
+          ${(row.check_items || []).map((item) => `
+            <li>
+              <strong>${escapeHtml(item.check_group || "檢查")}</strong>
+              <span>${escapeHtml(item.check_item || "")}</span>
+              <em>${escapeHtml(item.check_status || "PENDING")}${item.is_required ? " / 必填" : " / 選填"}</em>
+            </li>
+          `).join("")}
+        </ul>
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderPreTradePlans(rows = []) {
+  if (!state.authToken) {
+    return `<article class="position-alert-card"><strong>我的交易前計畫：</strong>登入後可建立自己的交易前計畫、人工確認與操作紀錄。</article>`;
+  }
+  if (!rows.length) {
+    return `<article class="empty-state"><strong>尚未建立我的交易前計畫</strong><span>可以先參考上方系統清單，再手動建立自己的計畫。</span></article>`;
+  }
+  return `
+    <div class="v13-subsection-title"><strong>我的交易前計畫</strong><span>/pre-trade/plans</span></div>
+    ${rows.map((row) => `
+      <article class="position-card">
+        <div class="position-card-header">
+          <div>
+            <p class="section-kicker">${escapeHtml(getPreTradeTypeLabel(row.plan_type))} / ${escapeHtml(row.confirmation_status || "PENDING")}</p>
+            <h3>${escapeHtml(row.stock_code || "-")} ${escapeHtml(row.stock_name || "")}</h3>
+          </div>
+          <span class="summary-pill">${row.user_confirmed ? "已確認" : "待確認"}</span>
+        </div>
+        <div class="position-metrics-grid">
+          ${createInfoItem("計畫日", formatDate(row.plan_date))}
+          ${createInfoItem("計畫價", formatNumber(row.planned_price))}
+          ${createInfoItem("股數", formatNumber(row.planned_shares))}
+          ${createInfoItem("最大風險", `$${formatNumber(row.max_risk_amount || 0)}`)}
+        </div>
+        ${row.entry_condition ? `<p class="position-note">${escapeHtml(row.entry_condition)}</p>` : ""}
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderPreTradePage() {
+  const summary = state.preTradeSummary || {};
+  const checklists = Array.isArray(state.preTradeChecklists) ? state.preTradeChecklists : [];
+  const plans = Array.isArray(state.preTradePlans) ? state.preTradePlans : [];
+
+  setContentSummary([
+    { label: "清單總數", value: `${formatNumber(summary.total_count || checklists.length)} 筆` },
+    { label: "買進計畫", value: formatNumber(summary.buy_plan_count || 0) },
+    { label: "待確認", value: formatNumber(summary.pending_count || 0) },
+    { label: "人工確認", value: formatNumber(summary.manual_confirm_required_count || 0) },
+  ], "V3.1 是半自動交易前置準備；不串券商、不自動下單。");
+
+  setResultHeader({
+    title: "半自動交易前置準備",
+    desc: checklists.length ? "已讀取最新交易前檢查清單。" : "目前尚未產生交易前準備清單。",
+    badge: "V3.1 交易前準備",
+    countText: `${formatNumber(summary.total_count || checklists.length)} 筆`,
+  });
+
+  stockList.innerHTML = `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V3.1 半自動交易前置準備</p>
+          <h3>更新交易前檢查清單</h3>
+          <p>會依 V3.0 交易輔助建議產生買進計畫、減碼檢查、風險檢查與觀察清單；所有動作都要人工確認。</p>
+        </div>
+        <button class="detail-btn" type="button" data-pre-trade-generate="true">產生交易前準備</button>
+      </div>
+    </article>
+    ${state.preTradeLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.preTradeLastResult)}</article>` : ""}
+    <article class="position-alert-card"><strong>安全邊界：</strong>V3.1 不串券商、不自動下單，只保存交易前檢查與人工確認紀錄。</article>
+    ${renderPreTradeSummaryCards(summary)}
+    ${renderPreTradeChecklists(checklists)}
+    ${renderPreTradePlans(plans)}
+  `;
+}
+
+async function loadPreTrade() {
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, checklistResult, planResult] = await Promise.all([
+      fetchJson("/pre-trade/summary", { raw: true }),
+      fetchJson("/pre-trade/checklists", { raw: true }),
+      state.authToken ? fetchJson("/pre-trade/plans", { auth: true, raw: true }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+    ]);
+    state.preTradeSummary = summaryResult.summary || {};
+    state.preTradeChecklists = Array.isArray(checklistResult.data) ? checklistResult.data : Array.isArray(summaryResult.checklists) ? summaryResult.checklists : [];
+    state.preTradePlans = Array.isArray(planResult.data) ? planResult.data : [];
+    renderPreTradePage();
+    showTemporaryStatus(`已更新交易前準備清單：${formatNumber(state.preTradeChecklists.length)} 筆。`, "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "交易前準備失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run pre-trade:setup。 ");
+    setResultHeader({ title: "交易前準備讀取失敗", desc: "目前無法取得 V3.1 交易前準備資料。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`交易前準備讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handlePreTradeGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/pre-trade/generate", { method: "POST", body: {}, raw: true });
+    state.preTradeLastResult = result.message || "已產生 V3.1 半自動交易前置準備清單。";
+    await loadPreTrade();
+  } catch (error) {
+    showStatus(`產生交易前準備失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+
 function renderAiFeedbackPage() {
   const summary = state.aiFeedbackSummary || {};
   const rows = Array.isArray(state.aiFeedbackRows) ? state.aiFeedbackRows : [];
@@ -9499,6 +9869,16 @@ async function loadList() {
 
   if (state.page === "trades") {
     await loadTradePerformance();
+    return;
+  }
+
+  if (state.page === "tradingAssist") {
+    await loadTradingAssist();
+    return;
+  }
+
+  if (state.page === "preTrade") {
+    await loadPreTrade();
     return;
   }
 
@@ -9976,6 +10356,18 @@ stockList.addEventListener("click", (event) => {
   const dailyWarRoomGenerateButton = event.target.closest("[data-war-room-generate]");
   if (dailyWarRoomGenerateButton) {
     handleDailyWarRoomGenerate(dailyWarRoomGenerateButton);
+    return;
+  }
+
+  const tradingAssistGenerateButton = event.target.closest("[data-trading-assist-generate]");
+  if (tradingAssistGenerateButton) {
+    handleTradingAssistGenerate(tradingAssistGenerateButton);
+    return;
+  }
+
+  const preTradeGenerateButton = event.target.closest("[data-pre-trade-generate]");
+  if (preTradeGenerateButton) {
+    handlePreTradeGenerate(preTradeGenerateButton);
     return;
   }
 

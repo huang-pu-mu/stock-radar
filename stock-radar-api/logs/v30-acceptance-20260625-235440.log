@@ -1,0 +1,146 @@
+====================================
+Stock Radar V3.0 實戰交易輔助系統自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v30-acceptance-20260625-235440.log
+開始時間：2026/6/25 23:54:40
+API：http://localhost:3000
+DB流程：執行 setup / trading assist generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.0 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupTradingAssistantTables.js
+完成：V3.0 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.0 generate script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateTradingAssistantPlans.js
+完成：V3.0 generate script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V3.0 實戰交易輔助資料表
+指令：npm run trading-assist:setup
+
+> stock-radar-api@1.0.0 trading-assist:setup
+> node scripts/setupTradingAssistantTables.js
+
+◇ injected env (7) from .env // tip: ⌘ enable debugging { debug: true }
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+====================================
+Stock Radar V3.0 實戰交易輔助資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v30-trading-assistant.sql
+建立 / 確認完成：
+- trading_assistant_accounts
+- trading_plans
+- trading_plan_orders
+- trading_assistant_recommendations
+- trading_assistant_reports
+結果：PASS
+完成：建立 V3.0 實戰交易輔助資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V3.0 實戰交易輔助建議
+指令：npm run trading-assist:generate
+
+> stock-radar-api@1.0.0 trading-assist:generate
+> node scripts/generateTradingAssistantPlans.js
+
+◇ injected env (7) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+====================================
+Stock Radar V3.0 實戰交易輔助產生
+====================================
+報告日期：2026-06-25
+市場模式：BEAR
+交易輔助建議：8
+買進候選：0
+減碼檢查：0
+風險檢查：0
+人工確認：0
+結果：PASS
+完成：產生 V3.0 實戰交易輔助建議，耗時 0分1秒
+--------------------------------------------------
+開始：V3.0 靜態 / API 驗收
+指令：npm run v30:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v30:check
+> node scripts/checkV30.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V3.0 實戰交易輔助系統驗收檢查
+====================================
+✅ [版本] API 版本為 V3.0.0 - stock-radar-api-v3.0.0
+✅ [版本] API 預期 PWA 版本為 v77 - stock-radar-pwa-v77
+✅ [版本] service-worker 快取版本為 v77 - stock-radar-pwa-v77
+✅ [前端] 側邊功能選單顯示 V3.0 - index.html
+✅ [npm 指令] trading-assist:setup - node scripts/setupTradingAssistantTables.js
+✅ [npm 指令] trading-assist:generate - node scripts/generateTradingAssistantPlans.js
+✅ [npm 指令] trading-assist:daily - npm run trading-assist:setup && npm run trading-assist:generate
+✅ [npm 指令] v30:check - node scripts/checkV30.js
+✅ [npm 指令] v30:test - node scripts/runV30Acceptance.js
+✅ [npm 指令] v25:test - node scripts/runV25Acceptance.js
+✅ [npm 指令] war-room:daily - npm run war-room:setup && npm run war-room:generate
+✅ [必要檔案] stock-radar-api/sql/v30-trading-assistant.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupTradingAssistantTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateTradingAssistantPlans.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV30.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV30Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/index.html - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] 交易輔助帳戶資料表 - CREATE TABLE IF NOT EXISTS `trading_assistant_accounts`
+✅ [SQL] 交易計畫資料表 - CREATE TABLE IF NOT EXISTS `trading_plans`
+✅ [SQL] 模擬下單草稿資料表 - CREATE TABLE IF NOT EXISTS `trading_plan_orders`
+✅ [SQL] 交易輔助建議資料表 - CREATE TABLE IF NOT EXISTS `trading_assistant_recommendations`
+✅ [SQL] 交易輔助報告資料表 - CREATE TABLE IF NOT EXISTS `trading_assistant_reports`
+✅ [SQL] 人工確認欄位 - manual_confirm_required
+✅ [SQL] 不自動下單定位 - 不自動送券商
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v30/status - server.js 靜態檢查
+✅ [API 路由] GET /v30/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /trade-assist/summary - server.js 靜態檢查
+✅ [API 路由] GET /trade-assist/recommendations - server.js 靜態檢查
+✅ [API 路由] POST /trade-assist/generate - server.js 靜態檢查
+✅ [API 路由] GET /trade-assist/plans - server.js 靜態檢查
+✅ [API 路由] POST /trade-assist/plans - server.js 靜態檢查
+✅ [API 路由] PUT /trade-assist/plans/:id - server.js 靜態檢查
+✅ [API 路由] DELETE /trade-assist/plans/:id - server.js 靜態檢查
+✅ [前端] 交易輔助頁 - renderTradingAssistPage
+✅ [前端] 交易輔助 API - /trade-assist/summary
+✅ [前端] 交易輔助建議 API - /trade-assist/recommendations
+✅ [前端] 產生交易輔助 API - /trade-assist/generate
+✅ [前端] V3.0 文字 - V3.0 實戰交易輔助系統
+✅ [前端] 交易輔助按鈕 - data-trading-assist-generate
+✅ [前端] 不再顯示 V1.4 系統狀態 - V3.0 status copy
+✅ [安全邊界] V3.0 不自動下單 - manual confirmation only
+✅ [相容] 保留 V2.5 每日作戰室 - V2.5 routes
+✅ [相容] 保留 V2.4 部位模擬 - V2.4 routes
+✅ [相容] 保留 V2.3 AI 回饋學習 - V2.3 routes
+✅ [相容] 保留 V2.2 交易績效 - V2.2 routes
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v30/status - HTTP 200
+✅ [API 動態] /v30/acceptance - HTTP 200
+✅ [API 動態] /trade-assist/summary - HTTP 200
+✅ [API 動態] /trade-assist/recommendations - HTTP 200
+✅ [API 動態] /trade-assist/plans 登入保護 - HTTP 401
+------------------------------------
+PASS：58
+WARN：0
+FAIL：0
+結果：PASS
+完成：V3.0 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 23:54:44
+總耗時：0分4秒
+結果：PASS

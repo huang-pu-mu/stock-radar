@@ -1275,8 +1275,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v2.5.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v76";
+const API_VERSION = "stock-radar-api-v3.1.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v78";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1921,6 +1921,158 @@ function calculateV25Progress() {
   return Math.round(total / V25_MODULES.length);
 }
 
+
+
+
+const V30_FEATURE_TABLES = [
+  { name: "trading_assistant_accounts", label: "V3.0 交易輔助帳戶", date_column: "updated_at" },
+  { name: "trading_plans", label: "V3.0 交易計畫", date_column: "plan_date" },
+  { name: "trading_plan_orders", label: "V3.0 模擬下單草稿", date_column: "updated_at" },
+  { name: "trading_assistant_recommendations", label: "V3.0 每日交易輔助建議", date_column: "recommendation_date" },
+  { name: "trading_assistant_reports", label: "V3.0 交易輔助每日報告", date_column: "report_date" },
+];
+
+const V30_MODULES = [
+  { key: "trading_assistant_tables", name: "交易輔助資料表", progress: 100, status: "completed", required_tables: ["trading_assistant_accounts", "trading_plans", "trading_plan_orders", "trading_assistant_recommendations", "trading_assistant_reports"] },
+  { key: "manual_trade_plans", name: "交易計畫與人工確認", progress: 95, status: "first_version", required_apis: ["GET /trade-assist/plans", "POST /trade-assist/plans"] },
+  { key: "daily_trade_recommendations", name: "每日交易輔助建議", progress: 95, status: "first_version", required_apis: ["GET /trade-assist/recommendations", "POST /trade-assist/generate"] },
+  { key: "paper_order_drafts", name: "模擬下單草稿", progress: 88, status: "first_version", required_tables: ["trading_plan_orders"] },
+  { key: "frontend_trading_assist_page", name: "前端交易輔助頁", progress: 92, status: "first_version", required_apis: ["交易輔助頁", "交易建議", "人工確認提醒"] },
+  { key: "v30_acceptance_log", name: "V3.0 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v30:check", "npm run v30:test"] },
+];
+
+const V30_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "trading_assistant_accounts 已建立",
+      "trading_plans 已建立",
+      "trading_plan_orders 已建立",
+      "trading_assistant_recommendations 已建立",
+      "trading_assistant_reports 已建立",
+      "npm run trading-assist:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "交易輔助流程",
+    items: [
+      "npm run trading-assist:generate 可依每日作戰室與 AI 訊號產生交易輔助建議",
+      "系統可建立買進候選、減碼檢查、風險檢查與觀察清單",
+      "所有下單草稿都必須人工確認，不會自動送券商、不會自動下單",
+    ],
+  },
+  {
+    group: "API",
+    items: [
+      "GET /trade-assist/summary 可取得交易輔助總覽",
+      "GET /trade-assist/recommendations 可取得每日交易輔助建議",
+      "GET /trade-assist/plans 可查詢使用者交易計畫",
+      "POST /trade-assist/plans 可建立使用者交易計畫",
+      "POST /trade-assist/generate 可手動產生交易輔助資料",
+      "GET /v30/status 與 GET /v30/acceptance 可驗收版本狀態",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增交易輔助頁",
+      "前端顯示交易輔助摘要、買進候選、減碼檢查、風險檢查與人工確認提醒",
+      "PWA 快取版本升級至 stock-radar-pwa-v77",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run trading-assist:setup",
+      "npm run trading-assist:generate",
+      "npm run v30:check",
+      "npm run v30:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV30Progress() {
+  if (V30_MODULES.length === 0) return 0;
+  const total = V30_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V30_MODULES.length);
+}
+
+
+const V31_FEATURE_TABLES = [
+  { name: "pre_trade_plans", label: "V3.1 交易前計畫", date_column: "plan_date" },
+  { name: "pre_trade_check_items", label: "V3.1 交易前檢查項目", date_column: "checklist_date" },
+  { name: "pre_trade_action_logs", label: "V3.1 操作紀錄", date_column: "action_date" },
+];
+
+const V31_MODULES = [
+  { key: "pre_trade_tables", name: "交易前準備資料表", progress: 100, status: "completed", required_tables: ["pre_trade_plans", "pre_trade_check_items", "pre_trade_action_logs"] },
+  { key: "pre_trade_checklists", name: "交易前檢查清單", progress: 95, status: "first_version", required_apis: ["GET /pre-trade/checklists", "npm run pre-trade:generate"] },
+  { key: "manual_confirmation", name: "使用者人工確認", progress: 95, status: "first_version", required_apis: ["PUT /pre-trade/plans/:id/confirm"] },
+  { key: "action_logs", name: "操作紀錄保存", progress: 92, status: "first_version", required_tables: ["pre_trade_action_logs"] },
+  { key: "plan_result_compare", name: "計畫與實際結果比對", progress: 88, status: "first_version", required_fields: ["compare_status", "actual_result_note"] },
+  { key: "frontend_pre_trade_page", name: "前端交易前準備頁", progress: 92, status: "first_version", required_apis: ["交易前準備頁", "檢查清單", "人工確認"] },
+  { key: "v31_acceptance_log", name: "V3.1 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v31:check", "npm run v31:test"] },
+];
+
+const V31_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "pre_trade_plans 已建立",
+      "pre_trade_check_items 已建立",
+      "pre_trade_action_logs 已建立",
+      "npm run pre-trade:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "交易前準備",
+    items: [
+      "npm run pre-trade:generate 可依 V3.0 交易輔助建議產生交易前檢查清單",
+      "可整理買進計畫、減碼檢查、風險檢查與觀察清單",
+      "每筆計畫都保留 entry_condition、risk_control_plan、manual_confirm_required",
+    ],
+  },
+  {
+    group: "人工確認",
+    items: [
+      "GET /pre-trade/plans 可查詢登入使用者自己的交易前計畫",
+      "POST /pre-trade/plans 可手動建立使用者交易前計畫",
+      "PUT /pre-trade/plans/:id/confirm 可人工確認或拒絕",
+      "POST /pre-trade/plans/:id/logs 可保存操作紀錄",
+    ],
+  },
+  {
+    group: "安全邊界",
+    items: [
+      "V3.1 不串券商",
+      "V3.1 不會自動下單",
+      "所有交易動作都需要使用者人工確認",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增交易前準備頁",
+      "前端顯示檢查清單、交易前條件、風控計畫與人工確認狀態",
+      "PWA 快取版本升級至 stock-radar-pwa-v78",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run pre-trade:setup",
+      "npm run pre-trade:generate",
+      "npm run v31:check",
+      "npm run v31:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV31Progress() {
+  if (V31_MODULES.length === 0) return 0;
+  const total = V31_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V31_MODULES.length);
+}
 
 
 
@@ -7288,6 +7440,193 @@ async function getDailyWarRoomHistory(limit = 20) {
   );
 }
 
+
+async function getV30Snapshot() {
+  const snapshot = { accounts: null, plans: null, orders: null, recommendations: null, reports: null };
+  if (await checkTableExists("trading_assistant_accounts")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count FROM trading_assistant_accounts`, [], [{ total_count: 0, active_count: 0 }]);
+    snapshot.accounts = rows?.[0] || null;
+  }
+  if (await checkTableExists("trading_plans")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count, DATE_FORMAT(MAX(plan_date), '%Y-%m-%d') AS latest_plan_date FROM trading_plans`, [], [{ total_count: 0, active_count: 0, latest_plan_date: null }]);
+    snapshot.plans = rows?.[0] || null;
+  }
+  if (await checkTableExists("trading_plan_orders")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(manual_confirm_required = 1) AS manual_confirm_count FROM trading_plan_orders`, [], [{ total_count: 0, manual_confirm_count: 0 }]);
+    snapshot.orders = rows?.[0] || null;
+  }
+  if (await checkTableExists("trading_assistant_recommendations")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(recommendation_date), '%Y-%m-%d') AS latest_recommendation_date FROM trading_assistant_recommendations`, [], [{ total_count: 0, latest_recommendation_date: null }]);
+    snapshot.recommendations = rows?.[0] || null;
+  }
+  if (await checkTableExists("trading_assistant_reports")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(report_date), '%Y-%m-%d') AS latest_report_date FROM trading_assistant_reports`, [], [{ total_count: 0, latest_report_date: null }]);
+    snapshot.reports = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+async function getTradingAssistRecommendations(limit = 30) {
+  if (!(await checkTableExists("trading_assistant_recommendations"))) return [];
+  return safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(recommendation_date, '%Y-%m-%d') AS recommendation_date,
+      stock_code,
+      stock_name,
+      industry,
+      recommendation_type,
+      priority,
+      ai_strength_score,
+      market_mode,
+      suggested_action,
+      risk_note,
+      plan_note,
+      source_module,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+    FROM trading_assistant_recommendations
+    WHERE recommendation_date = (SELECT MAX(recommendation_date) FROM trading_assistant_recommendations)
+    ORDER BY FIELD(recommendation_type, 'BUY_PLAN', 'REDUCE', 'RISK_CHECK', 'WATCH'), priority ASC, id ASC
+    LIMIT ?
+    `,
+    [limit],
+    [],
+  );
+}
+
+async function getTradingAssistLatestReport() {
+  if (!(await checkTableExists("trading_assistant_reports"))) return null;
+  const rows = await safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(report_date, '%Y-%m-%d') AS report_date,
+      market_mode,
+      recommendation_count,
+      buy_plan_count,
+      reduce_plan_count,
+      risk_check_count,
+      manual_confirm_count,
+      action_summary,
+      line_message,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM trading_assistant_reports
+    ORDER BY report_date DESC, id DESC
+    LIMIT 1
+    `,
+    [],
+    [],
+  );
+  return rows[0] || null;
+}
+
+async function getTradingAssistSummary() {
+  const report = await getTradingAssistLatestReport();
+  const recommendations = await getTradingAssistRecommendations(20);
+  const summary = {
+    report_date: report?.report_date || null,
+    market_mode: report?.market_mode || recommendations[0]?.market_mode || "RANGE",
+    recommendation_count: Number(report?.recommendation_count || recommendations.length || 0),
+    buy_plan_count: Number(report?.buy_plan_count || recommendations.filter((row) => row.recommendation_type === "BUY_PLAN").length || 0),
+    reduce_plan_count: Number(report?.reduce_plan_count || recommendations.filter((row) => row.recommendation_type === "REDUCE").length || 0),
+    risk_check_count: Number(report?.risk_check_count || recommendations.filter((row) => row.recommendation_type === "RISK_CHECK").length || 0),
+    manual_confirm_count: Number(report?.manual_confirm_count || recommendations.filter((row) => ["BUY_PLAN", "REDUCE", "RISK_CHECK"].includes(row.recommendation_type)).length || 0),
+    action_summary: report?.action_summary || "V3.0 交易輔助資料尚未產生，可執行 npm run trading-assist:generate。",
+    line_message: report?.line_message || "",
+  };
+  return { summary, report, recommendations };
+}
+
+async function getTradingPlansForUser(userId, limit = 30) {
+  if (!(await checkTableExists("trading_plans"))) return [];
+  return safeQuery(
+    `
+    SELECT
+      p.id,
+      p.account_id,
+      DATE_FORMAT(p.plan_date, '%Y-%m-%d') AS plan_date,
+      p.stock_code,
+      p.stock_name,
+      p.market_type,
+      p.plan_type,
+      p.strategy_source,
+      p.planned_price,
+      p.planned_shares,
+      p.planned_lots,
+      p.stop_loss_price,
+      p.take_profit_price,
+      p.position_ratio_pct,
+      p.risk_amount,
+      p.ai_strength_score,
+      p.market_mode,
+      p.plan_status,
+      p.user_confirmed,
+      p.confirm_note,
+      p.note,
+      DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(p.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM trading_plans p
+    WHERE p.user_id = ? AND p.is_active = 1
+    ORDER BY p.plan_date DESC, p.id DESC
+    LIMIT ?
+    `,
+    [userId, limit],
+    [],
+  );
+}
+
+function normalizeTradingPlanPayload(body = {}, defaults = {}) {
+  const plannedPrice = parsePositiveNumber(body.planned_price ?? body.plannedPrice ?? defaults.planned_price, 0) || 0;
+  const plannedShares = Math.max(0, Math.round(parsePositiveNumber(body.planned_shares ?? body.plannedShares ?? defaults.planned_shares, 0) || 0));
+  const plannedLots = parsePositiveNumber(body.planned_lots ?? body.plannedLots ?? defaults.planned_lots, plannedShares > 0 ? plannedShares / 1000 : 0) || 0;
+  const stopLoss = parsePositiveNumber(body.stop_loss_price ?? body.stopLossPrice ?? defaults.stop_loss_price, 0) || null;
+  const takeProfit = parsePositiveNumber(body.take_profit_price ?? body.takeProfitPrice ?? defaults.take_profit_price, 0) || null;
+  const riskAmount = plannedPrice > 0 && plannedShares > 0 && stopLoss ? Math.max(0, (plannedPrice - stopLoss) * plannedShares) : parsePositiveNumber(body.risk_amount ?? body.riskAmount ?? defaults.risk_amount, 0) || 0;
+  return {
+    accountId: body.account_id ?? body.accountId ?? defaults.account_id ?? null,
+    planDate: String(body.plan_date || body.planDate || defaults.plan_date || todayTaipeiDate()).slice(0, 10),
+    stockCode: String(body.stock_code || body.stockCode || defaults.stock_code || "").trim(),
+    planType: String(body.plan_type || body.planType || defaults.plan_type || "WATCH").trim().toUpperCase(),
+    strategySource: String(body.strategy_source || body.strategySource || defaults.strategy_source || "AI_MULTI_FACTOR").trim(),
+    plannedPrice,
+    plannedShares,
+    plannedLots,
+    stopLossPrice: stopLoss,
+    takeProfitPrice: takeProfit,
+    positionRatioPct: parsePositiveNumber(body.position_ratio_pct ?? body.positionRatioPct ?? defaults.position_ratio_pct, 0) || 0,
+    riskAmount,
+    aiStrengthScore: parsePositiveNumber(body.ai_strength_score ?? body.aiStrengthScore ?? defaults.ai_strength_score, 0) || null,
+    marketMode: String(body.market_mode || body.marketMode || defaults.market_mode || "RANGE").trim().toUpperCase(),
+    planStatus: String(body.plan_status || body.planStatus || defaults.plan_status || "PLANNED").trim().toUpperCase(),
+    userConfirmed: Boolean(body.user_confirmed ?? body.userConfirmed ?? defaults.user_confirmed ?? false) ? 1 : 0,
+    confirmNote: String(body.confirm_note || body.confirmNote || defaults.confirm_note || "").trim(),
+    note: String(body.note || defaults.note || "").trim(),
+  };
+}
+
+function validateTradingPlanPayload(payload) {
+  if (!payload.stockCode) return "請輸入股票代號。";
+  if (!/^\d{4,6}[A-Z]?$/.test(payload.stockCode)) return "股票代號格式不正確。";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.planDate)) return "計畫日期格式需為 YYYY-MM-DD。";
+  if (!["BUY", "SELL", "WATCH", "REDUCE"].includes(payload.planType)) return "計畫類型只支援 BUY / SELL / WATCH / REDUCE。";
+  if (!["PLANNED", "WAITING_CONFIRM", "EXECUTED", "CANCELLED"].includes(payload.planStatus)) return "計畫狀態不正確。";
+  return "";
+}
+
+async function createTradingPlanOrder(userId, planId, payload) {
+  const side = payload.planType === "SELL" || payload.planType === "REDUCE" ? "SELL" : "BUY";
+  const estimatedAmount = Number(payload.plannedPrice || 0) * Number(payload.plannedShares || 0);
+  await query(
+    `
+    INSERT INTO trading_plan_orders (user_id, plan_id, order_side, order_type, order_price, order_shares, estimated_amount, order_status, manual_confirm_required)
+    VALUES (?, ?, ?, 'LIMIT', ?, ?, ?, 'DRAFT', 1)
+    `,
+    [userId, planId, side, payload.plannedPrice || null, payload.plannedShares || 0, estimatedAmount || 0],
+  );
+}
+
 async function getAiFeedbackSummary(limit = 12) {
   if (!(await checkTableExists("ai_recommendation_feedbacks"))) {
     return {
@@ -7954,6 +8293,189 @@ app.get("/v25/acceptance", (req, res) => {
     modules: V25_MODULES,
     recommended_commands: ["npm run war-room:setup", "npm run war-room:generate", "npm run v25:check", "npm run v25:test -- --api=http://localhost:3000"],
     recommended_urls: ["/health", "/v25/status", "/v25/acceptance", "/war-room/latest", "/war-room/history"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+
+app.get("/trade-assist/summary", async (req, res) => {
+  try {
+    const payload = await getTradingAssistSummary();
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V3.0 實戰交易輔助系統", ...payload, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢交易輔助總覽失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易輔助總覽失敗", error: error.message });
+  }
+});
+
+app.get("/trade-assist/recommendations", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const rows = await getTradingAssistRecommendations(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢交易輔助建議失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易輔助建議失敗", error: error.message });
+  }
+});
+
+app.post("/trade-assist/generate", async (req, res) => {
+  try {
+    const date = String(req.body?.date || req.query.date || "").trim();
+    const args = /^\d{4}-\d{2}-\d{2}$/.test(date) ? [date] : [];
+    const result = await runLocalScript("trading-assist:generate", args);
+    const payload = await getTradingAssistSummary();
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生 V3.0 交易輔助建議", ...payload, output: result.stdout.slice(-2000), checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("產生交易輔助建議失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生交易輔助建議失敗", error: error.message });
+  }
+});
+
+app.get("/trade-assist/plans", requireAuth, async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const rows = await getTradingPlansForUser(req.user.id, limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢交易計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易計畫失敗", error: error.message });
+  }
+});
+
+app.post("/trade-assist/plans", requireAuth, async (req, res) => {
+  try {
+    const payload = normalizeTradingPlanPayload(req.body || {});
+    const errorMessage = validateTradingPlanPayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+    const stock = await getStockBasic(payload.stockCode);
+    if (!stock) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+    const result = await query(
+      `
+      INSERT INTO trading_plans (
+        user_id, account_id, plan_date, stock_code, stock_name, market_type, plan_type, strategy_source,
+        planned_price, planned_shares, planned_lots, stop_loss_price, take_profit_price, position_ratio_pct,
+        risk_amount, ai_strength_score, market_mode, plan_status, user_confirmed, confirm_note, note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [req.user.id, payload.accountId, payload.planDate, payload.stockCode, stock.stock_name, stock.market_type, payload.planType, payload.strategySource, payload.plannedPrice || null, payload.plannedShares, payload.plannedLots, payload.stopLossPrice, payload.takeProfitPrice, payload.positionRatioPct, payload.riskAmount, payload.aiStrengthScore, payload.marketMode, payload.planStatus, payload.userConfirmed, payload.confirmNote, payload.note],
+    );
+    const planId = Number(result.insertId || 0);
+    if (planId && payload.plannedShares > 0) await createTradingPlanOrder(req.user.id, planId, payload);
+    const rows = await getTradingPlansForUser(req.user.id, 30);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已建立交易計畫，所有下單草稿需人工確認。", data: rows.find((row) => Number(row.id) === planId) || null }));
+  } catch (error) {
+    console.error("建立交易計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "建立交易計畫失敗", error: error.message });
+  }
+});
+
+app.put("/trade-assist/plans/:id", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.id);
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "交易計畫 ID 不正確。" });
+    const currentRows = await query(`SELECT * FROM trading_plans WHERE id = ? AND user_id = ? LIMIT 1`, [planId, req.user.id]);
+    if (currentRows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆交易計畫。" });
+    const payload = normalizeTradingPlanPayload(req.body || {}, currentRows[0]);
+    const errorMessage = validateTradingPlanPayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+    const stock = await getStockBasic(payload.stockCode);
+    if (!stock) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+    await query(
+      `
+      UPDATE trading_plans
+      SET account_id = ?, plan_date = ?, stock_code = ?, stock_name = ?, market_type = ?, plan_type = ?, strategy_source = ?,
+          planned_price = ?, planned_shares = ?, planned_lots = ?, stop_loss_price = ?, take_profit_price = ?, position_ratio_pct = ?,
+          risk_amount = ?, ai_strength_score = ?, market_mode = ?, plan_status = ?, user_confirmed = ?, confirm_note = ?, note = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+      `,
+      [payload.accountId, payload.planDate, payload.stockCode, stock.stock_name, stock.market_type, payload.planType, payload.strategySource, payload.plannedPrice || null, payload.plannedShares, payload.plannedLots, payload.stopLossPrice, payload.takeProfitPrice, payload.positionRatioPct, payload.riskAmount, payload.aiStrengthScore, payload.marketMode, payload.planStatus, payload.userConfirmed, payload.confirmNote, payload.note, planId, req.user.id],
+    );
+    const rows = await getTradingPlansForUser(req.user.id, 30);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已更新交易計畫", data: rows.find((row) => Number(row.id) === planId) || null }));
+  } catch (error) {
+    console.error("更新交易計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "更新交易計畫失敗", error: error.message });
+  }
+});
+
+app.delete("/trade-assist/plans/:id", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.id);
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "交易計畫 ID 不正確。" });
+    const result = await query(`UPDATE trading_plans SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, [planId, req.user.id]);
+    if (Number(result.affectedRows || 0) === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆交易計畫。" });
+    res.json({ success: true, version: API_VERSION, message: "已停用交易計畫", id: planId });
+  } catch (error) {
+    console.error("停用交易計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "停用交易計畫失敗", error: error.message });
+  }
+});
+
+app.get("/v30/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V30_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV30Snapshot();
+    const recommendationCount = Number(snapshot.recommendations?.total_count || 0);
+    const reportCount = Number(snapshot.reports?.total_count || 0);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v3.0.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v77" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V3.0 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V3.0 實戰交易輔助資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("recommendations", "交易輔助建議", recommendationCount > 0 ? "pass" : "warn", recommendationCount > 0 ? `已有 ${recommendationCount} 筆交易輔助建議。` : "尚未產生交易輔助建議，可執行 npm run trading-assist:generate。", { recommendation_count: recommendationCount }),
+      buildCheck("reports", "交易輔助報告", reportCount > 0 ? "pass" : "warn", reportCount > 0 ? `已有 ${reportCount} 份交易輔助報告。` : "尚未產生交易輔助每日報告。", { report_count: reportCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V3.0 實戰交易輔助系統",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V3.0 交易輔助、人工確認與前端頁面都正常。" : overallStatus === "warn" ? "V3.0 程式與資料表已就緒，可產生交易輔助建議。" : "V3.0 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV30Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      modules: V30_MODULES,
+      next_actions: [
+        "執行 npm run trading-assist:setup 建立 V3.0 資料表。",
+        "執行 npm run trading-assist:generate 產生交易輔助建議。",
+        "前端進入交易輔助頁檢查買進候選、減碼檢查與人工確認提醒。",
+        "執行 npm run v30:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V3.0 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V3.0 實戰交易輔助系統", message: "查詢 V3.0 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v30/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V3.0 實戰交易輔助系統驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV30Progress(),
+    checklist: V30_FINAL_ACCEPTANCE_ITEMS,
+    modules: V30_MODULES,
+    recommended_commands: ["npm run trading-assist:setup", "npm run trading-assist:generate", "npm run v30:check", "npm run v30:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v30/status", "/v30/acceptance", "/trade-assist/summary", "/trade-assist/recommendations"],
     checked_at: nowTaipeiText(),
   });
 });
@@ -14686,6 +15208,384 @@ app.post("/watchlist/rules", requireAuth, async (req, res) => {
     });
   }
 });
+
+
+async function getLatestPreTradeDate() {
+  if (!(await checkTableExists("pre_trade_plans"))) return null;
+  const rows = await query("SELECT DATE_FORMAT(MAX(plan_date), '%Y-%m-%d') AS latest_date FROM pre_trade_plans WHERE is_active = 1");
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getPreTradeSummary(planDate = null) {
+  if (!(await checkTableExists("pre_trade_plans"))) return null;
+  const targetDate = planDate || await getLatestPreTradeDate();
+  if (!targetDate) return null;
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(plan_date, '%Y-%m-%d') AS plan_date,
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN plan_type = 'BUY_PLAN' THEN 1 ELSE 0 END) AS buy_plan_count,
+      SUM(CASE WHEN plan_type = 'REDUCE' THEN 1 ELSE 0 END) AS reduce_count,
+      SUM(CASE WHEN plan_type = 'RISK_CHECK' THEN 1 ELSE 0 END) AS risk_check_count,
+      SUM(CASE WHEN plan_type = 'WATCH' THEN 1 ELSE 0 END) AS watch_count,
+      SUM(CASE WHEN manual_confirm_required = 1 THEN 1 ELSE 0 END) AS manual_confirm_required_count,
+      SUM(CASE WHEN user_confirmed = 1 THEN 1 ELSE 0 END) AS confirmed_count,
+      SUM(CASE WHEN confirmation_status = 'PENDING' THEN 1 ELSE 0 END) AS pending_count
+    FROM pre_trade_plans
+    WHERE plan_date = ?
+      AND is_active = 1
+    GROUP BY plan_date
+    `,
+    [targetDate],
+  );
+  return rows?.[0] || null;
+}
+
+async function getPreTradeChecklistRows(planDate = null, limit = 30) {
+  if (!(await checkTableExists("pre_trade_plans"))) return [];
+  const targetDate = planDate || await getLatestPreTradeDate();
+  if (!targetDate) return [];
+  const rows = await query(
+    `
+    SELECT
+      p.id,
+      p.user_id,
+      DATE_FORMAT(p.plan_date, '%Y-%m-%d') AS plan_date,
+      p.stock_code,
+      p.stock_name,
+      p.industry,
+      p.plan_type,
+      p.source_recommendation_id,
+      p.source_module,
+      p.entry_condition,
+      p.risk_control_plan,
+      p.stop_loss_price,
+      p.take_profit_price,
+      p.planned_price,
+      p.planned_shares,
+      p.position_size_pct,
+      p.max_risk_amount,
+      p.manual_confirm_required,
+      p.user_confirmed,
+      p.confirmation_status,
+      p.compare_status,
+      p.actual_result_note,
+      DATE_FORMAT(p.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM pre_trade_plans p
+    WHERE p.plan_date = ?
+      AND p.is_active = 1
+    ORDER BY FIELD(p.plan_type, 'BUY_PLAN', 'REDUCE', 'RISK_CHECK', 'WATCH'), p.id ASC
+    LIMIT ?
+    `,
+    [targetDate, limit],
+  );
+  if (!rows.length || !(await checkTableExists("pre_trade_check_items"))) return rows.map((row) => ({ ...row, check_items: [] }));
+
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const itemRows = await query(
+    `
+    SELECT
+      id,
+      plan_id,
+      check_group,
+      check_item,
+      check_status,
+      is_required,
+      sort_order
+    FROM pre_trade_check_items
+    WHERE plan_id IN (${placeholders})
+    ORDER BY plan_id ASC, sort_order ASC, id ASC
+    `,
+    ids,
+  );
+  const itemMap = new Map();
+  for (const item of itemRows) {
+    const key = String(item.plan_id);
+    if (!itemMap.has(key)) itemMap.set(key, []);
+    itemMap.get(key).push(item);
+  }
+  return rows.map((row) => ({ ...row, check_items: itemMap.get(String(row.id)) || [] }));
+}
+
+function normalizePreTradePayload(body = {}, existing = {}) {
+  const stockCode = normalizeStockCodeValue(body.stock_code ?? existing.stock_code);
+  return {
+    planDate: String(body.plan_date ?? existing.plan_date ?? todayTaipeiDateText()).slice(0, 10),
+    stockCode,
+    stockName: String(body.stock_name ?? existing.stock_name ?? "").trim().slice(0, 80) || null,
+    industry: String(body.industry ?? existing.industry ?? "").trim().slice(0, 80) || null,
+    planType: String(body.plan_type ?? existing.plan_type ?? "WATCH").trim().toUpperCase(),
+    entryCondition: String(body.entry_condition ?? existing.entry_condition ?? "").trim().slice(0, 1000) || "等待條件符合後再人工確認。",
+    riskControlPlan: String(body.risk_control_plan ?? existing.risk_control_plan ?? "").trim().slice(0, 1000) || "確認停損、停利、部位比例與最大虧損後才可執行。",
+    stopLossPrice: normalizeNullablePrice(body.stop_loss_price ?? existing.stop_loss_price),
+    takeProfitPrice: normalizeNullablePrice(body.take_profit_price ?? existing.take_profit_price),
+    plannedPrice: normalizeNullablePrice(body.planned_price ?? existing.planned_price),
+    plannedShares: parsePositiveNumber(body.planned_shares ?? existing.planned_shares, null),
+    positionSizePct: parsePositiveNumber(body.position_size_pct ?? existing.position_size_pct, null),
+    maxRiskAmount: parsePositiveNumber(body.max_risk_amount ?? existing.max_risk_amount, null),
+    actualResultNote: String(body.actual_result_note ?? existing.actual_result_note ?? "").trim().slice(0, 1000) || null,
+  };
+}
+
+function validatePreTradePayload(payload) {
+  if (!isValidDateText(payload.planDate)) return "計畫日期格式不正確，請使用 YYYY-MM-DD。";
+  if (payload.stockCode && !isValidStockCodeValue(payload.stockCode)) return "股票代號格式不正確。";
+  if (!["BUY_PLAN", "REDUCE", "RISK_CHECK", "WATCH"].includes(payload.planType)) return "plan_type 必須是 BUY_PLAN / REDUCE / RISK_CHECK / WATCH。";
+  return "";
+}
+
+app.get("/pre-trade/summary", async (req, res) => {
+  try {
+    const planDate = req.query.date || null;
+    const summary = await getPreTradeSummary(planDate);
+    const checklists = await getPreTradeChecklistRows(summary?.plan_date || planDate, 8);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      module: "V3.1 半自動交易前置準備",
+      summary: summary || {
+        plan_date: planDate || null,
+        total_count: 0,
+        buy_plan_count: 0,
+        reduce_count: 0,
+        risk_check_count: 0,
+        watch_count: 0,
+        manual_confirm_required_count: 0,
+        confirmed_count: 0,
+        pending_count: 0,
+      },
+      checklists,
+      safety_boundary: "不串券商、不會自動下單，所有交易動作皆須人工確認。",
+    }));
+  } catch (error) {
+    console.error("查詢交易前準備摘要失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易前準備摘要失敗", error: error.message });
+  }
+});
+
+app.get("/pre-trade/checklists", async (req, res) => {
+  try {
+    const planDate = req.query.date || null;
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const rows = await getPreTradeChecklistRows(planDate, limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢交易前檢查清單失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易前檢查清單失敗", error: error.message });
+  }
+});
+
+app.post("/pre-trade/generate", async (req, res) => {
+  try {
+    const result = await runLocalScript("pre-trade:generate", req.body?.date ? [String(req.body.date).slice(0, 10)] : []);
+    const summary = await getPreTradeSummary();
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      message: "已產生 V3.1 半自動交易前置準備清單。",
+      stdout: result.stdout,
+      stderr: result.stderr,
+      summary,
+    }));
+  } catch (error) {
+    console.error("產生交易前準備清單失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生交易前準備清單失敗", error: error.message });
+  }
+});
+
+app.get("/pre-trade/plans", requireAuth, async (req, res) => {
+  try {
+    if (!(await checkTableExists("pre_trade_plans"))) return res.json({ success: true, version: API_VERSION, count: 0, data: [] });
+    const rows = await query(
+      `
+      SELECT
+        id,
+        user_id,
+        DATE_FORMAT(plan_date, '%Y-%m-%d') AS plan_date,
+        stock_code,
+        stock_name,
+        industry,
+        plan_type,
+        entry_condition,
+        risk_control_plan,
+        stop_loss_price,
+        take_profit_price,
+        planned_price,
+        planned_shares,
+        position_size_pct,
+        max_risk_amount,
+        manual_confirm_required,
+        user_confirmed,
+        confirmation_status,
+        compare_status,
+        actual_result_note,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+      FROM pre_trade_plans
+      WHERE user_id = ?
+        AND is_active = 1
+      ORDER BY plan_date DESC, id DESC
+      LIMIT 100
+      `,
+      [req.user.id],
+    );
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢我的交易前計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢我的交易前計畫失敗", error: error.message });
+  }
+});
+
+app.post("/pre-trade/plans", requireAuth, async (req, res) => {
+  try {
+    const payload = normalizePreTradePayload(req.body || {});
+    const validationError = validatePreTradePayload(payload);
+    if (validationError) return res.status(400).json({ success: false, version: API_VERSION, message: validationError });
+
+    const result = await query(
+      `
+      INSERT INTO pre_trade_plans (
+        user_id, plan_date, stock_code, stock_name, industry, plan_type, entry_condition, risk_control_plan,
+        stop_loss_price, take_profit_price, planned_price, planned_shares, position_size_pct, max_risk_amount,
+        manual_confirm_required, user_confirmed, confirmation_status, compare_status, actual_result_note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'PENDING', 'WAITING', ?)
+      `,
+      [
+        req.user.id,
+        payload.planDate,
+        payload.stockCode,
+        payload.stockName,
+        payload.industry,
+        payload.planType,
+        payload.entryCondition,
+        payload.riskControlPlan,
+        payload.stopLossPrice,
+        payload.takeProfitPrice,
+        payload.plannedPrice,
+        payload.plannedShares,
+        payload.positionSizePct,
+        payload.maxRiskAmount,
+        payload.actualResultNote,
+      ],
+    );
+    const planId = Number(result.insertId);
+    await query(
+      "INSERT INTO pre_trade_action_logs (user_id, plan_id, action_date, action_type, action_message) VALUES (?, ?, ?, 'CREATE', ?)",
+      [req.user.id, planId, payload.planDate, "使用者建立 V3.1 交易前計畫，尚未人工確認。"],
+    );
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "交易前計畫已建立。", id: planId }));
+  } catch (error) {
+    console.error("建立交易前計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "建立交易前計畫失敗", error: error.message });
+  }
+});
+
+app.put("/pre-trade/plans/:id/confirm", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const confirmed = String(req.body?.confirmed ?? "1") !== "0";
+    const status = confirmed ? "CONFIRMED" : "REJECTED";
+    const note = String(req.body?.note || "").trim().slice(0, 500);
+    const result = await query(
+      `
+      UPDATE pre_trade_plans
+      SET user_confirmed = ?, confirmation_status = ?, actual_result_note = COALESCE(?, actual_result_note), updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND user_id = ?
+        AND is_active = 1
+      `,
+      [confirmed ? 1 : 0, status, note || null, id, req.user.id],
+    );
+    await query(
+      "INSERT INTO pre_trade_action_logs (user_id, plan_id, action_date, action_type, action_message) VALUES (?, ?, ?, ?, ?)",
+      [req.user.id, id, todayTaipeiDateText(), status, note || `使用者將交易前計畫標記為 ${status}。`],
+    );
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "交易前計畫確認狀態已更新。", affected_rows: result.affectedRows || 0 }));
+  } catch (error) {
+    console.error("更新交易前計畫確認狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "更新交易前計畫確認狀態失敗", error: error.message });
+  }
+});
+
+app.post("/pre-trade/plans/:id/logs", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const actionType = String(req.body?.action_type || "NOTE").trim().toUpperCase().slice(0, 50);
+    const actionMessage = String(req.body?.action_message || req.body?.note || "新增交易前操作紀錄。").trim().slice(0, 1000);
+    await query(
+      "INSERT INTO pre_trade_action_logs (user_id, plan_id, action_date, action_type, action_message) VALUES (?, ?, ?, ?, ?)",
+      [req.user.id, id, todayTaipeiDateText(), actionType, actionMessage],
+    );
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "交易前操作紀錄已保存。" }));
+  } catch (error) {
+    console.error("新增交易前操作紀錄失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "新增交易前操作紀錄失敗", error: error.message });
+  }
+});
+
+app.get("/v31/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V31_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getPreTradeSummary();
+    const checklistRows = await getPreTradeChecklistRows(summary?.plan_date || null, 5);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck("versions", "API / PWA 版本", API_VERSION === "stock-radar-api-v3.1.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v78" ? "pass" : "fail", `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`, { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION }),
+      buildCheck("tables", "V3.1 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V3.1 半自動交易前置準備資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("pre_trade_summary", "交易前準備摘要", summary ? "pass" : "warn", summary ? "已有交易前準備摘要。" : "尚未產生交易前準備清單，請執行 npm run pre-trade:generate。", { summary }),
+      buildCheck("pre_trade_checklists", "交易前檢查清單", checklistRows.length > 0 ? "pass" : "warn", checklistRows.length > 0 ? `已有 ${checklistRows.length} 筆交易前檢查清單。` : "交易前檢查清單尚無資料。", { count: checklistRows.length }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V3.1 半自動交易前置準備",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V3.1 半自動交易前置準備、資料表、清單與人工確認流程正常。" : overallStatus === "warn" ? "V3.1 程式已就緒，但交易前準備清單尚需產生。" : "V3.1 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV31Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      summary,
+      checklists: checklistRows,
+      modules: V31_MODULES,
+      safety_boundary: "不串券商、不會自動下單，所有交易動作皆須人工確認。",
+      next_actions: [
+        "執行 npm run pre-trade:setup 建立 V3.1 資料表。",
+        "執行 npm run pre-trade:generate 產生交易前準備清單。",
+        "執行 npm run v31:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V3.1 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V3.1 半自動交易前置準備", message: "查詢 V3.1 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v31/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V3.1 半自動交易前置準備驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV31Progress(),
+    checklist: V31_FINAL_ACCEPTANCE_ITEMS,
+    modules: V31_MODULES,
+    recommended_commands: ["npm run pre-trade:setup", "npm run pre-trade:generate", "npm run v31:check", "npm run v31:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v31/status", "/v31/acceptance", "/pre-trade/summary", "/pre-trade/checklists"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
 
 app.listen(PORT, () => {
   console.log(`Stock Radar API running on http://localhost:${PORT}`);

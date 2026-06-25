@@ -93,7 +93,17 @@
     "war-room:generate": "node scripts/generateDailyWarRoomReport.js",
     "war-room:daily": "npm run war-room:setup && npm run war-room:generate",
     "v25:check": "node scripts/checkV25.js",
-    "v25:test": "node scripts/runV25Acceptance.js"
+    "v25:test": "node scripts/runV25Acceptance.js",
+    "trading-assist:setup": "node scripts/setupTradingAssistantTables.js",
+    "trading-assist:generate": "node scripts/generateTradingAssistantPlans.js",
+    "trading-assist:daily": "npm run trading-assist:setup && npm run trading-assist:generate",
+    "v30:check": "node scripts/checkV30.js",
+    "v30:test": "node scripts/runV30Acceptance.js",
+    "pre-trade:setup": "node scripts/setupPreTradePreparationTables.js",
+    "pre-trade:generate": "node scripts/generatePreTradePreparations.js",
+    "pre-trade:daily": "npm run pre-trade:setup && npm run pre-trade:generate",
+    "v31:check": "node scripts/checkV31.js",
+    "v31:test": "node scripts/runV31Acceptance.js"
   },
   "keywords": [
     "stock",
