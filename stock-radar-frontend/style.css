@@ -5504,3 +5504,7 @@ body.chart-zoom-open {
 }
 
 .breakout-panel { border-style: solid; }
+
+
+.main-force-panel { border-style: solid; }
+.main-force-panel::before { background: linear-gradient(180deg, rgba(250, 204, 21, 0.35), transparent); }

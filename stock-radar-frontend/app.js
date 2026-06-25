@@ -584,6 +584,76 @@ function renderBreakoutPanel() {
   `;
 }
 
+
+function renderMainForcePanel() {
+  const payload = state.mainForceRisk || {};
+  const summary = payload.summary || null;
+  const topSignals = Array.isArray(payload.top_signals) ? payload.top_signals : [];
+  const advice = payload.advice || state.mainForceRiskError || "尚未讀取主力籌碼資料。";
+
+  if (!summary && !state.mainForceRiskError) return "";
+
+  const score = pick(summary || {}, ["avg_main_force_score", "top_main_force_score"], "-");
+  const tone = getScoreClass(score);
+  const tradeDate = pick(summary || {}, ["trade_date"], "-");
+  const totalCount = pick(summary || {}, ["total_count"], 0);
+  const strongCount = pick(summary || {}, ["strong_count"], 0);
+  const watchCount = pick(summary || {}, ["watch_count"], 0);
+  const riskCount = pick(summary || {}, ["risk_count"], 0);
+  const topStock = `${pick(summary || {}, ["top_stock_name"], "-")} ${pick(summary || {}, ["top_stock_code"], "")}`.trim();
+  const topPills = topSignals.slice(0, 4).map((item) => {
+    const label = `${pick(item, ["stock_name"], "-")} ${pick(item, ["stock_code"], "")}`.trim();
+    const itemScore = pick(item, ["main_force_score"], "-");
+    const status = pick(item, ["main_force_status"], "主力觀察");
+    return `<span class="component-pill ${getScoreClass(itemScore)}">${escapeHtml(label)} ${formatNumber(itemScore)}｜${escapeHtml(status)}</span>`;
+  }).join("");
+
+  return `
+    <section class="market-risk-panel main-force-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V1.8 主力籌碼引擎</p>
+          <h3>主力籌碼雷達｜${formatNumber(totalCount)} 檔</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">Main Force</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("強勢主力", `${formatNumber(strongCount)} 檔`, "score-high")}
+        ${createInfoItem("觀察股", `${formatNumber(watchCount)} 檔`, "score-mid")}
+        ${createInfoItem("出貨風險", `${formatNumber(riskCount)} 檔`, riskCount > 0 ? "score-low" : "score-high")}
+        ${createInfoItem("第一名", escapeHtml(topStock))}
+        ${createInfoItem("資料日", formatDate(tradeDate))}
+      </div>
+      ${topPills ? `<div class="global-component-strip">${topPills}</div>` : ""}
+    </section>
+  `;
+}
+
+async function loadMainForceForRadar() {
+  if (state.page !== "radar") {
+    state.mainForceRisk = null;
+    state.mainForceRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/main-force/latest", { method: "GET", raw: true });
+    state.mainForceRisk = result;
+    state.mainForceRiskError = "";
+  } catch (error) {
+    state.mainForceRisk = null;
+    state.mainForceRiskError = error.message || "主力籌碼資料讀取失敗。";
+  }
+}
+
+async function loadV18StatusForAcceptance() {
+  return fetchJson("/v18/status", { method: "GET", raw: true });
+}
+
 async function loadBreakoutForRadar() {
   if (state.page !== "radar") {
     state.breakoutRisk = null;
@@ -2627,7 +2697,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -5351,8 +5421,21 @@ function renderStockCard(row, index) {
   const breakoutVolumeRatio = pick(row, ["breakout_volume_ratio_5", "volume_ratio_5"], "-");
   const breakoutOverheatRisk = pick(row, ["breakout_overheat_risk", "overheat_risk"], "-");
   const hasBreakoutScore = breakoutScore !== "" && breakoutScore !== null && breakoutScore !== undefined;
+  const mainForceScore = pick(row, ["main_force_score"], "");
+  const mainForceStatus = pick(row, ["main_force_status"], "");
+  const mainForceCost = pick(row, ["estimated_main_force_cost"], "-");
+  const mainForceCostGap = pick(row, ["cost_gap_percent"], "-");
+  const mainForceDistributionRisk = pick(row, ["main_force_distribution_risk", "distribution_risk"], "-");
+  const hasMainForceScore = mainForceScore !== "" && mainForceScore !== null && mainForceScore !== undefined;
 
   const radarItems = [
+    ...(hasMainForceScore ? [
+      createInfoItem("主力分數", formatNumber(mainForceScore), getScoreClass(mainForceScore)),
+      createInfoItem("主力狀態", escapeHtml(mainForceStatus || "主力觀察")),
+      createInfoItem("估算成本", formatPrice(mainForceCost)),
+      createInfoItem("成本差距", formatPercent(mainForceCostGap), getChangeClass(mainForceCostGap)),
+      createInfoItem("出貨風險", escapeHtml(mainForceDistributionRisk)),
+    ] : []),
     ...(hasBreakoutScore ? [
       createInfoItem("突破分數", formatNumber(breakoutScore), getScoreClass(breakoutScore)),
       createInfoItem("突破型態", escapeHtml(breakoutType || breakoutLevel || "技術觀察")),
@@ -7942,6 +8025,7 @@ async function loadList() {
     await loadMarketRiskForRadar();
     await loadGlobalRiskForRadar();
     await loadBreakoutForRadar();
+    await loadMainForceForRadar();
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -7970,7 +8054,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([

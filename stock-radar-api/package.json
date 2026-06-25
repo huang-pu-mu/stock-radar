@@ -50,7 +50,12 @@
     "breakout:generate": "node scripts/generateBreakoutSignals.js",
     "breakout:daily": "npm run breakout:setup && npm run breakout:generate",
     "v17:check": "node scripts/checkV17.js",
-    "v17:test": "node scripts/runV17Acceptance.js"
+    "v17:test": "node scripts/runV17Acceptance.js",
+    "main-force:setup": "node scripts/setupMainForceEngineTables.js",
+    "main-force:generate": "node scripts/generateMainForceSignals.js",
+    "main-force:daily": "npm run main-force:setup && npm run main-force:generate",
+    "v18:check": "node scripts/checkV18.js",
+    "v18:test": "node scripts/runV18Acceptance.js"
   },
   "keywords": [
     "stock",

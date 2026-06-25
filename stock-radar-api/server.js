@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.7.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v63";
+const API_VERSION = "stock-radar-api-v1.8.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v64";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1675,6 +1675,93 @@ function calculateV17Progress() {
   if (V17_MODULES.length === 0) return 0;
   const total = V17_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V17_MODULES.length);
+}
+
+
+const V18_FEATURE_TABLES = [
+  { name: "main_force_signals", label: "V1.8 主力籌碼訊號", date_column: "trade_date" },
+  { name: "main_force_summaries", label: "V1.8 主力籌碼摘要", date_column: "trade_date" },
+];
+
+const V18_MODULES = [
+  {
+    key: "main_force_tables",
+    name: "主力籌碼資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["main_force_signals", "main_force_summaries"],
+  },
+  {
+    key: "main_force_score",
+    name: "Main Force Score 主力籌碼分數",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run main-force:generate", "GET /main-force/top"],
+  },
+  {
+    key: "main_force_cost",
+    name: "估算主力成本與成本差距",
+    progress: 85,
+    status: "first_version",
+    required_apis: ["GET /main-force/latest", "GET /main-force/top"],
+  },
+  {
+    key: "main_force_distribution_risk",
+    name: "主力布局 / 鎖碼 / 出貨風險判斷",
+    progress: 85,
+    status: "first_version",
+    required_apis: ["GET /main-force/latest", "GET /radar/top"],
+  },
+  {
+    key: "v18_acceptance_log",
+    name: "V1.8 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v18:check", "npm run v18:test"],
+  },
+];
+
+const V18_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "main_force_signals 已建立",
+      "main_force_summaries 已建立",
+      "npm run main-force:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "主力籌碼引擎",
+    items: [
+      "npm run main-force:generate 可依 major_holder_stats / 法人 / 價格 / 技術突破資料產生 Main Force Score",
+      "GET /main-force/latest 可回傳主力籌碼摘要與強勢清單",
+      "GET /main-force/top 可回傳主力籌碼排行",
+      "主力狀態包含主力低檔布局、千張大戶增持、籌碼集中上升、疑似出貨風險",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "首頁顯示 V1.8 主力籌碼雷達摘要",
+      "GET /radar/top 新增 main_force_score / main_force_status / estimated_main_force_cost / distribution_risk",
+      "股票卡片顯示主力分數、主力狀態、估算成本、成本差距與出貨風險",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v18:check",
+      "npm run v18:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV18Progress() {
+  if (V18_MODULES.length === 0) return 0;
+  const total = V18_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V18_MODULES.length);
 }
 
 const V13_MODULES = [
@@ -2258,6 +2345,137 @@ async function buildV17BreakoutPayload(tradeDate = null, market = null, limit = 
     summary,
     top_signals: topRows,
     advice: getV17BreakoutAdvice(summary),
+  });
+}
+
+
+async function getLatestMainForceDate() {
+  if (!(await checkTableExists("main_force_signals"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM main_force_signals`,
+    [],
+    [],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getMainForceSummary(tradeDate = null, market = "全部") {
+  if (!(await checkTableExists("main_force_summaries"))) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0 };
+  }
+
+  const targetDate = tradeDate || await getLatestMainForceDate();
+  if (!targetDate) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0 };
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      market_type,
+      total_count,
+      strong_count,
+      watch_count,
+      early_count,
+      risk_count,
+      avg_main_force_score,
+      top_main_force_score,
+      top_stock_code,
+      top_stock_name,
+      DATE_FORMAT(generated_at, '%Y-%m-%d %H:%i:%s') AS generated_at
+    FROM main_force_summaries
+    WHERE trade_date = ?
+      AND market_type = ?
+    LIMIT 1
+    `,
+    [targetDate, market || "全部"],
+    [],
+  );
+
+  return rows?.[0] || { trade_date: targetDate, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0 };
+}
+
+async function getMainForceTopRows({ tradeDate = null, market = null, limit = 10 } = {}) {
+  if (!(await checkTableExists("main_force_signals"))) return [];
+
+  const targetDate = tradeDate || await getLatestMainForceDate();
+  if (!targetDate) return [];
+
+  const params = [targetDate];
+  let marketCondition = "";
+  if (market) {
+    marketCondition = "AND market_type = ?";
+    params.push(market);
+  }
+  params.push(limit);
+
+  return await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      DATE_FORMAT(source_data_date, '%Y-%m-%d') AS source_data_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      main_force_score,
+      main_force_level,
+      main_force_status,
+      main_force_trend,
+      estimated_main_force_cost,
+      close_price,
+      cost_gap_percent,
+      large_holder_ratio,
+      large_holder_ratio_change,
+      thousand_lot_ratio,
+      thousand_lot_ratio_change,
+      large_holder_count,
+      large_holder_count_change,
+      small_holder_count,
+      small_holder_count_change,
+      CAST(foreign_net_buy AS CHAR) AS foreign_net_buy,
+      CAST(investment_trust_net_buy AS CHAR) AS investment_trust_net_buy,
+      CAST(dealer_net_buy AS CHAR) AS dealer_net_buy,
+      volume_ratio_5,
+      breakout_score,
+      chip_score,
+      accumulation_signal,
+      lock_chip_signal,
+      distribution_risk,
+      reason_summary
+    FROM main_force_signals
+    WHERE trade_date = ?
+      ${marketCondition}
+    ORDER BY main_force_score DESC, distribution_risk ASC, stock_code ASC
+    LIMIT ?
+    `,
+    params,
+    [],
+  );
+}
+
+function getV18MainForceAdvice(summary) {
+  const total = Number(summary?.total_count || 0);
+  const strong = Number(summary?.strong_count || 0);
+  const watch = Number(summary?.watch_count || 0);
+  const risk = Number(summary?.risk_count || 0);
+  const avg = Number(summary?.avg_main_force_score || 0);
+  if (!total) return "尚未產生主力籌碼訊號，請先執行 npm run main-force:generate。";
+  if (risk >= Math.max(10, Math.round(total * 0.08))) return `主力籌碼風險股偏多，疑似出貨 ${risk} 檔，建議搭配 V1.6 全球風險保守篩選。`;
+  if (strong >= 20 || avg >= 70) return `主力籌碼偏強，強勢主力 ${strong} 檔、觀察 ${watch} 檔，可優先查看低檔布局與籌碼鎖定股。`;
+  if (strong >= 5 || watch >= 30) return `主力籌碼正常，強勢主力 ${strong} 檔、觀察 ${watch} 檔，適合搭配 V1.7 突破分數確認發動。`;
+  return `主力籌碼訊號偏少，強勢主力 ${strong} 檔，盤面可能偏整理或大戶資料尚未明顯變化。`;
+}
+
+async function buildV18MainForcePayload(tradeDate = null, market = null, limit = 10) {
+  const summary = await getMainForceSummary(tradeDate, market || "全部");
+  const topRows = await getMainForceTopRows({ tradeDate: summary?.trade_date || tradeDate, market, limit });
+
+  return convertBigIntToString({
+    summary,
+    top_signals: topRows,
+    advice: getV18MainForceAdvice(summary),
   });
 }
 
@@ -4821,6 +5039,189 @@ app.get("/v17/acceptance", (req, res) => {
 
 
 
+
+app.get("/main-force/latest", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 10, 50);
+    const tradeDate = req.query.date || null;
+    const payload = await buildV18MainForcePayload(tradeDate, market, limit);
+
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V1.8 主力籌碼引擎",
+      market: market || "全部",
+      ...payload,
+    });
+  } catch (error) {
+    console.error("查詢主力籌碼摘要失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢主力籌碼摘要失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/main-force/top", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const tradeDate = req.query.date || null;
+
+    if (!(await checkTableExists("main_force_signals"))) {
+      return res.status(500).json({
+        success: false,
+        version: API_VERSION,
+        message: "尚未建立 main_force_signals，請先執行 npm run main-force:setup。",
+      });
+    }
+
+    const targetDate = tradeDate || await getLatestMainForceDate();
+    const rows = await getMainForceTopRows({ tradeDate: targetDate, market, limit });
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: rows.length,
+      data: rows,
+    }));
+  } catch (error) {
+    console.error("查詢主力籌碼排行失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢主力籌碼排行失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/v18/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v18TableStatuses = [];
+
+    for (const tableDefinition of V18_FEATURE_TABLES) {
+      v18TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const missingTables = v18TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getMainForceSummary();
+    const topRows = await getMainForceTopRows({ tradeDate: summary?.trade_date || null, limit: 5 });
+    const summaryReady = Number(summary?.total_count || 0) > 0;
+    const topReady = topRows.length > 0;
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.8.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v64" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.8 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.8 主力籌碼資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "main_force_summary",
+        "主力籌碼摘要",
+        summaryReady ? "pass" : "warn",
+        summaryReady ? "已有主力籌碼摘要。" : "尚未產生主力籌碼訊號，請執行 npm run main-force:generate。",
+        { summary },
+      ),
+      buildCheck(
+        "main_force_top",
+        "主力籌碼排行",
+        topReady ? "pass" : "warn",
+        topReady ? `已有 ${topRows.length} 筆主力籌碼排行。` : "主力籌碼排行尚無資料。",
+        { count: topRows.length },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.8 主力籌碼引擎",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.8 主力籌碼引擎、資料表、摘要與排行正常。"
+          : overallStatus === "warn"
+            ? "V1.8 程式已就緒，但主力籌碼訊號尚需產生。"
+            : "V1.8 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV18Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v18TableStatuses,
+      main_force: {
+        summary,
+        top_signals: topRows,
+        advice: getV18MainForceAdvice(summary),
+      },
+      modules: V18_MODULES,
+      next_actions: [
+        "執行 npm run main-force:setup 建立 V1.8 資料表。",
+        "執行 npm run main-force:generate 產生主力籌碼訊號。",
+        "執行 npm run v18:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.8 系統狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.8 主力籌碼引擎",
+      message: "查詢 V1.8 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v18/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.8 主力籌碼引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV18Progress(),
+    checklist: V18_FINAL_ACCEPTANCE_ITEMS,
+    modules: V18_MODULES,
+    recommended_commands: [
+      "npm run main-force:setup",
+      "npm run main-force:generate",
+      "npm run v18:check",
+      "npm run v18:test -- --api=http://localhost:3000",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v18/status",
+      "/v18/acceptance",
+      "/main-force/latest",
+      "/main-force/top",
+      "/radar/top",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+
 app.post("/auth/google", async (req, res) => {
   try {
     const credential = req.body?.credential;
@@ -6449,6 +6850,7 @@ app.get("/radar/top", async (req, res) => {
     const hasMarketRiskAdjustedScores = await checkTableExists("market_risk_adjusted_scores");
     const hasGlobalRiskAdjustedScores = await checkTableExists("global_risk_adjusted_scores");
     const hasBreakoutSignals = await checkTableExists("technical_breakout_signals");
+    const hasMainForceSignals = await checkTableExists("main_force_signals");
 
     let targetDate = queryDate;
 
@@ -6578,6 +6980,41 @@ app.get("/radar/top", async (req, res) => {
         NULL AS breakout_reason_summary,
       `;
 
+
+    const mainForceSelect = hasMainForceSignals
+      ? `
+        mf.main_force_score,
+        mf.main_force_level,
+        mf.main_force_status,
+        mf.main_force_trend,
+        mf.estimated_main_force_cost,
+        mf.cost_gap_percent,
+        mf.large_holder_ratio,
+        mf.large_holder_ratio_change,
+        mf.thousand_lot_ratio,
+        mf.thousand_lot_ratio_change,
+        mf.accumulation_signal,
+        mf.lock_chip_signal,
+        mf.distribution_risk AS main_force_distribution_risk,
+        mf.reason_summary AS main_force_reason_summary,
+      `
+      : `
+        NULL AS main_force_score,
+        NULL AS main_force_level,
+        NULL AS main_force_status,
+        NULL AS main_force_trend,
+        NULL AS estimated_main_force_cost,
+        NULL AS cost_gap_percent,
+        NULL AS large_holder_ratio,
+        NULL AS large_holder_ratio_change,
+        NULL AS thousand_lot_ratio,
+        NULL AS thousand_lot_ratio_change,
+        NULL AS accumulation_signal,
+        NULL AS lock_chip_signal,
+        NULL AS main_force_distribution_risk,
+        NULL AS main_force_reason_summary,
+      `;
+
     const marketRiskAdjustedJoin = hasMarketRiskAdjustedScores
       ? `
       LEFT JOIN market_risk_adjusted_scores a
@@ -6600,8 +7037,19 @@ app.get("/radar/top", async (req, res) => {
        AND c.trade_date = b.trade_date`
       : "";
 
+    const mainForceJoin = hasMainForceSignals
+      ? `
+      LEFT JOIN main_force_signals mf
+        ON c.stock_code = mf.stock_code
+       AND c.trade_date = mf.trade_date`
+      : "";
+
     let marketRiskAdjustedOrder = "c.chip_score DESC, c.stock_code ASC";
-    if (hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
+    if (hasMainForceSignals && hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
+      marketRiskAdjustedOrder = "COALESCE(mf.main_force_score, g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, COALESCE(g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, c.stock_code ASC";
+    } else if (hasMainForceSignals) {
+      marketRiskAdjustedOrder = "COALESCE(mf.main_force_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
+    } else if (hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
       marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, COALESCE(a.adjusted_score, c.chip_score) DESC, c.stock_code ASC";
     } else if (hasGlobalRiskAdjustedScores) {
       marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
@@ -6621,6 +7069,7 @@ app.get("/radar/top", async (req, res) => {
         ${marketRiskAdjustedSelect}
         ${globalRiskAdjustedSelect}
         ${breakoutSelect}
+        ${mainForceSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -6642,6 +7091,7 @@ app.get("/radar/top", async (req, res) => {
       ${marketRiskAdjustedJoin}
       ${globalRiskAdjustedJoin}
       ${breakoutJoin}
+      ${mainForceJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date
