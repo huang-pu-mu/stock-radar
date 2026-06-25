@@ -5753,3 +5753,9 @@ body.chart-zoom-open {
     grid-template-columns: 1fr;
   }
 }
+
+
+.recommendation-card.success-card { border-color: rgba(34, 197, 94, 0.45); }
+.recommendation-card.warning-card { border-color: rgba(245, 158, 11, 0.45); }
+.recommendation-card.danger-card { border-color: rgba(248, 113, 113, 0.45); }
+.compact-info-grid { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); }

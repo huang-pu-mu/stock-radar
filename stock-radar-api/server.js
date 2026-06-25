@@ -1275,8 +1275,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v3.1.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v78";
+const API_VERSION = "stock-radar-api-v3.2.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v79";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -2072,6 +2072,90 @@ function calculateV31Progress() {
   if (V31_MODULES.length === 0) return 0;
   const total = V31_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V31_MODULES.length);
+}
+
+
+const V32_FEATURE_TABLES = [
+  { name: "ai_daily_recommendations", label: "V3.2 AI 每日推薦主表", date_column: "recommendation_date" },
+  { name: "ai_recommendation_reasons", label: "V3.2 AI 推薦理由明細", date_column: "created_at" },
+  { name: "ai_recommendation_scores", label: "V3.2 AI 推薦因子分數", date_column: "created_at" },
+  { name: "ai_recommendation_performance", label: "V3.2 AI 推薦後績效", date_column: "recommendation_date" },
+  { name: "ai_recommendation_rules", label: "V3.2 AI 推薦規則門檻", date_column: "updated_at" },
+];
+
+const V32_MODULES = [
+  { key: "ai_recommendation_tables", name: "AI 每日推薦資料表", progress: 100, status: "completed", required_tables: ["ai_daily_recommendations", "ai_recommendation_reasons", "ai_recommendation_scores", "ai_recommendation_performance", "ai_recommendation_rules"] },
+  { key: "ai_buy_score", name: "AI Buy Score 今日買進分數", progress: 95, status: "first_version", required_apis: ["npm run ai-recommendations:generate", "GET /ai-recommendations/today"] },
+  { key: "recommendation_classification", name: "可買進 / 等拉回 / 觀察 / 禁買分類", progress: 95, status: "first_version", required_fields: ["recommendation_type", "recommendation_label"] },
+  { key: "reason_and_risk_plan", name: "推薦理由、買進區間與風控計畫", progress: 92, status: "first_version", required_tables: ["ai_recommendation_reasons", "ai_recommendation_scores"] },
+  { key: "performance_tracking", name: "推薦後 1/3/5/10 日績效追蹤", progress: 88, status: "first_version", required_tables: ["ai_recommendation_performance"] },
+  { key: "frontend_ai_recommendations_page", name: "前端 AI 每日推薦頁", progress: 92, status: "first_version", required_apis: ["AI 每日推薦頁", "今日推薦", "推薦績效"] },
+  { key: "v32_acceptance_log", name: "V3.2 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v32:check", "npm run v32:test"] },
+];
+
+const V32_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "ai_daily_recommendations 已建立",
+      "ai_recommendation_reasons 已建立",
+      "ai_recommendation_scores 已建立",
+      "ai_recommendation_performance 已建立",
+      "ai_recommendation_rules 已建立",
+      "npm run ai-recommendations:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "AI 每日推薦",
+    items: [
+      "npm run ai-recommendations:generate 可依 AI 多因子、籌碼、技術、主力、大戶、市場與全球風險產生推薦清單",
+      "系統可產生 AI Buy Score、Entry Timing Score、Risk Adjusted Score、Chase Risk Score、Exit Risk Score",
+      "推薦分類包含可買進、等拉回、觀察、禁買",
+      "每檔股票都保留推薦理由、買進區間、停損、停利與失效條件",
+    ],
+  },
+  {
+    group: "API",
+    items: [
+      "GET /ai-recommendations/today 可取得今日 AI 推薦清單",
+      "GET /ai-recommendations/:tradeDate 可查詢指定日期推薦清單",
+      "GET /ai-recommendations/:tradeDate/:stockCode 可查詢單檔推薦理由",
+      "GET /ai-recommendations/performance 可查詢推薦後績效",
+      "POST /ai-recommendations/generate 可手動產生推薦結果",
+      "GET /v32/status 與 GET /v32/acceptance 可驗收版本狀態",
+    ],
+  },
+  {
+    group: "安全邊界",
+    items: [
+      "V3.2 不串券商",
+      "V3.2 不自動下單",
+      "所有推薦都必須人工確認後才可轉成交易計畫",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增 AI 每日推薦頁",
+      "前端顯示可買進、等拉回、觀察、禁買清單",
+      "PWA 快取版本升級至 stock-radar-pwa-v79",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run ai-recommendations:setup",
+      "npm run ai-recommendations:generate",
+      "npm run v32:check",
+      "npm run v32:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV32Progress() {
+  if (V32_MODULES.length === 0) return 0;
+  const total = V32_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V32_MODULES.length);
 }
 
 
@@ -15207,6 +15291,289 @@ app.post("/watchlist/rules", requireAuth, async (req, res) => {
       error: error.message,
     });
   }
+});
+
+
+
+
+async function getLatestAiDailyRecommendationDate() {
+  if (!(await checkTableExists("ai_daily_recommendations"))) return null;
+  const rows = await query("SELECT DATE_FORMAT(MAX(recommendation_date), '%Y-%m-%d') AS latest_date FROM ai_daily_recommendations");
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getAiDailyRecommendationSummary(recommendationDate = null) {
+  if (!(await checkTableExists("ai_daily_recommendations"))) return null;
+  const targetDate = recommendationDate || await getLatestAiDailyRecommendationDate();
+  if (!targetDate) return null;
+  const rows = await query(
+    `
+    SELECT
+      DATE_FORMAT(recommendation_date, '%Y-%m-%d') AS recommendation_date,
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN recommendation_type = 'BUY' THEN 1 ELSE 0 END) AS buy_count,
+      SUM(CASE WHEN recommendation_type = 'PULLBACK' THEN 1 ELSE 0 END) AS pullback_count,
+      SUM(CASE WHEN recommendation_type = 'WATCH' THEN 1 ELSE 0 END) AS watch_count,
+      SUM(CASE WHEN recommendation_type = 'AVOID' THEN 1 ELSE 0 END) AS avoid_count,
+      AVG(ai_buy_score) AS avg_ai_buy_score,
+      MAX(ai_buy_score) AS top_ai_buy_score,
+      SUM(CASE WHEN manual_confirm_required = 1 THEN 1 ELSE 0 END) AS manual_confirm_required_count
+    FROM ai_daily_recommendations
+    WHERE recommendation_date = ?
+    GROUP BY recommendation_date
+    `,
+    [targetDate],
+  );
+  return rows?.[0] || null;
+}
+
+async function getAiDailyRecommendationRows({ recommendationDate = null, market = null, type = null, limit = 30 } = {}) {
+  if (!(await checkTableExists("ai_daily_recommendations"))) return [];
+  const targetDate = recommendationDate || await getLatestAiDailyRecommendationDate();
+  if (!targetDate) return [];
+  const params = [targetDate];
+  let marketCondition = "";
+  let typeCondition = "";
+  if (market) { marketCondition = "AND market_type = ?"; params.push(market); }
+  if (type) { typeCondition = "AND recommendation_type = ?"; params.push(String(type).toUpperCase()); }
+  params.push(limit);
+  return query(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(recommendation_date, '%Y-%m-%d') AS recommendation_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      recommendation_rank,
+      recommendation_type,
+      recommendation_label,
+      ai_buy_score,
+      entry_timing_score,
+      risk_adjusted_score,
+      chase_risk_score,
+      exit_risk_score,
+      ai_strength_score,
+      market_risk_score,
+      global_risk_score,
+      chip_factor_score,
+      technical_factor_score,
+      main_force_factor_score,
+      big_holder_factor_score,
+      fundamental_factor_score,
+      industry_fund_score,
+      close_price,
+      suggested_entry_low,
+      suggested_entry_high,
+      stop_loss_price,
+      take_profit_price,
+      position_sizing_note,
+      recommend_reason,
+      risk_control_plan,
+      invalid_condition,
+      line_summary,
+      manual_confirm_required,
+      source_signal_id,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM ai_daily_recommendations
+    WHERE recommendation_date = ?
+      ${marketCondition}
+      ${typeCondition}
+    ORDER BY FIELD(recommendation_type, 'BUY', 'PULLBACK', 'WATCH', 'AVOID'), recommendation_rank ASC, risk_adjusted_score DESC, ai_buy_score DESC
+    LIMIT ?
+    `,
+    params,
+  );
+}
+
+async function getAiDailyRecommendationDetail(recommendationDate, stockCode) {
+  if (!(await checkTableExists("ai_daily_recommendations"))) return null;
+  const rows = await query(
+    `
+    SELECT *
+    FROM ai_daily_recommendations
+    WHERE recommendation_date = ?
+      AND stock_code = ?
+    LIMIT 1
+    `,
+    [recommendationDate, stockCode],
+  );
+  const recommendation = rows?.[0] || null;
+  if (!recommendation) return null;
+  const reasons = await safeQuery(
+    `SELECT reason_group, reason_type, reason_text, sort_order FROM ai_recommendation_reasons WHERE recommendation_id = ? ORDER BY sort_order ASC, id ASC`,
+    [recommendation.id],
+    [],
+  );
+  const scores = await safeQuery(
+    `SELECT factor_key, factor_name, factor_score, factor_weight, weighted_score, factor_note FROM ai_recommendation_scores WHERE recommendation_id = ? ORDER BY id ASC`,
+    [recommendation.id],
+    [],
+  );
+  const performance = await safeQuery(
+    `SELECT return_1d_pct, return_3d_pct, return_5d_pct, return_10d_pct, max_return_pct, min_return_pct, performance_status FROM ai_recommendation_performance WHERE recommendation_id = ? LIMIT 1`,
+    [recommendation.id],
+    [],
+  );
+  return { recommendation, reasons, scores, performance: performance?.[0] || null };
+}
+
+async function getAiRecommendationPerformanceRows(limit = 50) {
+  if (!(await checkTableExists("ai_recommendation_performance"))) return [];
+  return query(
+    `
+    SELECT
+      p.id,
+      DATE_FORMAT(p.recommendation_date, '%Y-%m-%d') AS recommendation_date,
+      p.stock_code,
+      r.stock_name,
+      r.recommendation_type,
+      r.recommendation_label,
+      r.ai_buy_score,
+      p.entry_close_price,
+      p.return_1d_pct,
+      p.return_3d_pct,
+      p.return_5d_pct,
+      p.return_10d_pct,
+      p.max_return_pct,
+      p.min_return_pct,
+      p.performance_status,
+      DATE_FORMAT(p.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM ai_recommendation_performance p
+    LEFT JOIN ai_daily_recommendations r ON r.id = p.recommendation_id
+    ORDER BY p.recommendation_date DESC, r.ai_buy_score DESC, p.id DESC
+    LIMIT ?
+    `,
+    [limit],
+  );
+}
+
+app.get("/ai-recommendations/today", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const type = req.query.type || null;
+    const recommendationDate = req.query.date || null;
+    const summary = await getAiDailyRecommendationSummary(recommendationDate);
+    const rows = await getAiDailyRecommendationRows({ recommendationDate: summary?.recommendation_date || recommendationDate, market, type, limit });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V3.2 AI 每日推薦引擎", recommendation_date: summary?.recommendation_date || recommendationDate || null, market: market || "全部", count: rows.length, summary, data: rows, safety_boundary: "不串券商、不自動下單，所有推薦必須人工確認。" }));
+  } catch (error) {
+    console.error("查詢 AI 每日推薦失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 每日推薦失敗", error: error.message });
+  }
+});
+
+app.get("/ai-recommendations/performance", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 50, 200);
+    const rows = await getAiRecommendationPerformanceRows(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V3.2 AI 推薦績效追蹤", count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢 AI 推薦績效失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 推薦績效失敗", error: error.message });
+  }
+});
+
+app.get("/ai-recommendations/:tradeDate", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const type = req.query.type || null;
+    const tradeDate = String(req.params.tradeDate || "").slice(0, 10);
+    const summary = await getAiDailyRecommendationSummary(tradeDate);
+    const rows = await getAiDailyRecommendationRows({ recommendationDate: tradeDate, market, type, limit });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V3.2 AI 每日推薦引擎", recommendation_date: tradeDate, market: market || "全部", count: rows.length, summary, data: rows }));
+  } catch (error) {
+    console.error("查詢指定日期 AI 推薦失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢指定日期 AI 推薦失敗", error: error.message });
+  }
+});
+
+app.get("/ai-recommendations/:tradeDate/:stockCode", async (req, res) => {
+  try {
+    const tradeDate = String(req.params.tradeDate || "").slice(0, 10);
+    const stockCode = normalizeStockCodeValue(req.params.stockCode);
+    const detail = await getAiDailyRecommendationDetail(tradeDate, stockCode);
+    if (!detail) return res.status(404).json({ success: false, version: API_VERSION, message: "查無這筆 AI 推薦資料。" });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V3.2 AI 單檔推薦理由", data: detail }));
+  } catch (error) {
+    console.error("查詢單檔 AI 推薦理由失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢單檔 AI 推薦理由失敗", error: error.message });
+  }
+});
+
+app.post("/ai-recommendations/generate", async (req, res) => {
+  try {
+    const result = await runLocalScript("ai-recommendations:generate", req.body?.date ? [String(req.body.date).slice(0, 10)] : []);
+    const summary = await getAiDailyRecommendationSummary(req.body?.date ? String(req.body.date).slice(0, 10) : null);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生 V3.2 AI 每日推薦清單。", stdout: result.stdout, stderr: result.stderr, summary }));
+  } catch (error) {
+    console.error("產生 AI 每日推薦失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生 AI 每日推薦失敗", error: error.message });
+  }
+});
+
+app.get("/v32/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V32_FEATURE_TABLES) tableStatuses.push(await getV13TableStatus(tableDefinition));
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getAiDailyRecommendationSummary();
+    const rows = await getAiDailyRecommendationRows({ recommendationDate: summary?.recommendation_date || null, limit: 5 });
+    const performanceRows = await getAiRecommendationPerformanceRows(5);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck("versions", "API / PWA 版本", API_VERSION === "stock-radar-api-v3.2.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v79" ? "pass" : "fail", `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`, { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION }),
+      buildCheck("tables", "V3.2 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V3.2 AI 每日推薦資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("recommendations", "AI 每日推薦清單", rows.length > 0 ? "pass" : "warn", rows.length > 0 ? `已有 ${rows.length} 筆 AI 推薦資料。` : "尚未產生 AI 每日推薦，請執行 npm run ai-recommendations:generate。", { count: rows.length }),
+      buildCheck("performance", "推薦後績效追蹤", performanceRows.length > 0 ? "pass" : "warn", performanceRows.length > 0 ? "已有推薦後績效追蹤資料。" : "推薦後績效尚待後續交易日資料。", { count: performanceRows.length }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V3.2 AI 每日推薦引擎",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V3.2 AI 每日推薦引擎、資料表、推薦清單與前端接口正常。" : overallStatus === "warn" ? "V3.2 程式已就緒，但推薦清單或績效資料尚需產生。" : "V3.2 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV32Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      summary,
+      recommendations: rows,
+      performance: performanceRows,
+      modules: V32_MODULES,
+      safety_boundary: "不串券商、不自動下單，所有推薦必須人工確認。",
+      next_actions: [
+        "執行 npm run ai-recommendations:setup 建立 V3.2 資料表。",
+        "執行 npm run ai-recommendations:generate 產生 AI 每日推薦清單。",
+        "執行 npm run v32:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V3.2 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V3.2 AI 每日推薦引擎", message: "查詢 V3.2 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v32/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V3.2 AI 每日推薦引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV32Progress(),
+    checklist: V32_FINAL_ACCEPTANCE_ITEMS,
+    modules: V32_MODULES,
+    recommended_commands: ["npm run ai-recommendations:setup", "npm run ai-recommendations:generate", "npm run v32:check", "npm run v32:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v32/status", "/v32/acceptance", "/ai-recommendations/today", "/ai-recommendations/performance"],
+    checked_at: nowTaipeiText(),
+  });
 });
 
 

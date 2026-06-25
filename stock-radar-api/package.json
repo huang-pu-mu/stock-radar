@@ -103,7 +103,12 @@
     "pre-trade:generate": "node scripts/generatePreTradePreparations.js",
     "pre-trade:daily": "npm run pre-trade:setup && npm run pre-trade:generate",
     "v31:check": "node scripts/checkV31.js",
-    "v31:test": "node scripts/runV31Acceptance.js"
+    "v31:test": "node scripts/runV31Acceptance.js",
+    "ai-recommendations:setup": "node scripts/setupAiDailyRecommendationsTables.js",
+    "ai-recommendations:generate": "node scripts/generateAiDailyRecommendations.js",
+    "ai-recommendations:daily": "npm run ai-recommendations:setup && npm run ai-recommendations:generate",
+    "v32:check": "node scripts/checkV32.js",
+    "v32:test": "node scripts/runV32Acceptance.js"
   },
   "keywords": [
     "stock",

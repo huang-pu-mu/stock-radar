@@ -143,6 +143,10 @@ const state = {
   preTradeChecklists: [],
   preTradePlans: [],
   preTradeLastResult: null,
+  aiRecommendationSummary: null,
+  aiRecommendationRows: [],
+  aiRecommendationPerformance: [],
+  aiRecommendationLastResult: null,
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
@@ -2150,6 +2154,7 @@ function updatePageText() {
   const isTradesPage = state.page === "trades";
   const isTradingAssistPage = state.page === "tradingAssist";
   const isPreTradePage = state.page === "preTrade";
+  const isAiRecommendationsPage = state.page === "aiRecommendations";
   const isAlertsPage = state.page === "alerts";
   const isNotificationsPage = state.page === "notifications";
   const isStrategiesPage = state.page === "strategies";
@@ -2161,7 +2166,7 @@ function updatePageText() {
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isTradesPage || isTradingAssistPage || isPreTradePage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isTradesPage || isTradingAssistPage || isPreTradePage || isAiRecommendationsPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
   updateContentFilterHeader();
   updatePageMetaBar();
@@ -2263,6 +2268,13 @@ function updatePageText() {
     return;
   }
 
+  if (state.page === "aiRecommendations") {
+    pageTitle.textContent = "AI 每日推薦";
+    pageDesc.textContent = "V3.2 AI 每日推薦引擎，依數據分析產生可買進、等拉回、觀察與禁買清單。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看市場風險與 AI Buy Score；可買進也必須人工確認，不追高、不自動下單。</span>`;
+    return;
+  }
+
   if (state.page === "tradingAssist") {
     pageTitle.textContent = "交易輔助";
     pageDesc.textContent = "V3.0 實戰交易輔助系統，建立交易候選、模擬下單草稿與人工確認流程，不做自動下單。";
@@ -2294,7 +2306,7 @@ function updatePageText() {
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股、每日作戰室、交易輔助、交易前準備、我的持股、部位模擬、交易績效，並檢查 V3.1 交易前準備、V3.0 交易輔助、V2.5 每日作戰室、V2.4 部位風險、V2.3 AI 回饋學習、V2.2 交易績效、V2.1 持股風控、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
+    pageDesc.textContent = "管理登入、自選股、AI 每日推薦、每日作戰室、交易輔助、交易前準備、我的持股、部位模擬、交易績效，並檢查 V3.2 AI 每日推薦、V3.1 交易前準備、V3.0 交易輔助、V2.5 每日作戰室、V2.4 部位風險、V2.3 AI 回饋學習、V2.2 交易績效、V2.1 持股風控、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -9679,6 +9691,154 @@ function renderPreTradePlans(rows = []) {
   `;
 }
 
+
+
+function getAiRecommendationClass(type) {
+  const key = String(type || "WATCH").toUpperCase();
+  if (key === "BUY") return "success-card";
+  if (key === "PULLBACK") return "warning-card";
+  if (key === "AVOID") return "danger-card";
+  return "";
+}
+
+function renderAiRecommendationRows(rows = []) {
+  if (!rows.length) {
+    return `<article class="empty-state"><strong>尚未有 AI 每日推薦</strong><span>請先按「產生 AI 推薦」，或在 API 執行 npm run ai-recommendations:generate。</span></article>`;
+  }
+
+  return `
+    <div class="v13-subsection-title"><strong>AI 每日推薦清單</strong><span>/ai-recommendations/today</span></div>
+    ${rows.map((row) => `
+      <article class="stock-card recommendation-card ${getAiRecommendationClass(row.recommendation_type)}">
+        <div class="stock-card-main">
+          <div>
+            <p class="stock-code">#${formatNumber(row.recommendation_rank || 0)} ${escapeHtml(row.stock_code || "-")}</p>
+            <h3>${escapeHtml(row.stock_name || "未命名")}</h3>
+            <p>${escapeHtml(row.industry || row.market_type || "未分類")}</p>
+          </div>
+          <div class="score-pill">${escapeHtml(row.recommendation_label || "觀察")}</div>
+        </div>
+        <div class="info-grid">
+          ${createInfoItem("AI Buy", formatNumber(row.ai_buy_score))}
+          ${createInfoItem("風險修正", formatNumber(row.risk_adjusted_score))}
+          ${createInfoItem("買點分數", formatNumber(row.entry_timing_score))}
+          ${createInfoItem("追高風險", formatNumber(row.chase_risk_score))}
+          ${createInfoItem("出貨風險", formatNumber(row.exit_risk_score))}
+          ${createInfoItem("Market Risk", formatNumber(row.market_risk_score))}
+          ${createInfoItem("Global Risk", formatNumber(row.global_risk_score))}
+          ${createInfoItem("收盤價", formatPrice(row.close_price))}
+        </div>
+        <div class="position-alert-card">
+          <strong>推薦理由：</strong>${escapeHtml(row.recommend_reason || row.line_summary || "尚未產生推薦理由")}
+        </div>
+        <div class="position-alert-card">
+          <strong>買進區間：</strong>${formatPrice(row.suggested_entry_low)} ～ ${formatPrice(row.suggested_entry_high)}　
+          <strong>停損：</strong>${formatPrice(row.stop_loss_price)}　
+          <strong>停利：</strong>${formatPrice(row.take_profit_price)}
+        </div>
+        <div class="position-alert-card">
+          <strong>風控：</strong>${escapeHtml(row.risk_control_plan || "所有交易須人工確認。")}
+        </div>
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderAiRecommendationPerformance(rows = []) {
+  if (!rows.length) return `<article class="empty-state"><strong>尚未有推薦後績效</strong><span>等待後續交易日資料後會追蹤 1 / 3 / 5 / 10 日報酬。</span></article>`;
+  return `
+    <div class="v13-subsection-title"><strong>推薦後績效追蹤</strong><span>/ai-recommendations/performance</span></div>
+    ${rows.slice(0, 12).map((row) => `
+      <article class="position-row-card">
+        <div>
+          <strong>${escapeHtml(row.stock_code || "-")} ${escapeHtml(row.stock_name || "")}</strong>
+          <p>${escapeHtml(row.recommendation_date || "-")}｜${escapeHtml(row.recommendation_label || row.recommendation_type || "-")}</p>
+        </div>
+        <div class="info-grid compact-info-grid">
+          ${createInfoItem("1日", formatPercent(row.return_1d_pct))}
+          ${createInfoItem("3日", formatPercent(row.return_3d_pct))}
+          ${createInfoItem("5日", formatPercent(row.return_5d_pct))}
+          ${createInfoItem("10日", formatPercent(row.return_10d_pct))}
+          ${createInfoItem("狀態", escapeHtml(row.performance_status || "WAITING"))}
+        </div>
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderAiDailyRecommendationsPage() {
+  const summary = state.aiRecommendationSummary || {};
+  const rows = Array.isArray(state.aiRecommendationRows) ? state.aiRecommendationRows : [];
+  const performance = Array.isArray(state.aiRecommendationPerformance) ? state.aiRecommendationPerformance : [];
+
+  setContentSummary([
+    { label: "推薦總數", value: `${formatNumber(summary.total_count || rows.length)} 筆` },
+    { label: "可買進", value: formatNumber(summary.buy_count || rows.filter((row) => row.recommendation_type === "BUY").length) },
+    { label: "等拉回", value: formatNumber(summary.pullback_count || rows.filter((row) => row.recommendation_type === "PULLBACK").length) },
+    { label: "禁買", value: formatNumber(summary.avoid_count || rows.filter((row) => row.recommendation_type === "AVOID").length) },
+  ], "V3.2 AI 每日推薦引擎；推薦不是自動下單，仍需人工確認與風控計畫。");
+
+  setResultHeader({
+    title: "AI 每日推薦清單",
+    desc: rows.length ? "已讀取最新 AI 推薦股票。" : "目前尚未產生 AI 每日推薦。",
+    badge: "V3.2 AI 每日推薦",
+    countText: `${formatNumber(rows.length)} 筆`,
+  });
+
+  stockList.innerHTML = `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V3.2 AI 每日推薦引擎</p>
+          <h3>產生今日 AI 推薦</h3>
+          <p>系統會依 AI Buy Score、買點、籌碼、技術、主力、大戶與市場風險，產生可買進、等拉回、觀察與禁買清單。</p>
+        </div>
+        <button class="detail-btn" type="button" data-ai-recommendations-generate="true">產生 AI 推薦</button>
+      </div>
+    </article>
+    ${state.aiRecommendationLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.aiRecommendationLastResult)}</article>` : ""}
+    <article class="position-alert-card"><strong>安全邊界：</strong>V3.2 不串券商、不自動下單；所有推薦都必須人工確認後才可轉交易計畫。</article>
+    ${renderAiRecommendationRows(rows)}
+    ${renderAiRecommendationPerformance(performance)}
+  `;
+}
+
+async function loadAiDailyRecommendations() {
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [recommendationResult, performanceResult] = await Promise.all([
+      fetchJson("/ai-recommendations/today", { raw: true }),
+      fetchJson("/ai-recommendations/performance", { raw: true }).catch(() => ({ data: [] })),
+    ]);
+    state.aiRecommendationSummary = recommendationResult.summary || {};
+    state.aiRecommendationRows = Array.isArray(recommendationResult.data) ? recommendationResult.data : [];
+    state.aiRecommendationPerformance = Array.isArray(performanceResult.data) ? performanceResult.data : [];
+    renderAiDailyRecommendationsPage();
+    showTemporaryStatus(`已更新 AI 每日推薦：${formatNumber(state.aiRecommendationRows.length)} 筆。`, "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "AI 每日推薦失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run ai-recommendations:setup。 ");
+    setResultHeader({ title: "AI 每日推薦讀取失敗", desc: "目前無法取得 V3.2 AI 每日推薦資料。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`AI 每日推薦讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleAiRecommendationsGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/ai-recommendations/generate", { method: "POST", body: {}, raw: true });
+    state.aiRecommendationLastResult = result.message || "已產生 V3.2 AI 每日推薦清單。";
+    await loadAiDailyRecommendations();
+  } catch (error) {
+    showStatus(`產生 AI 每日推薦失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderPreTradePage() {
   const summary = state.preTradeSummary || {};
   const checklists = Array.isArray(state.preTradeChecklists) ? state.preTradeChecklists : [];
@@ -9869,6 +10029,11 @@ async function loadList() {
 
   if (state.page === "trades") {
     await loadTradePerformance();
+    return;
+  }
+
+  if (state.page === "aiRecommendations") {
+    await loadAiDailyRecommendations();
     return;
   }
 
@@ -10176,6 +10341,9 @@ function switchPage(page) {
   if (page === "warRoom") {
     state.dailyWarRoomLastResult = null;
   }
+  if (page === "aiRecommendations") {
+    state.aiRecommendationLastResult = null;
+  }
   if (page === "aiFeedback") {
     state.aiFeedbackLastResult = null;
   }
@@ -10356,6 +10524,12 @@ stockList.addEventListener("click", (event) => {
   const dailyWarRoomGenerateButton = event.target.closest("[data-war-room-generate]");
   if (dailyWarRoomGenerateButton) {
     handleDailyWarRoomGenerate(dailyWarRoomGenerateButton);
+    return;
+  }
+
+  const aiRecommendationsGenerateButton = event.target.closest("[data-ai-recommendations-generate]");
+  if (aiRecommendationsGenerateButton) {
+    handleAiRecommendationsGenerate(aiRecommendationsGenerateButton);
     return;
   }
 

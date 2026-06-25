@@ -1,0 +1,143 @@
+====================================
+Stock Radar V3.1 半自動交易前置準備自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v31-acceptance-20260626-001302.log
+開始時間：2026/6/26 00:13:02
+API：https://stock-radar-api-ten.vercel.app
+DB流程：執行 setup / pre-trade generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.1 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupPreTradePreparationTables.js
+完成：V3.1 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.1 generate script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generatePreTradePreparations.js
+完成：V3.1 generate script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V3.1 半自動交易前置準備資料表
+指令：npm run pre-trade:setup
+
+> stock-radar-api@1.0.0 pre-trade:setup
+> node scripts/setupPreTradePreparationTables.js
+
+◇ injected env (7) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+====================================
+Stock Radar V3.1 半自動交易前置準備資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v31-pre-trade-preparation.sql
+建立 / 確認完成：
+- pre_trade_plans
+- pre_trade_check_items
+- pre_trade_action_logs
+結果：PASS
+完成：建立 V3.1 半自動交易前置準備資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V3.1 半自動交易前置準備清單
+指令：npm run pre-trade:generate
+
+> stock-radar-api@1.0.0 pre-trade:generate
+> node scripts/generatePreTradePreparations.js
+
+◇ injected env (7) from .env // tip: ⌘ enable debugging { debug: true }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+====================================
+Stock Radar V3.1 半自動交易前置準備產生
+====================================
+計畫日期：2026-06-25
+前置檢查清單：8
+買進計畫：0
+減碼檢查：0
+風險檢查：0
+觀察清單：8
+安全邊界：不串券商、不自動下單、必須人工確認
+結果：PASS
+完成：產生 V3.1 半自動交易前置準備清單，耗時 0分1秒
+--------------------------------------------------
+開始：V3.1 靜態 / API 驗收
+指令：npm run v31:check -- --api=https://stock-radar-api-ten.vercel.app
+
+> stock-radar-api@1.0.0 v31:check
+> node scripts/checkV31.js --api=https://stock-radar-api-ten.vercel.app
+
+
+[API 動態檢查] https://stock-radar-api-ten.vercel.app
+====================================
+Stock Radar V3.1 半自動交易前置準備驗收檢查
+====================================
+✅ [版本] API 版本為 V3.1.0 - stock-radar-api-v3.1.0
+✅ [版本] API 預期 PWA 版本為 v78 - stock-radar-pwa-v78
+✅ [版本] service-worker 快取版本為 v78 - stock-radar-pwa-v78
+✅ [前端] 側邊功能選單顯示 V3.1 - index.html
+✅ [npm 指令] pre-trade:setup - node scripts/setupPreTradePreparationTables.js
+✅ [npm 指令] pre-trade:generate - node scripts/generatePreTradePreparations.js
+✅ [npm 指令] pre-trade:daily - npm run pre-trade:setup && npm run pre-trade:generate
+✅ [npm 指令] v31:check - node scripts/checkV31.js
+✅ [npm 指令] v31:test - node scripts/runV31Acceptance.js
+✅ [npm 指令] v30:test - node scripts/runV30Acceptance.js
+✅ [npm 指令] trading-assist:daily - npm run trading-assist:setup && npm run trading-assist:generate
+✅ [必要檔案] stock-radar-api/sql/v31-pre-trade-preparation.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupPreTradePreparationTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generatePreTradePreparations.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV31.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV31Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/index.html - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] 交易前計畫資料表 - CREATE TABLE IF NOT EXISTS `pre_trade_plans`
+✅ [SQL] 交易前檢查項目資料表 - CREATE TABLE IF NOT EXISTS `pre_trade_check_items`
+✅ [SQL] 操作紀錄資料表 - CREATE TABLE IF NOT EXISTS `pre_trade_action_logs`
+✅ [SQL] 人工確認欄位 - manual_confirm_required
+✅ [SQL] 不自動下單定位 - 不自動送券商
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v31/status - server.js 靜態檢查
+✅ [API 路由] GET /v31/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /pre-trade/summary - server.js 靜態檢查
+✅ [API 路由] GET /pre-trade/checklists - server.js 靜態檢查
+✅ [API 路由] POST /pre-trade/generate - server.js 靜態檢查
+✅ [API 路由] GET /pre-trade/plans - server.js 靜態檢查
+✅ [API 路由] POST /pre-trade/plans - server.js 靜態檢查
+✅ [API 路由] PUT /pre-trade/plans/:id/confirm - server.js 靜態檢查
+✅ [API 路由] POST /pre-trade/plans/:id/logs - server.js 靜態檢查
+✅ [前端] 交易前準備頁 - renderPreTradePage
+✅ [前端] 交易前摘要 API - /pre-trade/summary
+✅ [前端] 交易前檢查清單 API - /pre-trade/checklists
+✅ [前端] 產生前置檢查 API - /pre-trade/generate
+✅ [前端] V3.1 文字 - V3.1 半自動交易前置準備
+✅ [前端] 交易前準備按鈕 - data-pre-trade-generate
+✅ [前端] 不再顯示 V1.4 系統狀態 - V3.1 status copy
+✅ [安全邊界] V3.1 不串券商、不自動下單 - manual confirmation only
+✅ [相容] 保留 V3.0 交易輔助 - V3.0 routes
+✅ [相容] 保留 V2.5 每日作戰室 - V2.5 routes
+✅ [相容] 保留 V2.4 部位模擬 - V2.4 routes
+✅ [相容] 保留 V2.3 AI 回饋學習 - V2.3 routes
+✅ [相容] 保留 V2.2 交易績效 - V2.2 routes
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v31/status - HTTP 200
+✅ [API 動態] /v31/acceptance - HTTP 200
+✅ [API 動態] /pre-trade/summary - HTTP 200
+✅ [API 動態] /pre-trade/checklists - HTTP 200
+✅ [API 動態] /pre-trade/plans 登入保護 - HTTP 401
+------------------------------------
+PASS：57
+WARN：0
+FAIL：0
+結果：PASS
+完成：V3.1 靜態 / API 驗收，耗時 0分17秒
+--------------------------------------------------
+結束時間：2026/6/26 00:13:22
+總耗時：0分20秒
+結果：PASS

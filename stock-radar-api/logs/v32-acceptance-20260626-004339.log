@@ -1,0 +1,139 @@
+====================================
+Stock Radar V3.2 AI 每日推薦引擎自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v32-acceptance-20260626-004339.log
+開始時間：2026/6/26 00:43:39
+API：http://localhost:3000
+DB流程：執行 setup / ai-recommendations generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.2 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupAiDailyRecommendationsTables.js
+完成：V3.2 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V3.2 generate script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateAiDailyRecommendations.js
+完成：V3.2 generate script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V3.2 AI 每日推薦引擎資料表
+指令：npm run ai-recommendations:setup
+
+> stock-radar-api@1.0.0 ai-recommendations:setup
+> node scripts/setupAiDailyRecommendationsTables.js
+
+◇ injected env (7) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+====================================
+Stock Radar V3.2 AI 每日推薦引擎資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v32-ai-daily-recommendations.sql
+建立 / 確認完成：
+- ai_daily_recommendations
+- ai_recommendation_reasons
+- ai_recommendation_scores
+- ai_recommendation_performance
+- ai_recommendation_rules
+結果：PASS
+完成：建立 V3.2 AI 每日推薦引擎資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V3.2 AI 每日推薦引擎清單
+指令：npm run ai-recommendations:generate
+
+> stock-radar-api@1.0.0 ai-recommendations:generate
+> node scripts/generateAiDailyRecommendations.js
+
+◇ injected env (7) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+====================================
+Stock Radar V3.2 AI 每日推薦引擎產生流程
+====================================
+推薦日期：2026-06-25
+來源筆數：300
+產生筆數：10
+可買進：0
+等拉回：0
+觀察：0
+禁買：10
+結果：PASS
+完成：產生 V3.2 AI 每日推薦引擎清單，耗時 0分2秒
+--------------------------------------------------
+開始：V3.2 靜態 / API 驗收
+指令：npm run v32:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v32:check
+> node scripts/checkV32.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V3.2 AI 每日推薦引擎驗收檢查
+====================================
+✅ [版本] API 版本為 V3.2.0 - stock-radar-api-v3.2.0
+✅ [版本] API 預期 PWA 版本為 v79 - stock-radar-pwa-v79
+✅ [版本] service-worker 快取版本為 v79 - stock-radar-pwa-v79
+✅ [前端] 側邊功能選單顯示 V3.2 - index.html
+✅ [npm 指令] ai-recommendations:setup - node scripts/setupAiDailyRecommendationsTables.js
+✅ [npm 指令] ai-recommendations:generate - node scripts/generateAiDailyRecommendations.js
+✅ [npm 指令] ai-recommendations:daily - npm run ai-recommendations:setup && npm run ai-recommendations:generate
+✅ [npm 指令] v32:check - node scripts/checkV32.js
+✅ [npm 指令] v32:test - node scripts/runV32Acceptance.js
+✅ [npm 指令] v31:test - node scripts/runV31Acceptance.js
+✅ [npm 指令] pre-trade:daily - npm run pre-trade:setup && npm run pre-trade:generate
+✅ [必要檔案] stock-radar-api/sql/v32-ai-daily-recommendations.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupAiDailyRecommendationsTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateAiDailyRecommendations.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV32.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV32Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/index.html - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] 每日推薦主表 - CREATE TABLE IF NOT EXISTS `ai_daily_recommendations`
+✅ [SQL] 推薦理由明細 - CREATE TABLE IF NOT EXISTS `ai_recommendation_reasons`
+✅ [SQL] 因子分數明細 - CREATE TABLE IF NOT EXISTS `ai_recommendation_scores`
+✅ [SQL] 推薦後績效 - CREATE TABLE IF NOT EXISTS `ai_recommendation_performance`
+✅ [SQL] 推薦規則門檻 - CREATE TABLE IF NOT EXISTS `ai_recommendation_rules`
+✅ [SQL] 人工確認安全邊界 - 不自動送券商、不自動下單
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v32/status - server.js 靜態檢查
+✅ [API 路由] GET /v32/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /ai-recommendations/today - server.js 靜態檢查
+✅ [API 路由] GET /ai-recommendations/performance - server.js 靜態檢查
+✅ [API 路由] GET /ai-recommendations/:tradeDate - server.js 靜態檢查
+✅ [API 路由] GET /ai-recommendations/:tradeDate/:stockCode - server.js 靜態檢查
+✅ [API 路由] POST /ai-recommendations/generate - server.js 靜態檢查
+✅ [前端] AI 每日推薦頁 - renderAiDailyRecommendationsPage
+✅ [前端] 今日推薦 API - /ai-recommendations/today
+✅ [前端] 推薦績效 API - /ai-recommendations/performance
+✅ [前端] 產生推薦 API - /ai-recommendations/generate
+✅ [前端] V3.2 文字 - V3.2 AI 每日推薦引擎
+✅ [前端] AI 推薦按鈕 - data-ai-recommendations-generate
+✅ [安全邊界] V3.2 不串券商、不自動下單 - manual confirmation only
+✅ [推薦分類] 可買進 / 等拉回 / 觀察 / 禁買 - classification labels
+✅ [相容] 保留 V3.1 半自動前置 - V3.1 routes
+✅ [相容] 保留 V3.0 交易輔助 - V3.0 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v32/status - HTTP 200
+✅ [API 動態] /v32/acceptance - HTTP 200
+✅ [API 動態] /ai-recommendations/today - HTTP 200
+✅ [API 動態] /ai-recommendations/performance - HTTP 200
+------------------------------------
+PASS：51
+WARN：0
+FAIL：0
+結果：PASS
+完成：V3.2 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/26 00:43:44
+總耗時：0分5秒
+結果：PASS
