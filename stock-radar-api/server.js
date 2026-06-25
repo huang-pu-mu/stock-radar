@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.9.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v65";
+const API_VERSION = "stock-radar-api-v2.0.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v70";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1850,6 +1850,93 @@ function calculateV19Progress() {
   if (V19_MODULES.length === 0) return 0;
   const total = V19_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V19_MODULES.length);
+}
+
+
+const V20_FEATURE_TABLES = [
+  { name: "ai_selection_signals", label: "V2.0 AI 多因子選股訊號", date_column: "trade_date" },
+  { name: "ai_selection_summaries", label: "V2.0 AI 多因子選股摘要", date_column: "trade_date" },
+];
+
+const V20_MODULES = [
+  {
+    key: "ai_selection_tables",
+    name: "AI 多因子選股資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["ai_selection_signals", "ai_selection_summaries"],
+  },
+  {
+    key: "ai_strength_score",
+    name: "AI Strength Score",
+    progress: 92,
+    status: "first_version",
+    required_apis: ["npm run ai-selection:generate", "GET /ai-selection/top"],
+  },
+  {
+    key: "factor_decomposition",
+    name: "推薦理由 / 不推薦理由拆解",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["GET /ai-selection/latest", "GET /radar/top"],
+  },
+  {
+    key: "multi_factor_integration",
+    name: "整合 V1.5～V1.9 多因子",
+    progress: 92,
+    status: "first_version",
+    required_apis: ["Market Risk", "Global Risk", "Breakout", "Main Force", "Big Holder"],
+  },
+  {
+    key: "v20_acceptance_log",
+    name: "V2.0 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v20:check", "npm run v20:test"],
+  },
+];
+
+const V20_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "ai_selection_signals 已建立",
+      "ai_selection_summaries 已建立",
+      "npm run ai-selection:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "AI 多因子選股引擎",
+    items: [
+      "npm run ai-selection:generate 可依 V1.5～V1.9 既有因子產生 AI Strength Score",
+      "GET /ai-selection/latest 可回傳 AI 摘要、排行與建議",
+      "GET /ai-selection/top 可回傳 AI 強勢股、推薦理由與不推薦理由",
+      "GET /radar/top 新增 ai_strength_score / ai_status / recommend_reason / avoid_reason",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "首頁顯示 AI 多因子選股卡",
+      "股票卡片顯示 AI 強勢分數、風險等級、推薦理由與不推薦理由",
+      "每日之星排序優先參考 AI Strength Score",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v20:check",
+      "npm run v20:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV20Progress() {
+  if (V20_MODULES.length === 0) return 0;
+  const total = V20_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V20_MODULES.length);
 }
 
 const V13_MODULES = [
@@ -2702,6 +2789,132 @@ async function buildV19BigHolderTrendPayload(tradeDate = null, market = null, li
     summary,
     top_signals: topRows,
     advice: getV19BigHolderTrendAdvice(summary),
+  });
+}
+
+
+async function getLatestAiSelectionDate() {
+  if (!(await checkTableExists("ai_selection_signals"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM ai_selection_signals`,
+    [],
+    [{ latest_date: null }],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getAiSelectionSummary(tradeDate = null, market = "全部") {
+  if (!(await checkTableExists("ai_selection_summaries"))) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, observe_count: 0, risk_count: 0, low_risk_count: 0 };
+  }
+  const targetDate = tradeDate || await getLatestAiSelectionDate();
+  if (!targetDate) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, observe_count: 0, risk_count: 0, low_risk_count: 0 };
+  }
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      market_type,
+      total_count,
+      strong_count,
+      watch_count,
+      observe_count,
+      risk_count,
+      low_risk_count,
+      avg_ai_strength_score,
+      top_ai_strength_score,
+      top_stock_code,
+      top_stock_name,
+      DATE_FORMAT(generated_at, '%Y-%m-%d %H:%i:%s') AS generated_at
+    FROM ai_selection_summaries
+    WHERE trade_date = ?
+      AND market_type = ?
+    LIMIT 1
+    `,
+    [targetDate, market || "全部"],
+    [],
+  );
+  return rows?.[0] || { trade_date: targetDate, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, observe_count: 0, risk_count: 0, low_risk_count: 0 };
+}
+
+async function getAiSelectionTopRows({ tradeDate = null, market = null, limit = 10 } = {}) {
+  if (!(await checkTableExists("ai_selection_signals"))) return [];
+  const targetDate = tradeDate || await getLatestAiSelectionDate();
+  if (!targetDate) return [];
+  const params = [targetDate];
+  let marketCondition = "";
+  if (market) {
+    marketCondition = "AND market_type = ?";
+    params.push(market);
+  }
+  params.push(limit);
+  return await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      ai_strength_score,
+      ai_level,
+      ai_status,
+      candidate_horizon,
+      close_score,
+      night_adjusted_score,
+      global_adjusted_score,
+      chip_factor_score,
+      technical_factor_score,
+      main_force_factor_score,
+      big_holder_factor_score,
+      market_factor_score,
+      global_factor_score,
+      fundamental_factor_score,
+      breakout_score,
+      main_force_score,
+      big_holder_trend_score,
+      market_risk_score,
+      global_risk_score,
+      opening_gap_probability,
+      eps,
+      revenue_yoy_percent,
+      risk_level,
+      risk_flags,
+      recommend_reason,
+      avoid_reason
+    FROM ai_selection_signals
+    WHERE trade_date = ?
+      ${marketCondition}
+    ORDER BY ai_strength_score DESC, risk_level ASC, stock_code ASC
+    LIMIT ?
+    `,
+    params,
+    [],
+  );
+}
+
+function getV20AiSelectionAdvice(summary) {
+  const total = Number(summary?.total_count || 0);
+  const strong = Number(summary?.strong_count || 0);
+  const watch = Number(summary?.watch_count || 0);
+  const risk = Number(summary?.risk_count || 0);
+  const lowRisk = Number(summary?.low_risk_count || 0);
+  const avg = Number(summary?.avg_ai_strength_score || 0);
+  if (!total) return "尚未產生 AI 多因子選股訊號，請先執行 npm run ai-selection:generate。";
+  if (risk >= Math.max(10, Math.round(total * 0.08))) return `AI 風險控管名單偏多，風險 ${risk} 檔，建議提高篩選門檻並優先避開高開低風險股。`;
+  if (strong >= 20 || avg >= 72) return `AI 多因子盤勢偏強，AI 強勢 ${strong} 檔、低風險 ${lowRisk} 檔，可優先觀察 AI 強勢分數前段。`;
+  if (strong >= 5 || watch >= 30) return `AI 多因子盤勢正常，強勢 ${strong} 檔、觀察 ${watch} 檔，適合搭配風險等級分批觀察。`;
+  return `AI 強勢股數偏少，平均分數 ${avg.toFixed(2)}，目前更適合保守觀察與等待更明確訊號。`;
+}
+
+async function buildV20AiSelectionPayload(tradeDate = null, market = null, limit = 10) {
+  const summary = await getAiSelectionSummary(tradeDate, market || "全部");
+  const topRows = await getAiSelectionTopRows({ tradeDate: summary?.trade_date || tradeDate, market, limit });
+  return convertBigIntToString({
+    summary,
+    top_signals: topRows,
+    advice: getV20AiSelectionAdvice(summary),
   });
 }
 
@@ -5631,6 +5844,117 @@ app.get("/v19/acceptance", (req, res) => {
 });
 
 
+
+app.get("/ai-selection/latest", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const tradeDate = req.query.date || null;
+    const limit = parseLimit(req.query.limit, 10, 50);
+    const payload = await buildV20AiSelectionPayload(tradeDate, market, limit);
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V2.0 AI 多因子選股引擎",
+      market: market || "全部",
+      ...payload,
+    });
+  } catch (error) {
+    console.error("查詢 AI 多因子選股摘要失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 多因子選股摘要失敗", error: error.message });
+  }
+});
+
+app.get("/ai-selection/top", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const tradeDate = req.query.date || null;
+    if (!(await checkTableExists("ai_selection_signals"))) {
+      return res.status(500).json({ success: false, version: API_VERSION, message: "尚未建立 ai_selection_signals，請先執行 npm run ai-selection:setup。" });
+    }
+    const targetDate = tradeDate || await getLatestAiSelectionDate();
+    const rows = await getAiSelectionTopRows({ tradeDate: targetDate, market, limit });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, trade_date: targetDate, market: market || "全部", limit, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢 AI 多因子選股排行失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 多因子選股排行失敗", error: error.message });
+  }
+});
+
+app.get("/v20/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v20TableStatuses = [];
+    for (const tableDefinition of V20_FEATURE_TABLES) {
+      v20TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = v20TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getAiSelectionSummary();
+    const topRows = await getAiSelectionTopRows({ tradeDate: summary?.trade_date || null, limit: 5 });
+    const summaryReady = Number(summary?.total_count || 0) > 0;
+    const topReady = topRows.length > 0;
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v2.0.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V2.0 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V2.0 AI 多因子資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck("ai_summary", "AI 多因子摘要", summaryReady ? "pass" : "warn", summaryReady ? "已有 AI 多因子摘要。" : "尚未產生 AI 多因子訊號，請執行 npm run ai-selection:generate。", { summary }),
+      buildCheck("ai_top", "AI 強勢排行", topReady ? "pass" : "warn", topReady ? `已有 ${topRows.length} 筆 AI 強勢排行。` : "AI 強勢排行尚無資料。", { count: topRows.length }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.0 AI 多因子選股引擎",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.0 AI 多因子選股引擎、資料表、摘要與排行正常。" : overallStatus === "warn" ? "V2.0 程式已就緒，但 AI 訊號尚需產生。" : "V2.0 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV20Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v20TableStatuses,
+      ai_selection: { summary, top_signals: topRows, advice: getV20AiSelectionAdvice(summary) },
+      modules: V20_MODULES,
+      next_actions: [
+        "執行 npm run ai-selection:setup 建立 V2.0 資料表。",
+        "執行 npm run ai-selection:generate 產生 AI 多因子選股訊號。",
+        "執行 npm run v20:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.0 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.0 AI 多因子選股引擎", message: "查詢 V2.0 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v20/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.0 AI 多因子選股引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV20Progress(),
+    checklist: V20_FINAL_ACCEPTANCE_ITEMS,
+    modules: V20_MODULES,
+    recommended_commands: ["npm run ai-selection:setup", "npm run ai-selection:generate", "npm run v20:check", "npm run v20:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v20/status", "/v20/acceptance", "/ai-selection/latest", "/ai-selection/top", "/radar/top"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
 app.post("/auth/google", async (req, res) => {
   try {
     const credential = req.body?.credential;
@@ -7261,6 +7585,7 @@ app.get("/radar/top", async (req, res) => {
     const hasBreakoutSignals = await checkTableExists("technical_breakout_signals");
     const hasMainForceSignals = await checkTableExists("main_force_signals");
     const hasBigHolderTrendSignals = await checkTableExists("big_holder_trend_signals");
+    const hasAiSelectionSignals = await checkTableExists("ai_selection_signals");
 
     let targetDate = queryDate;
 
@@ -7307,6 +7632,43 @@ app.get("/radar/top", async (req, res) => {
     }
 
     params.push(limit);
+
+
+    const aiSelectionSelect = hasAiSelectionSignals
+      ? `
+        ai.ai_strength_score,
+        ai.ai_level,
+        ai.ai_status,
+        ai.candidate_horizon,
+        ai.chip_factor_score,
+        ai.technical_factor_score,
+        ai.main_force_factor_score,
+        ai.big_holder_factor_score,
+        ai.market_factor_score,
+        ai.global_factor_score,
+        ai.fundamental_factor_score,
+        ai.risk_level AS ai_risk_level,
+        ai.risk_flags AS ai_risk_flags,
+        ai.recommend_reason AS ai_recommend_reason,
+        ai.avoid_reason AS ai_avoid_reason,
+      `
+      : `
+        NULL AS ai_strength_score,
+        NULL AS ai_level,
+        NULL AS ai_status,
+        NULL AS candidate_horizon,
+        NULL AS chip_factor_score,
+        NULL AS technical_factor_score,
+        NULL AS main_force_factor_score,
+        NULL AS big_holder_factor_score,
+        NULL AS market_factor_score,
+        NULL AS global_factor_score,
+        NULL AS fundamental_factor_score,
+        NULL AS ai_risk_level,
+        NULL AS ai_risk_flags,
+        NULL AS ai_recommend_reason,
+        NULL AS ai_avoid_reason,
+      `;
 
     const marketRiskAdjustedSelect = hasMarketRiskAdjustedScores
       ? `
@@ -7496,8 +7858,24 @@ app.get("/radar/top", async (req, res) => {
        AND c.trade_date = mf.trade_date`
       : "";
 
+
+    const bigHolderTrendJoin = hasBigHolderTrendSignals
+      ? `
+      LEFT JOIN big_holder_trend_signals bh
+        ON c.stock_code = bh.stock_code
+       AND c.trade_date = bh.trade_date`
+      : "";
+
+    const aiSelectionJoin = hasAiSelectionSignals
+      ? `
+      LEFT JOIN ai_selection_signals ai
+        ON c.stock_code = ai.stock_code
+       AND c.trade_date = ai.trade_date`
+      : "";
+
     let marketRiskAdjustedOrder = "c.chip_score DESC, c.stock_code ASC";
     const scoreOrderCandidates = [];
+    if (hasAiSelectionSignals) scoreOrderCandidates.push("ai.ai_strength_score");
     if (hasBigHolderTrendSignals) scoreOrderCandidates.push("bh.big_holder_trend_score");
     if (hasMainForceSignals) scoreOrderCandidates.push("mf.main_force_score");
     if (hasGlobalRiskAdjustedScores) scoreOrderCandidates.push("g.global_adjusted_score");
@@ -7519,6 +7897,7 @@ app.get("/radar/top", async (req, res) => {
         ${breakoutSelect}
         ${mainForceSelect}
         ${bigHolderTrendSelect}
+        ${aiSelectionSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -7542,6 +7921,7 @@ app.get("/radar/top", async (req, res) => {
       ${breakoutJoin}
       ${mainForceJoin}
       ${bigHolderTrendJoin}
+      ${aiSelectionJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date

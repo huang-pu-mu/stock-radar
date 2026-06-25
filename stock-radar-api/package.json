@@ -60,7 +60,12 @@
     "big-holder:generate": "node scripts/generateBigHolderTrendSignals.js",
     "big-holder:daily": "npm run big-holder:setup && npm run big-holder:generate",
     "v19:check": "node scripts/checkV19.js",
-    "v19:test": "node scripts/runV19Acceptance.js"
+    "v19:test": "node scripts/runV19Acceptance.js",
+    "ai-selection:setup": "node scripts/setupAiSelectionTables.js",
+    "ai-selection:generate": "node scripts/generateAiSelectionSignals.js",
+    "ai-selection:daily": "npm run ai-selection:setup && npm run ai-selection:generate",
+    "v20:check": "node scripts/checkV20.js",
+    "v20:test": "node scripts/runV20Acceptance.js"
   },
   "keywords": [
     "stock",
