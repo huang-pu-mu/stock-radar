@@ -1,0 +1,148 @@
+====================================
+Stock Radar V1.6 自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v16-acceptance-20260625-195241.log
+開始時間：2026/6/25 19:52:41
+API：http://localhost:3000
+DB流程：執行 setup / import / score
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V1.6 全球市場風險資料表
+指令：npm run global-risk:setup
+
+> stock-radar-api@1.0.0 global-risk:setup
+> node scripts/setupGlobalRiskTables.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+====================================
+Stock Radar V1.6 全球市場風險資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v16-global-risk.sql
+建立 / 確認完成：
+- global_market_components
+- global_market_snapshots
+- global_risk_adjusted_scores
+結果：PASS
+完成：建立 V1.6 全球市場風險資料表，耗時 0分1秒
+--------------------------------------------------
+開始：匯入全球市場風險資料
+指令：npm run global-risk:import
+
+> stock-radar-api@1.0.0 global-risk:import
+> node scripts/importGlobalMarketRisk.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+====================================
+Stock Radar V1.6 全球市場風險匯入
+====================================
+✅ S&P 500 -2.04%｜轉弱
+✅ NASDAQ -3.41%｜高壓力
+✅ Dow Jones -0.29%｜中性
+✅ 費城半導體 1.23%｜偏多
+✅ NVIDIA -4.05%｜高壓力
+✅ AMD 2.45%｜偏多
+✅ Microsoft -7.20%｜轉弱
+✅ Apple -2.06%｜轉弱
+✅ VIX 4.63%｜轉弱
+✅ DXY 0.69%｜中性
+✅ US10Y -0.27%｜中性
+------------------------------------
+資料日：2026-06-24
+Global Risk Score：7
+市場模式：BEAR
+隔日開低機率：95%
+元件筆數：11
+結果：PASS
+完成：匯入全球市場風險資料，耗時 0分2秒
+--------------------------------------------------
+開始：產生全球風險修正分數
+指令：npm run global-risk:score
+
+> stock-radar-api@1.0.0 global-risk:score
+> node scripts/generateGlobalRiskScores.js
+
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V1.6 全球風險修正分數產生
+====================================
+分析日期：2026-06-25
+全球風險：7｜高風險｜BEAR
+隔日開低機率：95%
+------------------------------------
+更新個股數：1954
+全球修正分數區間：-44 ～ 0
+結果：PASS
+完成：產生全球風險修正分數，耗時 0分16秒
+--------------------------------------------------
+開始：V1.6 靜態 / API 驗收
+指令：npm run v16:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v16:check
+> node scripts/checkV16.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V1.6 靜態 / API 驗收檢查
+====================================
+✅ [版本] API 版本為 V1.6.0 - stock-radar-api-v1.6.0
+✅ [版本] API 預期 PWA 版本為 v62 - stock-radar-pwa-v62
+✅ [版本] service-worker 快取版本為 v62 - stock-radar-pwa-v62
+✅ [npm 指令] global-risk:setup - node scripts/setupGlobalRiskTables.js
+✅ [npm 指令] global-risk:import - node scripts/importGlobalMarketRisk.js
+✅ [npm 指令] global-risk:score - node scripts/generateGlobalRiskScores.js
+✅ [npm 指令] global-risk:daily - npm run global-risk:import && npm run global-risk:score
+✅ [npm 指令] v16:check - node scripts/checkV16.js
+✅ [npm 指令] v16:test - node scripts/runV16Acceptance.js
+✅ [npm 指令] market-risk:daily - npm run market-risk:import && npm run market-risk:score
+✅ [npm 指令] official:daily - npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+✅ [npm 指令] alerts:generate - node scripts/generateWatchlistAlerts.js
+✅ [npm 指令] strategy-backtests:generate - node scripts/generateStrategyBacktests.js
+✅ [必要檔案] stock-radar-api/sql/v16-global-risk.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupGlobalRiskTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/importGlobalMarketRisk.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateGlobalRiskScores.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV16.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV16Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] global_market_snapshots 資料表 - v16-global-risk.sql
+✅ [SQL] global_market_components 資料表 - v16-global-risk.sql
+✅ [SQL] global_risk_adjusted_scores 資料表 - v16-global-risk.sql
+✅ [SQL] Global Risk Score 欄位 - global_risk_score
+✅ [SQL] 隔日開低機率欄位 - opening_gap_probability
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v16/status - server.js 靜態檢查
+✅ [API 路由] GET /v16/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /global-risk/latest - server.js 靜態檢查
+✅ [API 路由] GET /global-risk/top - server.js 靜態檢查
+✅ [API 路由] GET /radar/top - server.js 靜態檢查
+✅ [前端] 全球市場風險狀態卡 - renderGlobalRiskPanel
+✅ [前端] 首頁讀取 /global-risk/latest - /global-risk/latest
+✅ [前端] 全球修正分數顯示 - 全球修正
+✅ [前端] V1.6 狀態檢查 - /v16/status
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v16/status - HTTP 200
+✅ [API 動態] /v16/acceptance - HTTP 200
+✅ [API 動態] /global-risk/latest - HTTP 200
+✅ [API 動態] /global-risk/top - HTTP 200
+------------------------------------
+PASS：43
+WARN：0
+FAIL：0
+結果：PASS
+完成：V1.6 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 19:53:01
+總耗時：0分20秒
+結果：PASS

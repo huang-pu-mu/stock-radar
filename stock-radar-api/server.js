@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.5.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v61";
+const API_VERSION = "stock-radar-api-v1.6.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v62";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1500,6 +1500,94 @@ function calculateV15Progress() {
   if (V15_MODULES.length === 0) return 0;
   const total = V15_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V15_MODULES.length);
+}
+
+const V16_FEATURE_TABLES = [
+  { name: "global_market_snapshots", label: "V1.6 全球市場風險快照", date_column: "snapshot_time" },
+  { name: "global_market_components", label: "V1.6 全球市場元件", date_column: "trade_date" },
+  { name: "global_risk_adjusted_scores", label: "V1.6 全球風險修正分數", date_column: "trade_date" },
+];
+
+const V16_MODULES = [
+  {
+    key: "global_risk_tables",
+    name: "全球市場風險資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["global_market_snapshots", "global_market_components", "global_risk_adjusted_scores"],
+  },
+  {
+    key: "global_market_import",
+    name: "美股 / 費半 / 科技權值 / VIX / DXY / US10Y 匯入",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run global-risk:import"],
+  },
+  {
+    key: "global_risk_score",
+    name: "Global Risk Score",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["GET /global-risk/latest", "npm run global-risk:score"],
+  },
+  {
+    key: "next_day_gap_risk",
+    name: "隔日開低機率與全球修正分數",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["GET /global-risk/top", "GET /radar/top"],
+  },
+  {
+    key: "v16_acceptance_log",
+    name: "V1.6 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v16:check", "npm run v16:test"],
+  },
+];
+
+const V16_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "global_market_snapshots 已建立",
+      "global_market_components 已建立",
+      "global_risk_adjusted_scores 已建立",
+      "npm run global-risk:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "全球市場風險引擎",
+    items: [
+      "npm run global-risk:import 可匯入或中性補齊美股、費半、科技股、VIX、DXY、US10Y",
+      "npm run global-risk:score 可產生個股全球風險修正分數",
+      "GET /global-risk/latest 可回傳 Global Risk Score、模式與隔日開低機率",
+      "GET /global-risk/top 可回傳收盤分數、夜盤修正分數與全球修正分數",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "首頁顯示全球市場風險、科技股壓力、半導體壓力與隔日開低機率",
+      "GET /radar/top 新增 global_adjusted_score / global_risk_score / opening_gap_probability",
+      "股票卡片顯示全球修正分數與全球風險資訊",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v16:check",
+      "npm run v16:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV16Progress() {
+  if (V16_MODULES.length === 0) return 0;
+  const total = V16_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V16_MODULES.length);
 }
 
 const V13_MODULES = [
@@ -1814,6 +1902,148 @@ async function buildV15MarketRiskPayload(tradeDate = null) {
     snapshot,
     adjusted_summary: adjustedSummary,
     advice: getV15RiskAdvice(snapshot),
+  });
+}
+
+async function getLatestGlobalRiskSnapshot(tradeDate = null) {
+  if (!(await checkTableExists("global_market_snapshots"))) return null;
+
+  const params = [];
+  let dateCondition = "";
+
+  if (tradeDate) {
+    dateCondition = "WHERE trade_date <= ?";
+    params.push(tradeDate);
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      DATE_FORMAT(snapshot_time, '%Y-%m-%d %H:%i:%s') AS snapshot_time,
+      source,
+      source_url,
+      global_risk_score,
+      global_risk_level,
+      global_market_mode,
+      us_market_status,
+      technology_pressure,
+      semiconductor_pressure,
+      vix_status,
+      dxy_status,
+      us10y_status,
+      opening_gap_probability,
+      risk_summary,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM global_market_snapshots
+    ${dateCondition}
+    ORDER BY trade_date DESC, snapshot_time DESC, id DESC
+    LIMIT 1
+    `,
+    params,
+    [],
+  );
+
+  return rows?.[0] || null;
+}
+
+async function getGlobalRiskComponents(snapshotId = null) {
+  if (!snapshotId || !(await checkTableExists("global_market_components"))) return [];
+
+  return await safeQuery(
+    `
+    SELECT
+      symbol,
+      display_name,
+      asset_type,
+      market_group,
+      last_price,
+      previous_close,
+      change_point,
+      change_percent,
+      risk_impact,
+      risk_signal,
+      source
+    FROM global_market_components
+    WHERE snapshot_id = ?
+    ORDER BY
+      CASE market_group
+        WHEN 'us_index' THEN 1
+        WHEN 'semiconductor' THEN 2
+        WHEN 'technology' THEN 3
+        WHEN 'volatility' THEN 4
+        WHEN 'dollar' THEN 5
+        WHEN 'yield' THEN 6
+        ELSE 9
+      END,
+      symbol ASC
+    `,
+    [snapshotId],
+    [],
+  );
+}
+
+async function getLatestGlobalRiskAdjustedDate() {
+  if (!(await checkTableExists("global_risk_adjusted_scores"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM global_risk_adjusted_scores`,
+    [],
+    [{ latest_date: null }],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getGlobalRiskAdjustedSummary(tradeDate = null) {
+  if (!(await checkTableExists("global_risk_adjusted_scores"))) {
+    return { trade_date: tradeDate || null, count: 0, avg_global_adjusted_score: null, avg_global_adjustment: null, max_global_adjusted_score: null, min_global_adjusted_score: null };
+  }
+
+  const targetDate = tradeDate || await getLatestGlobalRiskAdjustedDate();
+  if (!targetDate) {
+    return { trade_date: null, count: 0, avg_global_adjusted_score: null, avg_global_adjustment: null, max_global_adjusted_score: null, min_global_adjusted_score: null };
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      COUNT(*) AS count,
+      ROUND(AVG(global_adjusted_score), 2) AS avg_global_adjusted_score,
+      ROUND(AVG(global_adjustment), 2) AS avg_global_adjustment,
+      MAX(global_adjusted_score) AS max_global_adjusted_score,
+      MIN(global_adjusted_score) AS min_global_adjusted_score
+    FROM global_risk_adjusted_scores
+    WHERE trade_date = ?
+    GROUP BY trade_date
+    `,
+    [targetDate],
+    [],
+  );
+
+  return rows?.[0] || { trade_date: targetDate, count: 0, avg_global_adjusted_score: null, avg_global_adjustment: null, max_global_adjusted_score: null, min_global_adjusted_score: null };
+}
+
+function getV16RiskAdvice(snapshot) {
+  if (!snapshot) return "尚未取得全球市場風險快照，請先執行 npm run global-risk:import。";
+  const score = Number(snapshot.global_risk_score || 70);
+  const gapProbability = Number(snapshot.opening_gap_probability || 50);
+  if (score >= 80) return `全球市場偏多，隔日開低機率約 ${gapProbability}%，強勢股可正常觀察。`;
+  if (score >= 60) return `全球市場中性，隔日開低機率約 ${gapProbability}%，每日之星可正常觀察但避免追高。`;
+  if (score >= 40) return `全球市場轉弱，隔日開低機率約 ${gapProbability}%，科技與半導體股需降權觀察。`;
+  return `全球市場高風險，隔日開低機率約 ${gapProbability}%，每日之星應大幅保守。`;
+}
+
+async function buildV16GlobalRiskPayload(tradeDate = null) {
+  const snapshot = await getLatestGlobalRiskSnapshot(tradeDate);
+  const components = await getGlobalRiskComponents(snapshot?.id || null);
+  const adjustedSummary = await getGlobalRiskAdjustedSummary(tradeDate || null);
+
+  return convertBigIntToString({
+    snapshot,
+    components,
+    adjusted_summary: adjustedSummary,
+    advice: getV16RiskAdvice(snapshot),
   });
 }
 
@@ -3467,7 +3697,7 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        (API_VERSION === "stock-radar-api-v1.4.8.6" || API_VERSION === "stock-radar-api-v1.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v61") ? "pass" : "fail",
+        (API_VERSION === "stock-radar-api-v1.4.8.6" || API_VERSION === "stock-radar-api-v1.5.0" || API_VERSION === "stock-radar-api-v1.6.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v62") ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V1.5 會相容保留 V1.4 功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -3806,7 +4036,7 @@ app.get("/v15/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.5.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" ? "pass" : "fail",
+        (API_VERSION === "stock-radar-api-v1.5.0" || API_VERSION === "stock-radar-api-v1.6.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v62") ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -3901,6 +4131,292 @@ app.get("/v15/acceptance", (req, res) => {
       "/v15/acceptance",
       "/market-risk/latest",
       "/market-risk/top",
+      "/radar/top",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+app.get("/global-risk/latest", async (req, res) => {
+  try {
+    const tradeDate = req.query.date || null;
+
+    if (tradeDate && !isValidDateText(tradeDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    const payload = await buildV16GlobalRiskPayload(tradeDate);
+
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V1.6 全球市場風險引擎",
+      ...payload,
+      checked_at: nowTaipeiText(),
+    });
+  } catch (error) {
+    console.error("查詢全球市場風險快照失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢全球市場風險快照失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/global-risk/top", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    if (!(await checkTableExists("global_risk_adjusted_scores"))) {
+      return res.json({
+        success: true,
+        version: API_VERSION,
+        trade_date: queryDate || null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+        message: "尚未建立 global_risk_adjusted_scores，請先執行 npm run global-risk:setup。",
+      });
+    }
+
+    const targetDate = queryDate || await getLatestGlobalRiskAdjustedDate();
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        version: API_VERSION,
+        trade_date: null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const params = [targetDate];
+    let marketCondition = "";
+    if (market) {
+      marketCondition = "AND s.market_type = ?";
+      params.push(market);
+    }
+    params.push(limit);
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(g.trade_date, '%Y-%m-%d') AS trade_date,
+        g.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        g.close_score,
+        g.market_adjusted_score,
+        g.global_adjusted_score,
+        g.global_adjustment,
+        g.global_risk_score,
+        g.global_risk_level,
+        g.global_market_mode,
+        g.global_risk_weight,
+        g.opening_gap_probability,
+        g.technology_pressure,
+        g.semiconductor_pressure,
+        g.risk_summary AS global_risk_summary,
+        c.chip_score,
+        c.foreign_score,
+        c.investment_trust_score,
+        c.dealer_score,
+        c.big_holder_score,
+        c.volume_score,
+        c.price_score,
+        c.foreign_status,
+        c.investment_trust_status,
+        c.dealer_status,
+        c.big_holder_status,
+        c.volume_status,
+        c.price_position,
+        p.close_price,
+        p.price_change,
+        CAST(p.volume AS CHAR) AS volume
+      FROM global_risk_adjusted_scores g
+      LEFT JOIN stocks s
+        ON g.stock_code = s.stock_code
+      LEFT JOIN chip_scores c
+        ON g.stock_code = c.stock_code
+       AND g.trade_date = c.trade_date
+      LEFT JOIN daily_prices p
+        ON g.stock_code = p.stock_code
+       AND g.trade_date = p.trade_date
+      WHERE g.trade_date = ?
+        ${marketCondition}
+      ORDER BY g.global_adjusted_score DESC, COALESCE(g.market_adjusted_score, g.close_score) DESC, g.stock_code ASC
+      LIMIT ?
+      `,
+      params,
+    );
+
+    const globalRiskPayload = await buildV16GlobalRiskPayload(targetDate);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: rows.length,
+      global_risk: globalRiskPayload,
+      data: rows,
+    }));
+  } catch (error) {
+    console.error("查詢全球風險修正排行失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢全球風險修正排行失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/v16/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v16TableStatuses = [];
+
+    for (const tableDefinition of V16_FEATURE_TABLES) {
+      v16TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const missingTables = v16TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getLatestGlobalRiskSnapshot();
+    const components = await getGlobalRiskComponents(snapshot?.id || null);
+    const adjustedSummary = await getGlobalRiskAdjustedSummary();
+    const snapshotReady = Boolean(snapshot && Number(snapshot.global_risk_score || 0) > 0);
+    const componentsReady = components.length >= 8;
+    const adjustedReady = Number(adjustedSummary?.count || 0) > 0;
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.6.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v62" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.6 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.6 全球市場風險資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "global_risk_snapshot",
+        "全球市場風險快照",
+        snapshotReady ? "pass" : "warn",
+        snapshotReady ? "已有 Global Risk Score 快照。" : "尚未有全球市場風險快照，請執行 npm run global-risk:import。",
+        { snapshot },
+      ),
+      buildCheck(
+        "global_components",
+        "全球市場元件",
+        componentsReady ? "pass" : "warn",
+        componentsReady ? `已有 ${components.length} 項全球市場元件。` : "全球市場元件不足，請檢查 global-risk:import log。",
+        { count: components.length },
+      ),
+      buildCheck(
+        "global_adjusted_scores",
+        "全球風險修正分數",
+        adjustedReady ? "pass" : "warn",
+        adjustedReady ? "已有個股全球風險修正分數。" : "尚未產生全球風險修正分數，請執行 npm run global-risk:score。",
+        { adjusted_summary: adjustedSummary },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.6 全球市場風險引擎",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.6 全球市場風險引擎、資料表、快照、元件與全球修正分數正常。"
+          : overallStatus === "warn"
+            ? "V1.6 程式已就緒，但全球市場快照或修正分數尚需匯入 / 產生。"
+            : "V1.6 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV16Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v16TableStatuses,
+      global_risk: {
+        snapshot,
+        components,
+        adjusted_summary: adjustedSummary,
+        advice: getV16RiskAdvice(snapshot),
+      },
+      modules: V16_MODULES,
+      next_actions: [
+        "執行 npm run global-risk:setup 建立 V1.6 資料表。",
+        "執行 npm run global-risk:import 匯入全球市場風險資料。",
+        "執行 npm run global-risk:score 產生全球風險修正分數。",
+        "執行 npm run v16:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.6 系統狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.6 全球市場風險引擎",
+      message: "查詢 V1.6 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v16/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.6 全球市場風險引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV16Progress(),
+    checklist: V16_FINAL_ACCEPTANCE_ITEMS,
+    modules: V16_MODULES,
+    recommended_commands: [
+      "npm run global-risk:setup",
+      "npm run global-risk:import",
+      "npm run global-risk:score",
+      "npm run v16:check",
+      "npm run v16:test -- --api=http://localhost:3000",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v16/status",
+      "/v16/acceptance",
+      "/global-risk/latest",
+      "/global-risk/top",
       "/radar/top",
     ],
     checked_at: nowTaipeiText(),
@@ -5535,6 +6051,7 @@ app.get("/radar/top", async (req, res) => {
 
     conn = await pool.getConnection();
     const hasMarketRiskAdjustedScores = await checkTableExists("market_risk_adjusted_scores");
+    const hasGlobalRiskAdjustedScores = await checkTableExists("global_risk_adjusted_scores");
 
     let targetDate = queryDate;
 
@@ -5605,15 +6122,55 @@ app.get("/radar/top", async (req, res) => {
         NULL AS risk_weight,
         NULL AS risk_summary,
       `;
+
+    const globalRiskAdjustedSelect = hasGlobalRiskAdjustedScores
+      ? `
+        g.global_adjusted_score,
+        g.global_adjustment,
+        g.global_risk_score,
+        g.global_risk_level,
+        g.global_market_mode,
+        g.global_risk_weight,
+        g.opening_gap_probability,
+        g.technology_pressure,
+        g.semiconductor_pressure,
+        g.risk_summary AS global_risk_summary,
+      `
+      : `
+        NULL AS global_adjusted_score,
+        NULL AS global_adjustment,
+        NULL AS global_risk_score,
+        NULL AS global_risk_level,
+        NULL AS global_market_mode,
+        NULL AS global_risk_weight,
+        NULL AS opening_gap_probability,
+        NULL AS technology_pressure,
+        NULL AS semiconductor_pressure,
+        NULL AS global_risk_summary,
+      `;
+
     const marketRiskAdjustedJoin = hasMarketRiskAdjustedScores
       ? `
       LEFT JOIN market_risk_adjusted_scores a
         ON c.stock_code = a.stock_code
        AND c.trade_date = a.trade_date`
       : "";
-    const marketRiskAdjustedOrder = hasMarketRiskAdjustedScores
-      ? "COALESCE(a.adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC"
-      : "c.chip_score DESC, c.stock_code ASC";
+
+    const globalRiskAdjustedJoin = hasGlobalRiskAdjustedScores
+      ? `
+      LEFT JOIN global_risk_adjusted_scores g
+        ON c.stock_code = g.stock_code
+       AND c.trade_date = g.trade_date`
+      : "";
+
+    let marketRiskAdjustedOrder = "c.chip_score DESC, c.stock_code ASC";
+    if (hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
+      marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, COALESCE(a.adjusted_score, c.chip_score) DESC, c.stock_code ASC";
+    } else if (hasGlobalRiskAdjustedScores) {
+      marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
+    } else if (hasMarketRiskAdjustedScores) {
+      marketRiskAdjustedOrder = "COALESCE(a.adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
+    }
 
     const rows = await conn.query(
       `
@@ -5625,6 +6182,7 @@ app.get("/radar/top", async (req, res) => {
         s.industry,
         c.chip_score,
         ${marketRiskAdjustedSelect}
+        ${globalRiskAdjustedSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -5644,6 +6202,7 @@ app.get("/radar/top", async (req, res) => {
       LEFT JOIN stocks s
         ON c.stock_code = s.stock_code
       ${marketRiskAdjustedJoin}
+      ${globalRiskAdjustedJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date

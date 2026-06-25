@@ -102,6 +102,8 @@ const state = {
   latestRows: [],
   marketRisk: null,
   marketRiskError: "",
+  globalRisk: null,
+  globalRiskError: "",
   lastSearchCode: "",
   lastSearchData: null,
   authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
@@ -478,6 +480,81 @@ function renderMarketRiskPanel() {
       </div>
     </section>
   `;
+}
+
+function renderGlobalRiskPanel() {
+  const payload = state.globalRisk || {};
+  const snapshot = payload.snapshot || null;
+  const summary = payload.adjusted_summary || {};
+  const components = Array.isArray(payload.components) ? payload.components : [];
+  const advice = payload.advice || state.globalRiskError || "尚未讀取全球市場風險資料。";
+
+  if (!snapshot && !state.globalRiskError) return "";
+
+  const score = pick(snapshot || {}, ["global_risk_score"], "-");
+  const tone = getMarketRiskTone(score);
+  const mode = pick(snapshot || {}, ["global_market_mode"], "RANGE");
+  const level = pick(snapshot || {}, ["global_risk_level"], "尚未取得");
+  const gapProbability = pick(snapshot || {}, ["opening_gap_probability"], "-");
+  const usStatus = pick(snapshot || {}, ["us_market_status"], "-");
+  const techPressure = pick(snapshot || {}, ["technology_pressure"], "-");
+  const semiPressure = pick(snapshot || {}, ["semiconductor_pressure"], "-");
+  const vixStatus = pick(snapshot || {}, ["vix_status"], "-");
+  const tradeDate = pick(snapshot || {}, ["trade_date"], pick(summary, ["trade_date"], "-"));
+  const mainComponents = components.slice(0, 4).map((item) => {
+    const label = pick(item, ["display_name", "symbol"], "-");
+    const percent = pick(item, ["change_percent"], null);
+    const signal = pick(item, ["risk_signal"], "-");
+    return `<span class="component-pill ${getChangeClass(percent)}">${escapeHtml(label)} ${formatPercent(percent)} ${escapeHtml(signal)}</span>`;
+  }).join("");
+
+  return `
+    <section class="market-risk-panel global-risk-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V1.6 全球市場風險引擎</p>
+          <h3>全球模式：${escapeHtml(mode)}｜${escapeHtml(level)}</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">Global Risk</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("隔日開低機率", formatPercent(gapProbability), getMarketRiskTone(100 - Number(gapProbability || 50)))}
+        ${createInfoItem("美股狀態", escapeHtml(usStatus))}
+        ${createInfoItem("科技股壓力", escapeHtml(techPressure))}
+        ${createInfoItem("半導體壓力", escapeHtml(semiPressure))}
+        ${createInfoItem("VIX", escapeHtml(vixStatus))}
+        ${createInfoItem("修正筆數", `${formatNumber(pick(summary, ["count"], 0))} 檔`)}
+        ${createInfoItem("平均修正", formatNumber(pick(summary, ["avg_global_adjustment"], "-")), getChangeClass(pick(summary, ["avg_global_adjustment"], 0)))}
+        ${createInfoItem("資料日", formatDate(tradeDate))}
+      </div>
+      ${mainComponents ? `<div class="global-component-strip">${mainComponents}</div>` : ""}
+    </section>
+  `;
+}
+
+async function loadV16StatusForAcceptance() {
+  return fetchJson("/v16/status", { method: "GET", raw: true });
+}
+
+async function loadGlobalRiskForRadar() {
+  if (state.page !== "radar") {
+    state.globalRisk = null;
+    state.globalRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/global-risk/latest", { method: "GET", raw: true });
+    state.globalRisk = result;
+    state.globalRiskError = "";
+  } catch (error) {
+    state.globalRisk = null;
+    state.globalRiskError = error.message || "全球市場風險資料讀取失敗。";
+  }
 }
 
 async function loadV15StatusForAcceptance() {
@@ -2481,7 +2558,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = `${state.page === "radar" ? renderMarketRiskPanel() : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -5179,21 +5256,36 @@ function renderStockCard(row, index) {
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
   const closeScore = pick(row, ["close_score", "chip_score", "total_score", "score"], "-");
-  const adjustedScore = pick(row, ["market_adjusted_score", "night_adjusted_score"], "");
-  const hasAdjustedScore = adjustedScore !== "" && adjustedScore !== null && adjustedScore !== undefined;
+  const globalAdjustedScore = pick(row, ["global_adjusted_score"], "");
+  const marketAdjustedScore = pick(row, ["market_adjusted_score", "night_adjusted_score"], "");
+  const hasGlobalAdjustedScore = globalAdjustedScore !== "" && globalAdjustedScore !== null && globalAdjustedScore !== undefined;
+  const hasMarketAdjustedScore = marketAdjustedScore !== "" && marketAdjustedScore !== null && marketAdjustedScore !== undefined;
+  const adjustedScore = hasGlobalAdjustedScore ? globalAdjustedScore : marketAdjustedScore;
+  const hasAdjustedScore = hasGlobalAdjustedScore || hasMarketAdjustedScore;
   const score = hasAdjustedScore ? adjustedScore : closeScore;
   const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
-  const scoreText = hasAdjustedScore ? "夜盤修正後" : getScoreText(score);
+  const scoreText = hasGlobalAdjustedScore ? "全球風險修正後" : hasMarketAdjustedScore ? "夜盤修正後" : getScoreText(score);
   const marketRiskScore = pick(row, ["market_risk_score"], "-");
   const nightAdjustment = pick(row, ["night_adjustment"], "-");
   const marketMode = pick(row, ["market_mode"], "-");
+  const globalRiskScore = pick(row, ["global_risk_score"], "-");
+  const globalAdjustment = pick(row, ["global_adjustment"], "-");
+  const globalMode = pick(row, ["global_market_mode"], "-");
+  const openingGapProbability = pick(row, ["opening_gap_probability"], "-");
 
   const radarItems = [
-    ...(hasAdjustedScore ? [
+    ...(hasGlobalAdjustedScore ? [
+      createInfoItem("收盤分數", formatNumber(closeScore), getScoreClass(closeScore)),
+      createInfoItem("夜盤修正", formatNumber(nightAdjustment), getChangeClass(nightAdjustment)),
+      createInfoItem("全球修正", formatNumber(globalAdjustment), getChangeClass(globalAdjustment)),
+      createInfoItem("Global Risk", formatNumber(globalRiskScore), getMarketRiskTone(globalRiskScore)),
+      createInfoItem("開低機率", formatPercent(openingGapProbability), getMarketRiskTone(100 - Number(openingGapProbability || 50))),
+      createInfoItem("全球模式", escapeHtml(globalMode)),
+    ] : hasMarketAdjustedScore ? [
       createInfoItem("收盤分數", formatNumber(closeScore), getScoreClass(closeScore)),
       createInfoItem("夜盤修正", formatNumber(nightAdjustment), getChangeClass(nightAdjustment)),
       createInfoItem("Market Risk", formatNumber(marketRiskScore), getMarketRiskTone(marketRiskScore)),
@@ -5229,7 +5321,7 @@ function renderStockCard(row, index) {
         </div>
         <div class="score-box ${scoreClass}">
           <span class="score-value">${formatNumber(score)}</span>
-          <span class="score-label">${hasAdjustedScore ? "夜盤修正" : "籌碼分數"}</span>
+          <span class="score-label">${hasGlobalAdjustedScore ? "全球修正" : hasMarketAdjustedScore ? "夜盤修正" : "籌碼分數"}</span>
         </div>
       </div>
 
@@ -7767,6 +7859,7 @@ async function loadList() {
   try {
     const rows = await fetchJson(buildListPath());
     await loadMarketRiskForRadar();
+    await loadGlobalRiskForRadar();
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -7795,7 +7888,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = `${state.page === "radar" ? renderMarketRiskPanel() : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([

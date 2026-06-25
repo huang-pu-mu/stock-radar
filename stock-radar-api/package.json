@@ -39,7 +39,13 @@
     "market-risk:score": "node scripts/generateMarketRiskScores.js",
     "market-risk:daily": "npm run market-risk:import && npm run market-risk:score",
     "v15:check": "node scripts/checkV15.js",
-    "v15:test": "node scripts/runV15Acceptance.js"
+    "v15:test": "node scripts/runV15Acceptance.js",
+    "global-risk:setup": "node scripts/setupGlobalRiskTables.js",
+    "global-risk:import": "node scripts/importGlobalMarketRisk.js",
+    "global-risk:score": "node scripts/generateGlobalRiskScores.js",
+    "global-risk:daily": "npm run global-risk:import && npm run global-risk:score",
+    "v16:check": "node scripts/checkV16.js",
+    "v16:test": "node scripts/runV16Acceptance.js"
   },
   "keywords": [
     "stock",
