@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.8.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v64";
+const API_VERSION = "stock-radar-api-v1.9.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v65";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1762,6 +1762,94 @@ function calculateV18Progress() {
   if (V18_MODULES.length === 0) return 0;
   const total = V18_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V18_MODULES.length);
+}
+
+
+const V19_FEATURE_TABLES = [
+  { name: "big_holder_trend_signals", label: "V1.9 大戶持股趨勢訊號", date_column: "trade_date" },
+  { name: "big_holder_trend_summaries", label: "V1.9 大戶持股趨勢摘要", date_column: "trade_date" },
+];
+
+const V19_MODULES = [
+  {
+    key: "big_holder_trend_tables",
+    name: "大戶持股趨勢資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["big_holder_trend_signals", "big_holder_trend_summaries"],
+  },
+  {
+    key: "big_holder_trend_score",
+    name: "Big Holder Trend Score 大戶趨勢分數",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run big-holder:generate", "GET /big-holder-trend/top"],
+  },
+  {
+    key: "four_week_eight_week_holder_change",
+    name: "4週 / 8週大戶與散戶變化",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["GET /big-holder-trend/latest", "GET /radar/top"],
+  },
+  {
+    key: "concentration_distribution_risk",
+    name: "籌碼集中 / 鬆動 / 出貨風險判斷",
+    progress: 85,
+    status: "first_version",
+    required_apis: ["GET /big-holder-trend/latest", "GET /radar/top"],
+  },
+  {
+    key: "v19_acceptance_log",
+    name: "V1.9 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v19:check", "npm run v19:test"],
+  },
+];
+
+const V19_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "big_holder_trend_signals 已建立",
+      "big_holder_trend_summaries 已建立",
+      "npm run big-holder:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "大戶持股模型",
+    items: [
+      "npm run big-holder:generate 可依 major_holder_stats 產生 Big Holder Trend Score",
+      "可計算 4 週 / 8 週 400 張以上大戶比例變化",
+      "可計算 4 週 / 8 週 1000 張以上大戶比例變化",
+      "可計算 4 週 / 8 週散戶人數變化",
+      "可判斷籌碼集中、籌碼鬆動與出貨風險",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "首頁顯示 V1.9 大戶持股趨勢摘要",
+      "GET /radar/top 新增 big_holder_trend_score / big_holder_status / large_holder_ratio_4w_change / small_holder_count_4w_change",
+      "股票卡片顯示大戶趨勢分數、4週大戶變化、8週大戶變化、散戶變化與集中狀態",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v19:check",
+      "npm run v19:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV19Progress() {
+  if (V19_MODULES.length === 0) return 0;
+  const total = V19_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V19_MODULES.length);
 }
 
 const V13_MODULES = [
@@ -2476,6 +2564,144 @@ async function buildV18MainForcePayload(tradeDate = null, market = null, limit =
     summary,
     top_signals: topRows,
     advice: getV18MainForceAdvice(summary),
+  });
+}
+
+
+
+async function getLatestBigHolderTrendDate() {
+  if (!(await checkTableExists("big_holder_trend_signals"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM big_holder_trend_signals`,
+    [],
+    [],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getBigHolderTrendSummary(tradeDate = null, market = "全部") {
+  if (!(await checkTableExists("big_holder_trend_summaries"))) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0, accumulating_count: 0, loosen_count: 0 };
+  }
+
+  const targetDate = tradeDate || await getLatestBigHolderTrendDate();
+  if (!targetDate) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0, accumulating_count: 0, loosen_count: 0 };
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      DATE_FORMAT(source_data_date, '%Y-%m-%d') AS source_data_date,
+      market_type,
+      total_count,
+      strong_count,
+      watch_count,
+      early_count,
+      risk_count,
+      accumulating_count,
+      loosen_count,
+      avg_big_holder_trend_score,
+      top_big_holder_trend_score,
+      top_stock_code,
+      top_stock_name,
+      DATE_FORMAT(generated_at, '%Y-%m-%d %H:%i:%s') AS generated_at
+    FROM big_holder_trend_summaries
+    WHERE trade_date = ?
+      AND market_type = ?
+    LIMIT 1
+    `,
+    [targetDate, market || "全部"],
+    [],
+  );
+
+  return rows?.[0] || { trade_date: targetDate, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0, risk_count: 0, accumulating_count: 0, loosen_count: 0 };
+}
+
+async function getBigHolderTrendTopRows({ tradeDate = null, market = null, limit = 10 } = {}) {
+  if (!(await checkTableExists("big_holder_trend_signals"))) return [];
+
+  const targetDate = tradeDate || await getLatestBigHolderTrendDate();
+  if (!targetDate) return [];
+
+  const params = [targetDate];
+  let marketCondition = "";
+  if (market) {
+    marketCondition = "AND market_type = ?";
+    params.push(market);
+  }
+  params.push(limit);
+
+  return await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      DATE_FORMAT(source_data_date, '%Y-%m-%d') AS source_data_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      big_holder_trend_score,
+      big_holder_level,
+      big_holder_status,
+      concentration_trend,
+      concentration_signal,
+      large_holder_ratio,
+      large_holder_ratio_4w_change,
+      large_holder_ratio_8w_change,
+      thousand_lot_ratio,
+      thousand_lot_ratio_4w_change,
+      thousand_lot_ratio_8w_change,
+      large_holder_count,
+      large_holder_count_4w_change,
+      large_holder_count_8w_change,
+      small_holder_count,
+      small_holder_count_4w_change,
+      small_holder_count_8w_change,
+      retail_pressure,
+      distribution_risk,
+      divergence_signal,
+      close_price,
+      price_change_4w_percent,
+      price_change_8w_percent,
+      chip_score,
+      main_force_score,
+      reason_summary
+    FROM big_holder_trend_signals
+    WHERE trade_date = ?
+      ${marketCondition}
+    ORDER BY big_holder_trend_score DESC, distribution_risk ASC, stock_code ASC
+    LIMIT ?
+    `,
+    params,
+    [],
+  );
+}
+
+function getV19BigHolderTrendAdvice(summary) {
+  const total = Number(summary?.total_count || 0);
+  const strong = Number(summary?.strong_count || 0);
+  const watch = Number(summary?.watch_count || 0);
+  const risk = Number(summary?.risk_count || 0);
+  const accumulating = Number(summary?.accumulating_count || 0);
+  const loosen = Number(summary?.loosen_count || 0);
+  const avg = Number(summary?.avg_big_holder_trend_score || 0);
+  if (!total) return "尚未產生大戶持股趨勢訊號，請先執行 npm run big-holder:generate。";
+  if (risk >= Math.max(10, Math.round(total * 0.08)) || loosen > accumulating) return `大戶趨勢轉弱股偏多，出貨風險 ${risk} 檔、籌碼鬆動 ${loosen} 檔，建議搭配 V1.6 全球風險保守篩選。`;
+  if (strong >= 20 || avg >= 70) return `大戶持股趨勢偏強，強勢 ${strong} 檔、籌碼集中 ${accumulating} 檔，可優先觀察中期籌碼集中股。`;
+  if (strong >= 5 || watch >= 30 || accumulating >= 30) return `大戶持股趨勢正常，強勢 ${strong} 檔、觀察 ${watch} 檔、集中 ${accumulating} 檔，適合搭配 V1.8 主力分數與 V1.7 突破分數。`;
+  return `大戶持股趨勢訊號偏少，強勢 ${strong} 檔，盤面可能偏整理或集保週資料尚未明顯變化。`;
+}
+
+async function buildV19BigHolderTrendPayload(tradeDate = null, market = null, limit = 10) {
+  const summary = await getBigHolderTrendSummary(tradeDate, market || "全部");
+  const topRows = await getBigHolderTrendTopRows({ tradeDate: summary?.trade_date || tradeDate, market, limit });
+
+  return convertBigIntToString({
+    summary,
+    top_signals: topRows,
+    advice: getV19BigHolderTrendAdvice(summary),
   });
 }
 
@@ -5222,6 +5448,189 @@ app.get("/v18/acceptance", (req, res) => {
 });
 
 
+app.get("/big-holder-trend/latest", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const tradeDate = req.query.date || null;
+    const limit = parseLimit(req.query.limit, 10, 50);
+
+    const payload = await buildV19BigHolderTrendPayload(tradeDate, market, limit);
+
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V1.9 大戶持股模型",
+      market: market || "全部",
+      ...payload,
+    });
+  } catch (error) {
+    console.error("查詢大戶持股趨勢摘要失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢大戶持股趨勢摘要失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/big-holder-trend/top", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const tradeDate = req.query.date || null;
+
+    if (!(await checkTableExists("big_holder_trend_signals"))) {
+      return res.status(500).json({
+        success: false,
+        version: API_VERSION,
+        message: "尚未建立 big_holder_trend_signals，請先執行 npm run big-holder:setup。",
+      });
+    }
+
+    const targetDate = tradeDate || await getLatestBigHolderTrendDate();
+    const rows = await getBigHolderTrendTopRows({ tradeDate: targetDate, market, limit });
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: rows.length,
+      data: rows,
+    }));
+  } catch (error) {
+    console.error("查詢大戶持股趨勢排行失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢大戶持股趨勢排行失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/v19/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v19TableStatuses = [];
+
+    for (const tableDefinition of V19_FEATURE_TABLES) {
+      v19TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const missingTables = v19TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getBigHolderTrendSummary();
+    const topRows = await getBigHolderTrendTopRows({ tradeDate: summary?.trade_date || null, limit: 5 });
+    const summaryReady = Number(summary?.total_count || 0) > 0;
+    const topReady = topRows.length > 0;
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.9.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v65" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.9 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.9 大戶持股趨勢資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "big_holder_summary",
+        "大戶持股趨勢摘要",
+        summaryReady ? "pass" : "warn",
+        summaryReady ? "已有大戶持股趨勢摘要。" : "尚未產生大戶持股趨勢訊號，請執行 npm run big-holder:generate。",
+        { summary },
+      ),
+      buildCheck(
+        "big_holder_top",
+        "大戶持股趨勢排行",
+        topReady ? "pass" : "warn",
+        topReady ? `已有 ${topRows.length} 筆大戶持股趨勢排行。` : "大戶持股趨勢排行尚無資料。",
+        { count: topRows.length },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.9 大戶持股模型",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.9 大戶持股模型、資料表、摘要與排行正常。"
+          : overallStatus === "warn"
+            ? "V1.9 程式已就緒，但大戶持股趨勢訊號尚需產生。"
+            : "V1.9 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV19Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v19TableStatuses,
+      big_holder_trend: {
+        summary,
+        top_signals: topRows,
+        advice: getV19BigHolderTrendAdvice(summary),
+      },
+      modules: V19_MODULES,
+      next_actions: [
+        "執行 npm run big-holder:setup 建立 V1.9 資料表。",
+        "執行 npm run big-holder:generate 產生大戶持股趨勢訊號。",
+        "執行 npm run v19:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.9 系統狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.9 大戶持股模型",
+      message: "查詢 V1.9 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v19/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.9 大戶持股模型驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV19Progress(),
+    checklist: V19_FINAL_ACCEPTANCE_ITEMS,
+    modules: V19_MODULES,
+    recommended_commands: [
+      "npm run big-holder:setup",
+      "npm run big-holder:generate",
+      "npm run v19:check",
+      "npm run v19:test -- --api=http://localhost:3000",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v19/status",
+      "/v19/acceptance",
+      "/big-holder-trend/latest",
+      "/big-holder-trend/top",
+      "/radar/top",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+
 app.post("/auth/google", async (req, res) => {
   try {
     const credential = req.body?.credential;
@@ -6851,6 +7260,7 @@ app.get("/radar/top", async (req, res) => {
     const hasGlobalRiskAdjustedScores = await checkTableExists("global_risk_adjusted_scores");
     const hasBreakoutSignals = await checkTableExists("technical_breakout_signals");
     const hasMainForceSignals = await checkTableExists("main_force_signals");
+    const hasBigHolderTrendSignals = await checkTableExists("big_holder_trend_signals");
 
     let targetDate = queryDate;
 
@@ -7015,6 +7425,48 @@ app.get("/radar/top", async (req, res) => {
         NULL AS main_force_reason_summary,
       `;
 
+
+
+    const bigHolderTrendSelect = hasBigHolderTrendSignals
+      ? `
+        bh.big_holder_trend_score,
+        bh.big_holder_level,
+        bh.big_holder_status,
+        bh.concentration_trend,
+        bh.concentration_signal,
+        bh.large_holder_ratio AS bh_large_holder_ratio,
+        bh.large_holder_ratio_4w_change,
+        bh.large_holder_ratio_8w_change,
+        bh.thousand_lot_ratio AS bh_thousand_lot_ratio,
+        bh.thousand_lot_ratio_4w_change,
+        bh.thousand_lot_ratio_8w_change,
+        bh.small_holder_count_4w_change,
+        bh.small_holder_count_8w_change,
+        bh.retail_pressure,
+        bh.distribution_risk AS big_holder_distribution_risk,
+        bh.divergence_signal,
+        bh.reason_summary AS big_holder_reason_summary,
+      `
+      : `
+        NULL AS big_holder_trend_score,
+        NULL AS big_holder_level,
+        NULL AS big_holder_status,
+        NULL AS concentration_trend,
+        NULL AS concentration_signal,
+        NULL AS bh_large_holder_ratio,
+        NULL AS large_holder_ratio_4w_change,
+        NULL AS large_holder_ratio_8w_change,
+        NULL AS bh_thousand_lot_ratio,
+        NULL AS thousand_lot_ratio_4w_change,
+        NULL AS thousand_lot_ratio_8w_change,
+        NULL AS small_holder_count_4w_change,
+        NULL AS small_holder_count_8w_change,
+        NULL AS retail_pressure,
+        NULL AS big_holder_distribution_risk,
+        NULL AS divergence_signal,
+        NULL AS big_holder_reason_summary,
+      `;
+
     const marketRiskAdjustedJoin = hasMarketRiskAdjustedScores
       ? `
       LEFT JOIN market_risk_adjusted_scores a
@@ -7045,17 +7497,13 @@ app.get("/radar/top", async (req, res) => {
       : "";
 
     let marketRiskAdjustedOrder = "c.chip_score DESC, c.stock_code ASC";
-    if (hasMainForceSignals && hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
-      marketRiskAdjustedOrder = "COALESCE(mf.main_force_score, g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, COALESCE(g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, c.stock_code ASC";
-    } else if (hasMainForceSignals) {
-      marketRiskAdjustedOrder = "COALESCE(mf.main_force_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
-    } else if (hasGlobalRiskAdjustedScores && hasMarketRiskAdjustedScores) {
-      marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, a.adjusted_score, c.chip_score) DESC, COALESCE(a.adjusted_score, c.chip_score) DESC, c.stock_code ASC";
-    } else if (hasGlobalRiskAdjustedScores) {
-      marketRiskAdjustedOrder = "COALESCE(g.global_adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
-    } else if (hasMarketRiskAdjustedScores) {
-      marketRiskAdjustedOrder = "COALESCE(a.adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC";
-    }
+    const scoreOrderCandidates = [];
+    if (hasBigHolderTrendSignals) scoreOrderCandidates.push("bh.big_holder_trend_score");
+    if (hasMainForceSignals) scoreOrderCandidates.push("mf.main_force_score");
+    if (hasGlobalRiskAdjustedScores) scoreOrderCandidates.push("g.global_adjusted_score");
+    if (hasMarketRiskAdjustedScores) scoreOrderCandidates.push("a.adjusted_score");
+    scoreOrderCandidates.push("c.chip_score");
+    marketRiskAdjustedOrder = `COALESCE(${scoreOrderCandidates.join(", ")}) DESC, c.chip_score DESC, c.stock_code ASC`;
 
     const rows = await conn.query(
       `
@@ -7070,6 +7518,7 @@ app.get("/radar/top", async (req, res) => {
         ${globalRiskAdjustedSelect}
         ${breakoutSelect}
         ${mainForceSelect}
+        ${bigHolderTrendSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -7092,6 +7541,7 @@ app.get("/radar/top", async (req, res) => {
       ${globalRiskAdjustedJoin}
       ${breakoutJoin}
       ${mainForceJoin}
+      ${bigHolderTrendJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date

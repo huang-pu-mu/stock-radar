@@ -55,7 +55,12 @@
     "main-force:generate": "node scripts/generateMainForceSignals.js",
     "main-force:daily": "npm run main-force:setup && npm run main-force:generate",
     "v18:check": "node scripts/checkV18.js",
-    "v18:test": "node scripts/runV18Acceptance.js"
+    "v18:test": "node scripts/runV18Acceptance.js",
+    "big-holder:setup": "node scripts/setupBigHolderTrendTables.js",
+    "big-holder:generate": "node scripts/generateBigHolderTrendSignals.js",
+    "big-holder:daily": "npm run big-holder:setup && npm run big-holder:generate",
+    "v19:check": "node scripts/checkV19.js",
+    "v19:test": "node scripts/runV19Acceptance.js"
   },
   "keywords": [
     "stock",

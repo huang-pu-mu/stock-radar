@@ -585,6 +585,80 @@ function renderBreakoutPanel() {
 }
 
 
+
+function renderBigHolderTrendPanel() {
+  const payload = state.bigHolderTrendRisk || {};
+  const summary = payload.summary || null;
+  const topSignals = Array.isArray(payload.top_signals) ? payload.top_signals : [];
+  const advice = payload.advice || state.bigHolderTrendRiskError || "尚未讀取大戶持股趨勢資料。";
+
+  if (!summary && !state.bigHolderTrendRiskError) return "";
+
+  const score = pick(summary || {}, ["avg_big_holder_trend_score", "top_big_holder_trend_score"], "-");
+  const tone = getScoreClass(score);
+  const tradeDate = pick(summary || {}, ["trade_date"], "-");
+  const sourceDate = pick(summary || {}, ["source_data_date"], "-");
+  const totalCount = pick(summary || {}, ["total_count"], 0);
+  const strongCount = pick(summary || {}, ["strong_count"], 0);
+  const accumulatingCount = pick(summary || {}, ["accumulating_count"], 0);
+  const loosenCount = pick(summary || {}, ["loosen_count"], 0);
+  const riskCount = pick(summary || {}, ["risk_count"], 0);
+  const topStock = `${pick(summary || {}, ["top_stock_name"], "-")} ${pick(summary || {}, ["top_stock_code"], "")}`.trim();
+  const topPills = topSignals.slice(0, 4).map((item) => {
+    const label = `${pick(item, ["stock_name"], "-")} ${pick(item, ["stock_code"], "")}`.trim();
+    const itemScore = pick(item, ["big_holder_trend_score"], "-");
+    const status = pick(item, ["big_holder_status"], "大戶趨勢觀察");
+    return `<span class="component-pill ${getScoreClass(itemScore)}">${escapeHtml(label)} ${formatNumber(itemScore)}｜${escapeHtml(status)}</span>`;
+  }).join("");
+
+  return `
+    <section class="market-risk-panel big-holder-trend-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V1.9 大戶持股模型</p>
+          <h3>大戶持股趨勢｜${formatNumber(totalCount)} 檔</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">Big Holder</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("強勢大戶", `${formatNumber(strongCount)} 檔`, "score-high")}
+        ${createInfoItem("籌碼集中", `${formatNumber(accumulatingCount)} 檔`, "score-high")}
+        ${createInfoItem("籌碼轉弱", `${formatNumber(loosenCount)} 檔`, loosenCount > 0 ? "score-low" : "score-high")}
+        ${createInfoItem("出貨風險", `${formatNumber(riskCount)} 檔`, riskCount > 0 ? "score-low" : "score-high")}
+        ${createInfoItem("第一名", escapeHtml(topStock))}
+        ${createInfoItem("集保日", formatDate(sourceDate))}
+        ${createInfoItem("分析日", formatDate(tradeDate))}
+      </div>
+      ${topPills ? `<div class="global-component-strip">${topPills}</div>` : ""}
+    </section>
+  `;
+}
+
+async function loadBigHolderTrendForRadar() {
+  if (state.page !== "radar") {
+    state.bigHolderTrendRisk = null;
+    state.bigHolderTrendRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/big-holder-trend/latest", { method: "GET", raw: true });
+    state.bigHolderTrendRisk = result;
+    state.bigHolderTrendRiskError = "";
+  } catch (error) {
+    state.bigHolderTrendRisk = null;
+    state.bigHolderTrendRiskError = error.message || "大戶持股趨勢資料讀取失敗。";
+  }
+}
+
+async function loadV19StatusForAcceptance() {
+  return fetchJson("/v19/status", { method: "GET", raw: true });
+}
+
 function renderMainForcePanel() {
   const payload = state.mainForceRisk || {};
   const summary = payload.summary || null;
@@ -2697,7 +2771,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -5427,8 +5501,25 @@ function renderStockCard(row, index) {
   const mainForceCostGap = pick(row, ["cost_gap_percent"], "-");
   const mainForceDistributionRisk = pick(row, ["main_force_distribution_risk", "distribution_risk"], "-");
   const hasMainForceScore = mainForceScore !== "" && mainForceScore !== null && mainForceScore !== undefined;
+  const bigHolderTrendScore = pick(row, ["big_holder_trend_score"], "");
+  const bigHolderStatus = pick(row, ["big_holder_status"], "");
+  const bigHolderLarge4w = pick(row, ["large_holder_ratio_4w_change"], "-");
+  const bigHolderLarge8w = pick(row, ["large_holder_ratio_8w_change"], "-");
+  const bigHolderSmall4w = pick(row, ["small_holder_count_4w_change"], "-");
+  const bigHolderSignal = pick(row, ["concentration_signal"], "-");
+  const bigHolderDistributionRisk = pick(row, ["big_holder_distribution_risk"], "-");
+  const hasBigHolderTrendScore = bigHolderTrendScore !== "" && bigHolderTrendScore !== null && bigHolderTrendScore !== undefined;
 
   const radarItems = [
+    ...(hasBigHolderTrendScore ? [
+      createInfoItem("大戶趨勢", formatNumber(bigHolderTrendScore), getScoreClass(bigHolderTrendScore)),
+      createInfoItem("大戶狀態", escapeHtml(bigHolderStatus || "大戶趨勢觀察")),
+      createInfoItem("4週大戶", formatPercent(bigHolderLarge4w), getChangeClass(bigHolderLarge4w)),
+      createInfoItem("8週大戶", formatPercent(bigHolderLarge8w), getChangeClass(bigHolderLarge8w)),
+      createInfoItem("散戶變化", formatNumber(bigHolderSmall4w), getChangeClass(Number(bigHolderSmall4w || 0) * -1)),
+      createInfoItem("集中狀態", escapeHtml(bigHolderSignal)),
+      createInfoItem("出貨風險", escapeHtml(bigHolderDistributionRisk)),
+    ] : []),
     ...(hasMainForceScore ? [
       createInfoItem("主力分數", formatNumber(mainForceScore), getScoreClass(mainForceScore)),
       createInfoItem("主力狀態", escapeHtml(mainForceStatus || "主力觀察")),
@@ -8026,6 +8117,7 @@ async function loadList() {
     await loadGlobalRiskForRadar();
     await loadBreakoutForRadar();
     await loadMainForceForRadar();
+    await loadBigHolderTrendForRadar();
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -8054,7 +8146,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([

@@ -1,0 +1,123 @@
+====================================
+Stock Radar V1.9 自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v19-acceptance-20260625-203048.log
+開始時間：2026/6/25 20:30:48
+API：http://localhost:3000
+DB流程：執行 setup / generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V1.9 大戶持股趨勢資料表
+指令：npm run big-holder:setup
+
+> stock-radar-api@1.0.0 big-holder:setup
+> node scripts/setupBigHolderTrendTables.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+====================================
+Stock Radar V1.9 大戶持股趨勢資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v19-big-holder-trend.sql
+建立 / 確認完成：
+- big_holder_trend_signals
+- big_holder_trend_summaries
+結果：PASS
+完成：建立 V1.9 大戶持股趨勢資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生大戶持股趨勢訊號
+指令：npm run big-holder:generate
+
+> stock-radar-api@1.0.0 big-holder:generate
+> node scripts/generateBigHolderTrendSignals.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+====================================
+Stock Radar V1.9 大戶持股趨勢訊號產生
+====================================
+分析日期：2026-06-25
+集保資料日期：2026-06-18
+更新個股數：1994
+略過個股數：0
+大戶趨勢分數區間：30 ～ 59
+平均大戶趨勢分數：40.97
+等級統計：STRONG 0｜WATCH 0｜EARLY 12｜RISK 0
+籌碼集中：0｜轉弱：0
+結果：PASS
+完成：產生大戶持股趨勢訊號，耗時 0分20秒
+--------------------------------------------------
+開始：V1.9 靜態 / API 驗收
+指令：npm run v19:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v19:check
+> node scripts/checkV19.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V1.9 靜態 / API 驗收檢查
+====================================
+✅ [版本] API 版本為 V1.9.0 - stock-radar-api-v1.9.0
+✅ [版本] API 預期 PWA 版本為 v65 - stock-radar-pwa-v65
+✅ [版本] service-worker 快取版本為 v65 - stock-radar-pwa-v65
+✅ [npm 指令] big-holder:setup - node scripts/setupBigHolderTrendTables.js
+✅ [npm 指令] big-holder:generate - node scripts/generateBigHolderTrendSignals.js
+✅ [npm 指令] big-holder:daily - npm run big-holder:setup && npm run big-holder:generate
+✅ [npm 指令] v19:check - node scripts/checkV19.js
+✅ [npm 指令] v19:test - node scripts/runV19Acceptance.js
+✅ [npm 指令] main-force:daily - npm run main-force:setup && npm run main-force:generate
+✅ [npm 指令] breakout:daily - npm run breakout:setup && npm run breakout:generate
+✅ [npm 指令] global-risk:daily - npm run global-risk:import && npm run global-risk:score
+✅ [npm 指令] market-risk:daily - npm run market-risk:import && npm run market-risk:score
+✅ [npm 指令] official:daily - npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+✅ [npm 指令] alerts:generate - node scripts/generateWatchlistAlerts.js
+✅ [npm 指令] strategy-backtests:generate - node scripts/generateStrategyBacktests.js
+✅ [必要檔案] stock-radar-api/sql/v19-big-holder-trend.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupBigHolderTrendTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateBigHolderTrendSignals.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV19.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV19Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] big_holder_trend_signals 資料表 - v19-big-holder-trend.sql
+✅ [SQL] big_holder_trend_summaries 資料表 - v19-big-holder-trend.sql
+✅ [SQL] Big Holder Trend Score 欄位 - big_holder_trend_score
+✅ [SQL] 4週 / 8週變化欄位 - large_holder_ratio_4w_change / large_holder_ratio_8w_change
+✅ [SQL] 散戶變化欄位 - small_holder_count_4w_change / small_holder_count_8w_change
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v19/status - server.js 靜態檢查
+✅ [API 路由] GET /v19/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /big-holder-trend/latest - server.js 靜態檢查
+✅ [API 路由] GET /big-holder-trend/top - server.js 靜態檢查
+✅ [API 路由] GET /radar/top - server.js 靜態檢查
+✅ [前端] 大戶持股趨勢卡 - renderBigHolderTrendPanel
+✅ [前端] 首頁讀取 /big-holder-trend/latest - /big-holder-trend/latest
+✅ [前端] 股票卡顯示大戶趨勢分數 - 大戶趨勢
+✅ [前端] 股票卡顯示4週大戶變化 - 4週大戶
+✅ [前端] V1.9 狀態檢查 - /v19/status
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v19/status - HTTP 200
+✅ [API 動態] /v19/acceptance - HTTP 200
+✅ [API 動態] /big-holder-trend/latest - HTTP 200
+✅ [API 動態] /big-holder-trend/top - HTTP 200
+------------------------------------
+PASS：45
+WARN：0
+FAIL：0
+結果：PASS
+完成：V1.9 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 20:31:09
+總耗時：0分21秒
+結果：PASS
