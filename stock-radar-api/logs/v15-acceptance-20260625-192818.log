@@ -1,0 +1,133 @@
+====================================
+Stock Radar V1.5 自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v15-acceptance-20260625-192818.log
+開始時間：2026/6/25 19:28:18
+API：http://localhost:3000
+DB流程：執行 setup / import / score
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V1.5 市場風險資料表
+指令：npm run market-risk:setup
+
+> stock-radar-api@1.0.0 market-risk:setup
+> node scripts/setupMarketRiskTables.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+====================================
+Stock Radar V1.5 市場風險資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v15-market-risk.sql
+建立 / 確認完成：
+- market_risk_adjusted_scores
+- market_risk_snapshots
+結果：PASS
+完成：建立 V1.5 市場風險資料表，耗時 0分1秒
+--------------------------------------------------
+開始：匯入 TAIFEX 台指期市場風險
+指令：npm run market-risk:import
+
+> stock-radar-api@1.0.0 market-risk:import
+> node scripts/importTaifexDailyMarket.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+====================================
+Stock Radar V1.5 台指期市場風險匯入
+====================================
+來源：https://openapi.taifex.com.tw/v1/DailyMarket
+商品：TX, TXF, MTX
+V1.5 台指期市場風險匯入失敗： Unexpected token '<', "<!-- HTML "... is not valid JSON
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94
+警告：匯入 TAIFEX 台指期市場風險 失敗，exit code: 3221226505，耗時 0分1秒
+--------------------------------------------------
+開始：產生夜盤修正分數
+指令：npm run market-risk:score
+
+> stock-radar-api@1.0.0 market-risk:score
+> node scripts/generateMarketRiskScores.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+====================================
+Stock Radar V1.5 夜盤修正分數產生
+====================================
+分析日期：2026-06-25
+市場風險：70｜正常｜RANGE
+訊號：尚未取得夜盤資料
+------------------------------------
+更新個股數：1954
+修正分數區間：-5 ～ 0
+結果：PASS
+完成：產生夜盤修正分數，耗時 0分16秒
+--------------------------------------------------
+開始：V1.5 靜態驗收
+指令：npm run v15:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v15:check
+> node scripts/checkV15.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V1.5 靜態 / API 驗收檢查
+====================================
+✅ [版本] API 版本為 V1.5.0 - stock-radar-api-v1.5.0
+✅ [版本] API 預期 PWA 版本為 v61 - stock-radar-pwa-v61
+✅ [版本] service-worker 快取版本為 v61 - stock-radar-pwa-v61
+✅ [npm 指令] market-risk:setup - node scripts/setupMarketRiskTables.js
+✅ [npm 指令] market-risk:import - node scripts/importTaifexDailyMarket.js
+✅ [npm 指令] market-risk:score - node scripts/generateMarketRiskScores.js
+✅ [npm 指令] market-risk:daily - npm run market-risk:import && npm run market-risk:score
+✅ [npm 指令] v15:check - node scripts/checkV15.js
+✅ [npm 指令] v15:test - node scripts/runV15Acceptance.js
+✅ [npm 指令] official:daily - npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+✅ [npm 指令] alerts:generate - node scripts/generateWatchlistAlerts.js
+✅ [npm 指令] strategy-backtests:generate - node scripts/generateStrategyBacktests.js
+✅ [必要檔案] stock-radar-api/sql/v15-market-risk.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupMarketRiskTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/importTaifexDailyMarket.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateMarketRiskScores.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV15.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV15Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] market_risk_snapshots 資料表 - v15-market-risk.sql
+✅ [SQL] market_risk_adjusted_scores 資料表 - v15-market-risk.sql
+✅ [SQL] Market Risk Score 欄位 - market_risk_score
+✅ [SQL] 夜盤修正分數欄位 - adjusted_score / night_adjustment
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v15/status - server.js 靜態檢查
+✅ [API 路由] GET /v15/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /market-risk/latest - server.js 靜態檢查
+✅ [API 路由] GET /market-risk/top - server.js 靜態檢查
+✅ [API 路由] GET /radar/top - server.js 靜態檢查
+✅ [前端] 市場風險狀態卡 - renderMarketRiskPanel
+✅ [前端] 首頁讀取 /market-risk/latest - /market-risk/latest
+✅ [前端] 夜盤修正分數顯示 - 夜盤修正
+✅ [前端] V1.5 狀態檢查 - /v15/status
+⚠️ [API 動態] /health - fetch failed
+⚠️ [API 動態] /v15/status - fetch failed
+⚠️ [API 動態] /v15/acceptance - fetch failed
+⚠️ [API 動態] /market-risk/latest - fetch failed
+⚠️ [API 動態] /market-risk/top - fetch failed
+------------------------------------
+PASS：36
+WARN：5
+FAIL：0
+結果：WARN
+完成：V1.5 靜態驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 19:28:36
+總耗時：0分19秒
+警告：1 項
+1. 匯入 TAIFEX 台指期市場風險 失敗，exit code: 3221226505，耗時 0分1秒
+結果：WARN，可先貼 log 檢查

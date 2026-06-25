@@ -100,6 +100,8 @@ const state = {
   market: "",
   limit: 20,
   latestRows: [],
+  marketRisk: null,
+  marketRiskError: "",
   lastSearchCode: "",
   lastSearchData: null,
   authToken: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "",
@@ -420,6 +422,83 @@ function updateListOverview(rows = [], options = {}) {
     badge: options.badge || (state.market || "全部"),
     countText: `${formatNumber(count)} ${countUnit}`,
   });
+}
+
+
+function getMarketRiskTone(score) {
+  const numberValue = toNumber(score);
+  if (numberValue === null) return "score-mid";
+  if (numberValue >= 80) return "score-high";
+  if (numberValue >= 60) return "score-mid";
+  if (numberValue >= 40) return "score-low";
+  return "score-low";
+}
+
+function renderMarketRiskPanel() {
+  const payload = state.marketRisk || {};
+  const snapshot = payload.snapshot || null;
+  const summary = payload.adjusted_summary || {};
+  const advice = payload.advice || state.marketRiskError || "尚未讀取市場風險資料。";
+
+  if (!snapshot && !state.marketRiskError) return "";
+
+  const score = pick(snapshot || {}, ["market_risk_score"], "-");
+  const tone = getMarketRiskTone(score);
+  const mode = pick(snapshot || {}, ["market_mode"], "RANGE");
+  const level = pick(snapshot || {}, ["market_risk_level"], "尚未取得");
+  const signal = pick(snapshot || {}, ["night_signal"], state.marketRiskError ? "讀取失敗" : "尚未取得");
+  const changePercent = pick(snapshot || {}, ["change_percent"], "-");
+  const changePoint = pick(snapshot || {}, ["change_point"], "-");
+  const lastPrice = pick(snapshot || {}, ["last_price"], "-");
+  const volume = pick(snapshot || {}, ["after_hours_volume", "total_volume"], "-");
+  const tradeDate = pick(snapshot || {}, ["trade_date"], pick(summary, ["trade_date"], "-"));
+
+  return `
+    <section class="market-risk-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V1.5 市場風險引擎</p>
+          <h3>市場模式：${escapeHtml(mode)}｜${escapeHtml(level)}</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">Market Risk</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("台指期訊號", escapeHtml(signal), tone)}
+        ${createInfoItem("夜盤漲跌幅", formatPercent(changePercent), getChangeClass(changePercent))}
+        ${createInfoItem("夜盤漲跌點", formatPrice(changePoint), getChangeClass(changePoint))}
+        ${createInfoItem("最後成交", formatPrice(lastPrice))}
+        ${createInfoItem("夜盤 / 合計量", formatNumber(volume))}
+        ${createInfoItem("修正筆數", `${formatNumber(pick(summary, ["count"], 0))} 檔`)}
+        ${createInfoItem("平均修正", formatNumber(pick(summary, ["avg_night_adjustment"], "-")), getChangeClass(pick(summary, ["avg_night_adjustment"], 0)))}
+        ${createInfoItem("資料日", formatDate(tradeDate))}
+      </div>
+    </section>
+  `;
+}
+
+async function loadV15StatusForAcceptance() {
+  return fetchJson("/v15/status", { method: "GET", raw: true });
+}
+
+async function loadMarketRiskForRadar() {
+  if (state.page !== "radar") {
+    state.marketRisk = null;
+    state.marketRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/market-risk/latest", { method: "GET", raw: true });
+    state.marketRisk = result;
+    state.marketRiskError = "";
+  } catch (error) {
+    state.marketRisk = null;
+    state.marketRiskError = error.message || "市場風險資料讀取失敗。";
+  }
 }
 
 const DEFAULT_STRATEGY_OPTIONS = [
@@ -2402,7 +2481,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+    stockList.innerHTML = `${state.page === "radar" ? renderMarketRiskPanel() : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -5099,15 +5178,27 @@ function renderStockCard(row, index) {
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
-  const score = pick(row, ["total_score", "chip_score", "score"], "-");
+  const closeScore = pick(row, ["close_score", "chip_score", "total_score", "score"], "-");
+  const adjustedScore = pick(row, ["market_adjusted_score", "night_adjusted_score"], "");
+  const hasAdjustedScore = adjustedScore !== "" && adjustedScore !== null && adjustedScore !== undefined;
+  const score = hasAdjustedScore ? adjustedScore : closeScore;
   const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
-  const scoreText = getScoreText(score);
+  const scoreText = hasAdjustedScore ? "夜盤修正後" : getScoreText(score);
+  const marketRiskScore = pick(row, ["market_risk_score"], "-");
+  const nightAdjustment = pick(row, ["night_adjustment"], "-");
+  const marketMode = pick(row, ["market_mode"], "-");
 
   const radarItems = [
+    ...(hasAdjustedScore ? [
+      createInfoItem("收盤分數", formatNumber(closeScore), getScoreClass(closeScore)),
+      createInfoItem("夜盤修正", formatNumber(nightAdjustment), getChangeClass(nightAdjustment)),
+      createInfoItem("Market Risk", formatNumber(marketRiskScore), getMarketRiskTone(marketRiskScore)),
+      createInfoItem("市場模式", escapeHtml(marketMode)),
+    ] : []),
     createStatusItem("外資", pick(row, ["foreign_status", "foreign_investor_status"])),
     createStatusItem("投信", pick(row, ["investment_trust_status", "trust_status"])),
     createStatusItem("成交量", pick(row, ["volume_status"])),
@@ -5138,7 +5229,7 @@ function renderStockCard(row, index) {
         </div>
         <div class="score-box ${scoreClass}">
           <span class="score-value">${formatNumber(score)}</span>
-          <span class="score-label">籌碼分數</span>
+          <span class="score-label">${hasAdjustedScore ? "夜盤修正" : "籌碼分數"}</span>
         </div>
       </div>
 
@@ -7675,6 +7766,7 @@ async function loadList() {
 
   try {
     const rows = await fetchJson(buildListPath());
+    await loadMarketRiskForRadar();
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -7703,7 +7795,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = state.latestRows.map(renderStockCard).join("");
+    stockList.innerHTML = `${state.page === "radar" ? renderMarketRiskPanel() : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([

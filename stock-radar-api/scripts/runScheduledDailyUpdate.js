@@ -103,6 +103,11 @@ async function main() {
       command: 'npm',
       args: ['run', 'official:daily'],
     },
+    {
+      title: 'V1.5 市場風險引擎 npm run market-risk:daily',
+      command: 'npm',
+      args: ['run', 'market-risk:daily'],
+    },
   ];
 
   const failures = [];

@@ -22,7 +22,24 @@
     "v13:check": "node scripts/checkV13.js",
     "v14:check": "node scripts/checkV13.js",
     "strategy-params:setup": "node scripts/setupStrategyParameterPresets.js",
-    "notifications:setup": "node scripts/setupNotificationChannels.js"
+    "notifications:setup": "node scripts/setupNotificationChannels.js",
+    "official:setup": "node scripts/setupOfficialTables.js",
+    "official:market": "node scripts/importMarketDailySummaries.js",
+    "official:revenue": "node scripts/importMonthlyRevenues.js",
+    "official:eps": "node scripts/importQuarterlyEps.js",
+    "official:events": "node scripts/importStockCalendarEvents.js",
+    "official:etf": "node scripts/syncEtfProfilesFromStocks.js",
+    "official:institutional-amounts": "node scripts/importInstitutionalAmountSummaries.js",
+    "official:market:history": "node scripts/backfillMarketDailySummaries.js",
+    "official:institutional-amounts:history": "node scripts/backfillInstitutionalAmountSummaries.js",
+    "official:microstructure:setup": "node scripts/setupMicrostructureTables.js",
+    "official:daily": "npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts",
+    "market-risk:setup": "node scripts/setupMarketRiskTables.js",
+    "market-risk:import": "node scripts/importTaifexDailyMarket.js",
+    "market-risk:score": "node scripts/generateMarketRiskScores.js",
+    "market-risk:daily": "npm run market-risk:import && npm run market-risk:score",
+    "v15:check": "node scripts/checkV15.js",
+    "v15:test": "node scripts/runV15Acceptance.js"
   },
   "keywords": [
     "stock",
@@ -37,8 +54,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "mariadb": "^3.4.5",
-    "google-auth-library": "^10.5.0"
+    "google-auth-library": "^10.9.0",
+    "mariadb": "^3.4.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

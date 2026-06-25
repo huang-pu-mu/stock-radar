@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.4.8.6";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v60";
+const API_VERSION = "stock-radar-api-v1.5.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v61";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1414,6 +1414,93 @@ const V14_FINAL_ACCEPTANCE_ITEMS = [
     ],
   },
 ];
+
+
+const V15_FEATURE_TABLES = [
+  { name: "market_risk_snapshots", label: "V1.5 市場風險快照", date_column: "snapshot_time" },
+  { name: "market_risk_adjusted_scores", label: "V1.5 夜盤修正分數", date_column: "trade_date" },
+];
+
+const V15_MODULES = [
+  {
+    key: "market_risk_tables",
+    name: "市場風險資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["market_risk_snapshots", "market_risk_adjusted_scores"],
+  },
+  {
+    key: "taifex_night_session_import",
+    name: "台指期夜盤資料匯入",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run market-risk:import"],
+  },
+  {
+    key: "market_risk_score",
+    name: "Market Risk Score",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run market-risk:score", "GET /market-risk/latest"],
+  },
+  {
+    key: "adjusted_daily_star_score",
+    name: "每日之星夜盤修正分數",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["GET /radar/top", "GET /market-risk/top"],
+  },
+  {
+    key: "v15_acceptance_log",
+    name: "V1.5 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v15:check", "npm run v15:test"],
+  },
+];
+
+const V15_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "market_risk_snapshots 已建立",
+      "market_risk_adjusted_scores 已建立",
+      "npm run market-risk:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "市場風險引擎",
+    items: [
+      "npm run market-risk:import 可匯入 TAIFEX DailyMarket 台指期資料",
+      "npm run market-risk:score 可依 Market Risk Score 產生夜盤修正分數",
+      "GET /market-risk/latest 可回傳市場模式 BULL / RANGE / BEAR",
+      "GET /market-risk/top 可回傳收盤分數與夜盤修正分數",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "GET /radar/top 保留原 chip_score，並新增 close_score / market_adjusted_score / market_risk_score",
+      "首頁顯示今日市場模式、台指期夜盤、Market Risk Score 與隔日風險提醒",
+      "股票卡片顯示收盤分數與夜盤修正分數",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v15:check",
+      "npm run v15:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV15Progress() {
+  if (V15_MODULES.length === 0) return 0;
+  const total = V15_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V15_MODULES.length);
+}
 
 const V13_MODULES = [
   {
@@ -1611,6 +1698,123 @@ async function getLatestColumnValue(tableName, columnName) {
   );
 
   return rows?.[0]?.latest_value || null;
+}
+
+
+async function getLatestMarketRiskSnapshot(tradeDate = null) {
+  if (!(await checkTableExists("market_risk_snapshots"))) return null;
+
+  const params = [];
+  let dateCondition = "";
+
+  if (tradeDate) {
+    dateCondition = "WHERE trade_date = ?";
+    params.push(tradeDate);
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      DATE_FORMAT(snapshot_time, '%Y-%m-%d %H:%i:%s') AS snapshot_time,
+      product_code,
+      product_name,
+      contract_month,
+      session_type,
+      open_price,
+      high_price,
+      low_price,
+      last_price,
+      change_point,
+      change_percent,
+      total_volume,
+      regular_volume,
+      after_hours_volume,
+      reference_index_point,
+      market_risk_score,
+      market_risk_level,
+      market_mode,
+      night_signal,
+      risk_summary,
+      source,
+      source_url,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM market_risk_snapshots
+    ${dateCondition}
+    ORDER BY
+      trade_date DESC,
+      CASE session_type WHEN 'after_hours' THEN 1 WHEN 'regular' THEN 2 ELSE 3 END,
+      snapshot_time DESC,
+      total_volume DESC,
+      id DESC
+    LIMIT 1
+    `,
+    params,
+    [],
+  );
+
+  return rows?.[0] || null;
+}
+
+async function getLatestMarketRiskAdjustedDate() {
+  if (!(await checkTableExists("market_risk_adjusted_scores"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM market_risk_adjusted_scores`,
+    [],
+    [{ latest_date: null }],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getMarketRiskAdjustedSummary(tradeDate = null) {
+  if (!(await checkTableExists("market_risk_adjusted_scores"))) {
+    return { trade_date: tradeDate || null, count: 0, avg_adjusted_score: null, avg_night_adjustment: null, max_adjusted_score: null, min_adjusted_score: null };
+  }
+
+  const targetDate = tradeDate || await getLatestMarketRiskAdjustedDate();
+  if (!targetDate) {
+    return { trade_date: null, count: 0, avg_adjusted_score: null, avg_night_adjustment: null, max_adjusted_score: null, min_adjusted_score: null };
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      COUNT(*) AS count,
+      ROUND(AVG(adjusted_score), 2) AS avg_adjusted_score,
+      ROUND(AVG(night_adjustment), 2) AS avg_night_adjustment,
+      MAX(adjusted_score) AS max_adjusted_score,
+      MIN(adjusted_score) AS min_adjusted_score
+    FROM market_risk_adjusted_scores
+    WHERE trade_date = ?
+    GROUP BY trade_date
+    `,
+    [targetDate],
+    [],
+  );
+
+  return rows?.[0] || { trade_date: targetDate, count: 0, avg_adjusted_score: null, avg_night_adjustment: null, max_adjusted_score: null, min_adjusted_score: null };
+}
+
+function getV15RiskAdvice(snapshot) {
+  if (!snapshot) return "尚未取得市場風險快照，請先執行 npm run market-risk:import。";
+  const score = Number(snapshot.market_risk_score || 70);
+  if (score >= 80) return "市場風險偏低，強勢股可正常觀察，但仍需搭配個股條件。";
+  if (score >= 60) return "市場中性偏穩，每日之星可正常觀察，避免追過熱標的。";
+  if (score >= 40) return "市場轉弱，推薦股已降權，隔日應偏保守觀察。";
+  return "市場高風險，隔日開低風險偏高，每日之星需要大幅保守。";
+}
+
+async function buildV15MarketRiskPayload(tradeDate = null) {
+  const snapshot = await getLatestMarketRiskSnapshot(tradeDate);
+  const adjustedSummary = await getMarketRiskAdjustedSummary(snapshot?.trade_date || tradeDate || null);
+
+  return convertBigIntToString({
+    snapshot,
+    adjusted_summary: adjustedSummary,
+    advice: getV15RiskAdvice(snapshot),
+  });
 }
 
 async function getV13TableStatus(tableDefinition) {
@@ -3263,8 +3467,8 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v1.4.8.6" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" ? "pass" : "fail",
-        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        (API_VERSION === "stock-radar-api-v1.4.8.6" || API_VERSION === "stock-radar-api-v1.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v61") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V1.5 會相容保留 V1.4 功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
       buildCheck(
@@ -3424,6 +3628,280 @@ app.get("/v14/acceptance", (req, res) => {
       "/strategy-backtests/stock-history",
       "/strategy-daily-report",
       "/notification/channels",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+
+app.get("/market-risk/latest", async (req, res) => {
+  try {
+    const tradeDate = req.query.date || null;
+
+    if (tradeDate && !isValidDateText(tradeDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    const payload = await buildV15MarketRiskPayload(tradeDate);
+
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V1.5 市場風險引擎",
+      ...payload,
+      checked_at: nowTaipeiText(),
+    });
+  } catch (error) {
+    console.error("查詢市場風險快照失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢市場風險快照失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/market-risk/top", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const market = parseMarket(req.query.market);
+    const queryDate = req.query.date || null;
+
+    if (queryDate && !isValidDateText(queryDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "date 格式錯誤，請使用 YYYY-MM-DD",
+      });
+    }
+
+    if (!(await checkTableExists("market_risk_adjusted_scores"))) {
+      return res.json({
+        success: true,
+        version: API_VERSION,
+        trade_date: queryDate || null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+        message: "尚未建立 market_risk_adjusted_scores，請先執行 npm run market-risk:setup。",
+      });
+    }
+
+    const targetDate = queryDate || await getLatestMarketRiskAdjustedDate();
+
+    if (!targetDate) {
+      return res.json({
+        success: true,
+        version: API_VERSION,
+        trade_date: null,
+        market: market || "全部",
+        limit,
+        count: 0,
+        data: [],
+      });
+    }
+
+    const params = [targetDate];
+    let marketCondition = "";
+    if (market) {
+      marketCondition = "AND s.market_type = ?";
+      params.push(market);
+    }
+    params.push(limit);
+
+    const rows = await query(
+      `
+      SELECT
+        DATE_FORMAT(a.trade_date, '%Y-%m-%d') AS trade_date,
+        a.stock_code,
+        s.stock_name,
+        s.market_type,
+        s.industry,
+        a.close_score,
+        a.adjusted_score AS market_adjusted_score,
+        a.adjusted_score AS night_adjusted_score,
+        a.night_adjustment,
+        a.market_risk_score,
+        a.market_risk_level,
+        a.market_mode,
+        a.risk_weight,
+        a.risk_summary,
+        c.chip_score,
+        c.foreign_score,
+        c.investment_trust_score,
+        c.dealer_score,
+        c.big_holder_score,
+        c.volume_score,
+        c.price_score,
+        c.foreign_status,
+        c.investment_trust_status,
+        c.dealer_status,
+        c.big_holder_status,
+        c.volume_status,
+        c.price_position,
+        p.close_price,
+        p.price_change,
+        CAST(p.volume AS CHAR) AS volume
+      FROM market_risk_adjusted_scores a
+      LEFT JOIN stocks s
+        ON a.stock_code = s.stock_code
+      LEFT JOIN chip_scores c
+        ON a.stock_code = c.stock_code
+       AND a.trade_date = c.trade_date
+      LEFT JOIN daily_prices p
+        ON a.stock_code = p.stock_code
+       AND a.trade_date = p.trade_date
+      WHERE a.trade_date = ?
+        ${marketCondition}
+      ORDER BY a.adjusted_score DESC, a.close_score DESC, a.stock_code ASC
+      LIMIT ?
+      `,
+      params,
+    );
+
+    const riskPayload = await buildV15MarketRiskPayload(targetDate);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: rows.length,
+      market_risk: riskPayload,
+      data: rows,
+    }));
+  } catch (error) {
+    console.error("查詢市場風險修正排行失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢市場風險修正排行失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/v15/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v15TableStatuses = [];
+
+    for (const tableDefinition of V15_FEATURE_TABLES) {
+      v15TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const missingTables = v15TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getLatestMarketRiskSnapshot();
+    const adjustedSummary = await getMarketRiskAdjustedSummary(snapshot?.trade_date || null);
+    const snapshotReady = Boolean(snapshot && Number(snapshot.market_risk_score || 0) > 0);
+    const adjustedReady = Number(adjustedSummary?.count || 0) > 0;
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.5.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.5 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.5 市場風險資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "market_risk_snapshot",
+        "市場風險快照",
+        snapshotReady ? "pass" : "warn",
+        snapshotReady ? "已有 Market Risk Score 快照。" : "尚未有市場風險快照，請執行 npm run market-risk:import。",
+        { snapshot },
+      ),
+      buildCheck(
+        "adjusted_scores",
+        "夜盤修正分數",
+        adjustedReady ? "pass" : "warn",
+        adjustedReady ? "已有個股夜盤修正分數。" : "尚未產生夜盤修正分數，請執行 npm run market-risk:score。",
+        { adjusted_summary: adjustedSummary },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.5 市場風險引擎",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.5 市場風險引擎、資料表、快照與夜盤修正分數正常。"
+          : overallStatus === "warn"
+            ? "V1.5 程式已就緒，但市場風險快照或修正分數尚需匯入 / 產生。"
+            : "V1.5 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV15Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v15TableStatuses,
+      market_risk: {
+        snapshot,
+        adjusted_summary: adjustedSummary,
+        advice: getV15RiskAdvice(snapshot),
+      },
+      modules: V15_MODULES,
+      next_actions: [
+        "執行 npm run market-risk:setup 建立 V1.5 資料表。",
+        "執行 npm run market-risk:import 匯入 TAIFEX 台指期資料。",
+        "執行 npm run market-risk:score 產生夜盤修正分數。",
+        "執行 npm run v15:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.5 系統狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.5 市場風險引擎",
+      message: "查詢 V1.5 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v15/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.5 市場風險引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV15Progress(),
+    checklist: V15_FINAL_ACCEPTANCE_ITEMS,
+    modules: V15_MODULES,
+    recommended_commands: [
+      "npm run market-risk:setup",
+      "npm run market-risk:import",
+      "npm run market-risk:score",
+      "npm run v15:check",
+      "npm run v15:test -- --api=http://localhost:3000",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v15/status",
+      "/v15/acceptance",
+      "/market-risk/latest",
+      "/market-risk/top",
+      "/radar/top",
     ],
     checked_at: nowTaipeiText(),
   });
@@ -5056,6 +5534,7 @@ app.get("/radar/top", async (req, res) => {
     }
 
     conn = await pool.getConnection();
+    const hasMarketRiskAdjustedScores = await checkTableExists("market_risk_adjusted_scores");
 
     let targetDate = queryDate;
 
@@ -5103,6 +5582,39 @@ app.get("/radar/top", async (req, res) => {
 
     params.push(limit);
 
+    const marketRiskAdjustedSelect = hasMarketRiskAdjustedScores
+      ? `
+        COALESCE(a.close_score, c.chip_score) AS close_score,
+        a.adjusted_score AS market_adjusted_score,
+        a.adjusted_score AS night_adjusted_score,
+        a.night_adjustment,
+        a.market_risk_score,
+        a.market_risk_level,
+        a.market_mode,
+        a.risk_weight,
+        a.risk_summary,
+      `
+      : `
+        c.chip_score AS close_score,
+        NULL AS market_adjusted_score,
+        NULL AS night_adjusted_score,
+        NULL AS night_adjustment,
+        NULL AS market_risk_score,
+        NULL AS market_risk_level,
+        NULL AS market_mode,
+        NULL AS risk_weight,
+        NULL AS risk_summary,
+      `;
+    const marketRiskAdjustedJoin = hasMarketRiskAdjustedScores
+      ? `
+      LEFT JOIN market_risk_adjusted_scores a
+        ON c.stock_code = a.stock_code
+       AND c.trade_date = a.trade_date`
+      : "";
+    const marketRiskAdjustedOrder = hasMarketRiskAdjustedScores
+      ? "COALESCE(a.adjusted_score, c.chip_score) DESC, c.chip_score DESC, c.stock_code ASC"
+      : "c.chip_score DESC, c.stock_code ASC";
+
     const rows = await conn.query(
       `
       SELECT
@@ -5112,6 +5624,7 @@ app.get("/radar/top", async (req, res) => {
         s.market_type,
         s.industry,
         c.chip_score,
+        ${marketRiskAdjustedSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -5130,12 +5643,13 @@ app.get("/radar/top", async (req, res) => {
       FROM chip_scores c
       LEFT JOIN stocks s
         ON c.stock_code = s.stock_code
+      ${marketRiskAdjustedJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date
       WHERE c.trade_date = ?
         ${marketCondition}
-      ORDER BY c.chip_score DESC, c.stock_code ASC
+      ORDER BY ${marketRiskAdjustedOrder}
       LIMIT ?
       `,
       params,

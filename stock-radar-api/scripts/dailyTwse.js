@@ -82,6 +82,15 @@ async function main() {
     }
 
     console.log("");
+    console.log("步驟 7：匯入台指期市場風險並產生夜盤修正分數");
+    try {
+      await runCommand(["scripts/importTaifexDailyMarket.js", `--date=${tradeDate}`]);
+      await runCommand(["scripts/generateMarketRiskScores.js", tradeDate]);
+    } catch (error) {
+      console.log("V1.5 市場風險資料處理失敗，先保留原每日資料流程。原因：" + error.message);
+    }
+
+    console.log("");
     console.log("====================================");
     console.log("每日流程完成");
     console.log(`日期：${tradeDate}`);
