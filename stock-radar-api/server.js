@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v2.0.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v70";
+const API_VERSION = "stock-radar-api-v2.1.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v72";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1852,6 +1852,77 @@ function calculateV19Progress() {
   return Math.round(total / V19_MODULES.length);
 }
 
+
+
+const V21_FEATURE_TABLES = [
+  { name: "user_positions", label: "V2.1 使用者持股清單", date_column: "updated_at" },
+  { name: "user_position_snapshots", label: "V2.1 持股風險快照", date_column: "trade_date" },
+  { name: "position_risk_alerts", label: "V2.1 持股風控提醒", date_column: "alert_date" },
+];
+
+const V21_MODULES = [
+  { key: "position_tables", name: "持股與風控資料表", progress: 100, status: "completed", required_tables: ["user_positions", "user_position_snapshots", "position_risk_alerts"] },
+  { key: "position_crud", name: "我的持股 CRUD", progress: 100, status: "completed", required_apis: ["GET /positions", "POST /positions", "PUT /positions/:id", "DELETE /positions/:id"] },
+  { key: "position_pnl", name: "持股損益估算", progress: 95, status: "first_version", required_apis: ["GET /positions/summary", "GET /positions/:id"] },
+  { key: "position_risk_snapshot", name: "持股風險快照", progress: 95, status: "first_version", required_apis: ["npm run position:snapshot", "GET /positions/:id/history"] },
+  { key: "position_ai_advice", name: "AI 持股建議動作", progress: 92, status: "first_version", required_apis: ["GET /positions/:id/risk", "GET /position-risk/latest"] },
+  { key: "position_alerts", name: "持股風控提醒", progress: 92, status: "first_version", required_apis: ["npm run position:alerts", "GET /position-risk/alerts"] },
+  { key: "v21_acceptance_log", name: "V2.1 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v21:check", "npm run v21:test"] },
+];
+
+const V21_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "user_positions 已建立",
+      "user_position_snapshots 已建立",
+      "position_risk_alerts 已建立",
+      "npm run position:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "持股 CRUD",
+    items: [
+      "GET /positions 可依 Google 登入使用者查詢自己的持股",
+      "POST /positions 可新增持股",
+      "PUT /positions/:id 可編輯持股與風控價格",
+      "DELETE /positions/:id 可停用持股",
+    ],
+  },
+  {
+    group: "損益與風控",
+    items: [
+      "GET /positions/summary 可計算總成本、市值與未實現損益",
+      "npm run position:snapshot 可依最新收盤價產生持股快照",
+      "npm run position:alerts 可產生停損、停利、AI 轉弱與市場風險提醒",
+      "GET /position-risk/alerts 可查詢登入使用者的持股風控提醒",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增我的持股 / 持股風控頁",
+      "前端可新增、編輯、停用持股",
+      "前端顯示損益統計、風控提醒與 AI 建議動作",
+      "PWA 快取版本升級至 stock-radar-pwa-v72",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run position:setup",
+      "npm run position:daily",
+      "npm run v21:check",
+      "npm run v21:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV21Progress() {
+  if (V21_MODULES.length === 0) return 0;
+  const total = V21_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V21_MODULES.length);
+}
 
 const V20_FEATURE_TABLES = [
   { name: "ai_selection_signals", label: "V2.0 AI 多因子選股訊號", date_column: "trade_date" },
@@ -5898,8 +5969,8 @@ app.get("/v20/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v2.0.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" ? "pass" : "fail",
-        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        (API_VERSION === "stock-radar-api-v2.0.0" || API_VERSION === "stock-radar-api-v2.0.1" || API_VERSION === "stock-radar-api-v2.1.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v71" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v72") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V2.1 會相容保留 V2.0 AI 多因子功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
       buildCheck(
@@ -5954,6 +6025,688 @@ app.get("/v20/acceptance", (req, res) => {
     checked_at: nowTaipeiText(),
   });
 });
+
+
+function todayTaipeiDateText() {
+  return nowTaipeiText().slice(0, 10);
+}
+
+function parsePositiveNumber(value, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const numberValue = Number(String(value).replaceAll(",", ""));
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function roundNumber(value, digits = 2) {
+  const numberValue = parsePositiveNumber(value, null);
+  if (numberValue === null) return null;
+  const factor = 10 ** digits;
+  return Math.round(numberValue * factor) / factor;
+}
+
+function normalizeNullablePrice(value) {
+  const numberValue = parsePositiveNumber(value, null);
+  if (numberValue === null || numberValue < 0) return null;
+  return roundNumber(numberValue, 2);
+}
+
+function normalizePositionPayload(body = {}, existing = {}) {
+  const stockCode = normalizeStockCodeValue(body.stock_code ?? existing.stock_code);
+  const buyDate = String(body.buy_date ?? existing.buy_date ?? todayTaipeiDateText()).slice(0, 10);
+  const buyPrice = parsePositiveNumber(body.buy_price ?? existing.buy_price, null);
+  const inputShares = parsePositiveNumber(body.shares, null);
+  const inputLots = parsePositiveNumber(body.lots, null);
+  const existingShares = parsePositiveNumber(existing.shares, null);
+  const existingLots = parsePositiveNumber(existing.lots, null);
+  const shares = inputShares !== null
+    ? inputShares
+    : inputLots !== null
+      ? inputLots * 1000
+      : existingShares !== null
+        ? existingShares
+        : existingLots !== null
+          ? existingLots * 1000
+          : null;
+  const lots = inputLots !== null ? inputLots : shares !== null ? shares / 1000 : null;
+  const costAmount = buyPrice !== null && shares !== null ? roundNumber(buyPrice * shares, 2) : null;
+
+  return {
+    stockCode,
+    buyDate,
+    buyPrice: buyPrice === null ? null : roundNumber(buyPrice, 2),
+    shares: shares === null ? null : roundNumber(shares, 2),
+    lots: lots === null ? null : roundNumber(lots, 3),
+    costAmount,
+    stopLossPrice: normalizeNullablePrice(body.stop_loss_price ?? existing.stop_loss_price),
+    takeProfitPrice: normalizeNullablePrice(body.take_profit_price ?? existing.take_profit_price),
+    trailingStopPrice: normalizeNullablePrice(body.trailing_stop_price ?? existing.trailing_stop_price),
+    note: String(body.note ?? existing.note ?? "").trim().slice(0, 500) || null,
+  };
+}
+
+function validatePositionPayload(payload) {
+  if (!payload.stockCode) return "請提供股票代號。";
+  if (!isValidStockCodeValue(payload.stockCode)) return "股票代號格式不正確。";
+  if (!isValidDateText(payload.buyDate)) return "買進日期格式不正確，請使用 YYYY-MM-DD。";
+  if (payload.buyPrice === null || payload.buyPrice <= 0) return "買進價格必須大於 0。";
+  if (payload.shares === null || payload.shares <= 0) return "請提供持股股數或張數，且必須大於 0。";
+  return "";
+}
+
+function analyzePositionRow(row = {}) {
+  const shares = parsePositiveNumber(row.shares, 0) || 0;
+  const buyPrice = parsePositiveNumber(row.buy_price, 0) || 0;
+  const closePrice = parsePositiveNumber(row.close_price, buyPrice) || buyPrice;
+  const costAmount = roundNumber(parsePositiveNumber(row.cost_amount, null) ?? buyPrice * shares, 2) || 0;
+  const marketValue = roundNumber(closePrice * shares, 2) || 0;
+  const unrealizedProfitLoss = roundNumber(marketValue - costAmount, 2) || 0;
+  const unrealizedProfitLossPct = costAmount > 0 ? roundNumber((unrealizedProfitLoss / costAmount) * 100, 4) : 0;
+  const stopLoss = parsePositiveNumber(row.stop_loss_price, null);
+  const takeProfit = parsePositiveNumber(row.take_profit_price, null);
+  const trailingStop = parsePositiveNumber(row.trailing_stop_price, null);
+  const aiScore = parsePositiveNumber(row.ai_strength_score, null);
+  const marketRisk = parsePositiveNumber(row.market_risk_score, null);
+  const globalRisk = parsePositiveNumber(row.global_risk_score, null);
+  const riskLine = trailingStop !== null ? Math.max(stopLoss ?? 0, trailingStop) : stopLoss;
+  const distanceToStopLossPct = stopLoss && closePrice ? roundNumber(((closePrice - stopLoss) / closePrice) * 100, 4) : null;
+  const distanceToTakeProfitPct = takeProfit && closePrice ? roundNumber(((takeProfit - closePrice) / closePrice) * 100, 4) : null;
+  const reasons = [];
+  let positionRiskLevel = String(row.position_risk_level || "").trim() || "LOW";
+  let aiAction = String(row.ai_action || "").trim();
+
+  if (riskLine !== null && closePrice <= riskLine) {
+    positionRiskLevel = "CRITICAL";
+    aiAction = "跌破風控線，建議檢查";
+    reasons.push(`現價 ${closePrice} 已低於風控線 ${riskLine}`);
+  } else if (takeProfit !== null && closePrice >= takeProfit) {
+    positionRiskLevel = "MEDIUM";
+    aiAction = "達停利價，建議分批檢查";
+    reasons.push(`現價 ${closePrice} 已達停利價 ${takeProfit}`);
+  } else if ((marketRisk !== null && marketRisk < 45) || (globalRisk !== null && globalRisk < 45)) {
+    positionRiskLevel = "HIGH";
+    aiAction = "風險升高，建議保守";
+    reasons.push("市場或全球風險分數偏低");
+  } else if (aiScore !== null && aiScore < 60) {
+    positionRiskLevel = "HIGH";
+    aiAction = "分數轉弱，建議減碼";
+    reasons.push(`AI Strength Score ${aiScore} 低於 60`);
+  } else if (aiScore !== null && aiScore >= 80 && unrealizedProfitLossPct >= 0) {
+    positionRiskLevel = "LOW";
+    aiAction = "AI 分數轉強，可續抱";
+    reasons.push(`AI Strength Score ${aiScore} 偏強`);
+  } else if (aiScore !== null && aiScore >= 72 && unrealizedProfitLossPct <= 0) {
+    positionRiskLevel = "MEDIUM";
+    aiAction = "可觀察加碼";
+    reasons.push(`AI Strength Score ${aiScore} 仍在觀察區間`);
+  } else if (unrealizedProfitLossPct <= -8) {
+    positionRiskLevel = "HIGH";
+    aiAction = "虧損擴大，建議檢查";
+    reasons.push(`未實現報酬率 ${unrealizedProfitLossPct}%`);
+  }
+
+  if (!aiAction) aiAction = "可續抱";
+  if (distanceToStopLossPct !== null && distanceToStopLossPct <= 5 && positionRiskLevel === "LOW") {
+    positionRiskLevel = "MEDIUM";
+    reasons.push("距離停損價小於 5%");
+  }
+  if (reasons.length === 0) {
+    reasons.push(`未實現報酬率 ${unrealizedProfitLossPct}%`);
+    if (aiScore !== null) reasons.push(`AI Strength Score ${aiScore}`);
+  }
+
+  return {
+    close_price: roundNumber(closePrice, 2),
+    market_value: marketValue,
+    cost_amount: costAmount,
+    unrealized_profit_loss: unrealizedProfitLoss,
+    unrealized_profit_loss_pct: unrealizedProfitLossPct,
+    distance_to_stop_loss_pct: distanceToStopLossPct,
+    distance_to_take_profit_pct: distanceToTakeProfitPct,
+    position_risk_level: positionRiskLevel,
+    ai_action: aiAction,
+    ai_reason: String(row.ai_reason || "").trim() || reasons.slice(0, 5).join("；"),
+  };
+}
+
+async function getPositionRowsForUser(userId, positionId = null, activeOnly = true) {
+  if (!(await checkTableExists("user_positions"))) return [];
+  const params = [userId];
+  let condition = "WHERE p.user_id = ?";
+  if (activeOnly) condition += " AND p.is_active = 1";
+  if (positionId !== null) {
+    condition += " AND p.id = ?";
+    params.push(positionId);
+  }
+
+  const rows = await query(
+    `
+    SELECT
+      p.id,
+      p.user_id,
+      p.stock_code,
+      COALESCE(p.stock_name, s.stock_name) AS stock_name,
+      COALESCE(p.market_type, s.market_type) AS market_type,
+      COALESCE(s.industry, '') AS industry,
+      DATE_FORMAT(p.buy_date, '%Y-%m-%d') AS buy_date,
+      p.buy_price,
+      p.shares,
+      p.lots,
+      p.cost_amount,
+      p.stop_loss_price,
+      p.take_profit_price,
+      p.trailing_stop_price,
+      p.note,
+      p.is_active,
+      DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(p.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at,
+      DATE_FORMAT(dp.trade_date, '%Y-%m-%d') AS price_trade_date,
+      dp.close_price,
+      dp.price_change,
+      dp.price_change_percent,
+      DATE_FORMAT(ai.trade_date, '%Y-%m-%d') AS ai_trade_date,
+      ai.ai_strength_score,
+      ai.market_risk_score,
+      ai.global_risk_score,
+      ai.breakout_score,
+      ai.main_force_score,
+      ai.big_holder_trend_score,
+      ai.recommend_reason,
+      ai.avoid_reason,
+      DATE_FORMAT(ps.trade_date, '%Y-%m-%d') AS snapshot_trade_date,
+      ps.position_risk_level,
+      ps.ai_action,
+      ps.ai_reason,
+      ps.distance_to_stop_loss_pct,
+      ps.distance_to_take_profit_pct
+    FROM user_positions p
+    LEFT JOIN stocks s ON s.stock_code = p.stock_code
+    LEFT JOIN daily_prices dp
+      ON dp.stock_code = p.stock_code
+     AND dp.trade_date = (SELECT MAX(dp2.trade_date) FROM daily_prices dp2 WHERE dp2.stock_code = p.stock_code)
+    LEFT JOIN ai_selection_signals ai
+      ON ai.stock_code = p.stock_code
+     AND ai.trade_date = (SELECT MAX(ai2.trade_date) FROM ai_selection_signals ai2 WHERE ai2.stock_code = p.stock_code)
+    LEFT JOIN user_position_snapshots ps
+      ON ps.position_id = p.id
+     AND ps.trade_date = (SELECT MAX(ps2.trade_date) FROM user_position_snapshots ps2 WHERE ps2.position_id = p.id)
+    ${condition}
+    ORDER BY p.is_active DESC, p.updated_at DESC, p.id DESC
+    `,
+    params,
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    ...analyzePositionRow(row),
+  }));
+}
+
+function buildPositionSummary(rows = [], alerts = []) {
+  const summary = rows.reduce((acc, row) => {
+    acc.total_positions += 1;
+    acc.total_cost_amount += parsePositiveNumber(row.cost_amount, 0) || 0;
+    acc.total_market_value += parsePositiveNumber(row.market_value, 0) || 0;
+    acc.total_unrealized_profit_loss += parsePositiveNumber(row.unrealized_profit_loss, 0) || 0;
+    const risk = String(row.position_risk_level || "").toUpperCase();
+    if (risk === "CRITICAL") acc.critical_count += 1;
+    else if (risk === "HIGH") acc.high_risk_count += 1;
+    else if (risk === "MEDIUM") acc.medium_risk_count += 1;
+    else acc.low_risk_count += 1;
+    return acc;
+  }, {
+    total_positions: 0,
+    total_cost_amount: 0,
+    total_market_value: 0,
+    total_unrealized_profit_loss: 0,
+    total_unrealized_profit_loss_pct: 0,
+    low_risk_count: 0,
+    medium_risk_count: 0,
+    high_risk_count: 0,
+    critical_count: 0,
+    unread_alert_count: alerts.filter((row) => Number(row.is_read || 0) === 0).length,
+  });
+
+  summary.total_cost_amount = roundNumber(summary.total_cost_amount, 2) || 0;
+  summary.total_market_value = roundNumber(summary.total_market_value, 2) || 0;
+  summary.total_unrealized_profit_loss = roundNumber(summary.total_unrealized_profit_loss, 2) || 0;
+  summary.total_unrealized_profit_loss_pct = summary.total_cost_amount > 0 ? roundNumber((summary.total_unrealized_profit_loss / summary.total_cost_amount) * 100, 4) : 0;
+  return summary;
+}
+
+async function getLatestPositionAlerts(userId, limit = 20, unreadOnly = false) {
+  if (!(await checkTableExists("position_risk_alerts"))) return [];
+  const params = [userId];
+  let condition = "WHERE a.user_id = ?";
+  if (unreadOnly) condition += " AND a.is_read = 0";
+  params.push(limit);
+  return query(
+    `
+    SELECT
+      a.id,
+      a.position_id,
+      a.stock_code,
+      COALESCE(p.stock_name, a.stock_code) AS stock_name,
+      DATE_FORMAT(a.alert_date, '%Y-%m-%d') AS alert_date,
+      a.alert_type,
+      a.alert_level,
+      a.alert_title,
+      a.alert_message,
+      a.is_read,
+      DATE_FORMAT(a.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+    FROM position_risk_alerts a
+    LEFT JOIN user_positions p ON p.id = a.position_id
+    ${condition}
+    ORDER BY a.is_read ASC, a.alert_date DESC, a.id DESC
+    LIMIT ?
+    `,
+    params,
+  );
+}
+
+async function insertPositionSnapshotForUser(userId, positionId = null) {
+  const positions = await getPositionRowsForUser(userId, positionId, true);
+  if (!(await checkTableExists("user_position_snapshots"))) {
+    throw new Error("尚未建立 user_position_snapshots，請先執行 npm run position:setup。");
+  }
+  let count = 0;
+  for (const row of positions) {
+    const tradeDate = row.price_trade_date || todayTaipeiDateText();
+    await query(
+      `
+      INSERT INTO user_position_snapshots (
+        user_id, position_id, stock_code, trade_date, close_price,
+        market_value, cost_amount, unrealized_profit_loss, unrealized_profit_loss_pct,
+        stop_loss_price, take_profit_price, trailing_stop_price,
+        distance_to_stop_loss_pct, distance_to_take_profit_pct,
+        ai_strength_score, market_risk_score, global_risk_score,
+        breakout_score, main_force_score, big_holder_trend_score,
+        position_risk_level, ai_action, ai_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        close_price = VALUES(close_price),
+        market_value = VALUES(market_value),
+        cost_amount = VALUES(cost_amount),
+        unrealized_profit_loss = VALUES(unrealized_profit_loss),
+        unrealized_profit_loss_pct = VALUES(unrealized_profit_loss_pct),
+        stop_loss_price = VALUES(stop_loss_price),
+        take_profit_price = VALUES(take_profit_price),
+        trailing_stop_price = VALUES(trailing_stop_price),
+        distance_to_stop_loss_pct = VALUES(distance_to_stop_loss_pct),
+        distance_to_take_profit_pct = VALUES(distance_to_take_profit_pct),
+        ai_strength_score = VALUES(ai_strength_score),
+        market_risk_score = VALUES(market_risk_score),
+        global_risk_score = VALUES(global_risk_score),
+        breakout_score = VALUES(breakout_score),
+        main_force_score = VALUES(main_force_score),
+        big_holder_trend_score = VALUES(big_holder_trend_score),
+        position_risk_level = VALUES(position_risk_level),
+        ai_action = VALUES(ai_action),
+        ai_reason = VALUES(ai_reason)
+      `,
+      [
+        userId,
+        row.id,
+        row.stock_code,
+        tradeDate,
+        row.close_price,
+        row.market_value,
+        row.cost_amount,
+        row.unrealized_profit_loss,
+        row.unrealized_profit_loss_pct,
+        row.stop_loss_price,
+        row.take_profit_price,
+        row.trailing_stop_price,
+        row.distance_to_stop_loss_pct,
+        row.distance_to_take_profit_pct,
+        row.ai_strength_score,
+        row.market_risk_score,
+        row.global_risk_score,
+        row.breakout_score,
+        row.main_force_score,
+        row.big_holder_trend_score,
+        row.position_risk_level,
+        row.ai_action,
+        row.ai_reason,
+      ],
+    );
+    count += 1;
+  }
+  return { count, positions };
+}
+
+async function getV21Snapshot() {
+  const snapshot = { positions: null, snapshots: null, alerts: null };
+  if (await checkTableExists("user_positions")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count FROM user_positions`, [], [{ total_count: 0, active_count: 0 }]);
+    snapshot.positions = rows?.[0] || null;
+  }
+  if (await checkTableExists("user_position_snapshots")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_trade_date FROM user_position_snapshots`, [], [{ total_count: 0, latest_trade_date: null }]);
+    snapshot.snapshots = rows?.[0] || null;
+  }
+  if (await checkTableExists("position_risk_alerts")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_read = 0) AS unread_count, DATE_FORMAT(MAX(alert_date), '%Y-%m-%d') AS latest_alert_date FROM position_risk_alerts`, [], [{ total_count: 0, unread_count: 0, latest_alert_date: null }]);
+    snapshot.alerts = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+app.get("/positions", requireAuth, async (req, res) => {
+  try {
+    const includeInactive = String(req.query.include_inactive || "") === "1";
+    const rows = await getPositionRowsForUser(req.user.id, null, !includeInactive);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢持股清單失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢持股清單失敗", error: error.message });
+  }
+});
+
+app.post("/positions", requireAuth, async (req, res) => {
+  try {
+    if (!(await checkTableExists("user_positions"))) {
+      return res.status(500).json({ success: false, version: API_VERSION, message: "尚未建立 user_positions，請先執行 npm run position:setup。" });
+    }
+    const payload = normalizePositionPayload(req.body || {});
+    const errorMessage = validatePositionPayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+
+    const stocks = await query(
+      `SELECT stock_code, stock_name, market_type FROM stocks WHERE stock_code = ? AND is_active = 1 LIMIT 1`,
+      [payload.stockCode],
+    );
+    if (stocks.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+    const stock = stocks[0];
+
+    const result = await query(
+      `
+      INSERT INTO user_positions (
+        user_id, stock_code, stock_name, market_type, buy_date, buy_price, shares, lots, cost_amount,
+        stop_loss_price, take_profit_price, trailing_stop_price, note, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `,
+      [
+        req.user.id,
+        payload.stockCode,
+        stock.stock_name,
+        stock.market_type,
+        payload.buyDate,
+        payload.buyPrice,
+        payload.shares,
+        payload.lots,
+        payload.costAmount,
+        payload.stopLossPrice,
+        payload.takeProfitPrice,
+        payload.trailingStopPrice,
+        payload.note,
+      ],
+    );
+    const createdId = Number(result.insertId || 0);
+    const rows = await getPositionRowsForUser(req.user.id, createdId, false);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已新增持股", data: rows[0] || { id: createdId } }));
+  } catch (error) {
+    console.error("新增持股失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "新增持股失敗", error: error.message });
+  }
+});
+
+app.get("/positions/summary", requireAuth, async (req, res) => {
+  try {
+    const [rows, alerts] = await Promise.all([getPositionRowsForUser(req.user.id), getLatestPositionAlerts(req.user.id, 50, false)]);
+    const summary = buildPositionSummary(rows, alerts);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, summary, alerts: alerts.slice(0, 5), checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢持股總覽失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢持股總覽失敗", error: error.message });
+  }
+});
+
+app.post("/positions/snapshot/generate", requireAuth, async (req, res) => {
+  try {
+    const positionId = req.body?.position_id ? Number(req.body.position_id) : null;
+    const result = await insertPositionSnapshotForUser(req.user.id, positionId);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生持股風險快照", generated_count: result.count, data: result.positions }));
+  } catch (error) {
+    console.error("產生持股風險快照失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生持股風險快照失敗", error: error.message });
+  }
+});
+
+app.get("/positions/:id", requireAuth, async (req, res) => {
+  try {
+    const positionId = Number(req.params.id);
+    if (!Number.isInteger(positionId) || positionId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "持股 ID 不正確。" });
+    const rows = await getPositionRowsForUser(req.user.id, positionId, false);
+    if (rows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆持股。" });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, data: rows[0] }));
+  } catch (error) {
+    console.error("查詢單筆持股失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢單筆持股失敗", error: error.message });
+  }
+});
+
+app.put("/positions/:id", requireAuth, async (req, res) => {
+  try {
+    const positionId = Number(req.params.id);
+    if (!Number.isInteger(positionId) || positionId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "持股 ID 不正確。" });
+    const currentRows = await query(`SELECT * FROM user_positions WHERE id = ? AND user_id = ? LIMIT 1`, [positionId, req.user.id]);
+    if (currentRows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆持股。" });
+    const payload = normalizePositionPayload(req.body || {}, currentRows[0]);
+    const errorMessage = validatePositionPayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+
+    const stocks = await query(`SELECT stock_code, stock_name, market_type FROM stocks WHERE stock_code = ? AND is_active = 1 LIMIT 1`, [payload.stockCode]);
+    if (stocks.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+    const stock = stocks[0];
+
+    await query(
+      `
+      UPDATE user_positions
+      SET stock_code = ?, stock_name = ?, market_type = ?, buy_date = ?, buy_price = ?, shares = ?, lots = ?, cost_amount = ?,
+          stop_loss_price = ?, take_profit_price = ?, trailing_stop_price = ?, note = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+      `,
+      [payload.stockCode, stock.stock_name, stock.market_type, payload.buyDate, payload.buyPrice, payload.shares, payload.lots, payload.costAmount, payload.stopLossPrice, payload.takeProfitPrice, payload.trailingStopPrice, payload.note, positionId, req.user.id],
+    );
+    const rows = await getPositionRowsForUser(req.user.id, positionId, false);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已更新持股", data: rows[0] }));
+  } catch (error) {
+    console.error("更新持股失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "更新持股失敗", error: error.message });
+  }
+});
+
+app.delete("/positions/:id", requireAuth, async (req, res) => {
+  try {
+    const positionId = Number(req.params.id);
+    if (!Number.isInteger(positionId) || positionId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "持股 ID 不正確。" });
+    const result = await query(`UPDATE user_positions SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, [positionId, req.user.id]);
+    if (Number(result.affectedRows || 0) === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆持股。" });
+    res.json({ success: true, version: API_VERSION, message: "已停用持股", id: positionId });
+  } catch (error) {
+    console.error("停用持股失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "停用持股失敗", error: error.message });
+  }
+});
+
+app.get("/positions/:id/risk", requireAuth, async (req, res) => {
+  try {
+    const positionId = Number(req.params.id);
+    const rows = await getPositionRowsForUser(req.user.id, positionId, false);
+    if (rows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆持股。" });
+    const row = rows[0];
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      data: {
+        position_id: row.id,
+        stock_code: row.stock_code,
+        stock_name: row.stock_name,
+        close_price: row.close_price,
+        unrealized_profit_loss: row.unrealized_profit_loss,
+        unrealized_profit_loss_pct: row.unrealized_profit_loss_pct,
+        position_risk_level: row.position_risk_level,
+        ai_action: row.ai_action,
+        ai_reason: row.ai_reason,
+        ai_strength_score: row.ai_strength_score,
+        market_risk_score: row.market_risk_score,
+        global_risk_score: row.global_risk_score,
+        recommend_reason: row.recommend_reason,
+        avoid_reason: row.avoid_reason,
+      },
+    }));
+  } catch (error) {
+    console.error("查詢持股風險失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢持股風險失敗", error: error.message });
+  }
+});
+
+app.get("/positions/:id/history", requireAuth, async (req, res) => {
+  try {
+    const positionId = Number(req.params.id);
+    const limit = parseLimit(req.query.limit, 30, 260);
+    const ownerRows = await query(`SELECT id FROM user_positions WHERE id = ? AND user_id = ? LIMIT 1`, [positionId, req.user.id]);
+    if (ownerRows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆持股。" });
+    const rows = await query(
+      `
+      SELECT
+        id,
+        position_id,
+        stock_code,
+        DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+        close_price,
+        market_value,
+        cost_amount,
+        unrealized_profit_loss,
+        unrealized_profit_loss_pct,
+        ai_strength_score,
+        market_risk_score,
+        global_risk_score,
+        position_risk_level,
+        ai_action,
+        ai_reason,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM user_position_snapshots
+      WHERE user_id = ? AND position_id = ?
+      ORDER BY trade_date DESC
+      LIMIT ?
+      `,
+      [req.user.id, positionId, limit],
+    );
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢持股歷史失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢持股歷史失敗", error: error.message });
+  }
+});
+
+app.get("/position-risk/latest", requireAuth, async (req, res) => {
+  try {
+    const [rows, alerts] = await Promise.all([getPositionRowsForUser(req.user.id), getLatestPositionAlerts(req.user.id, 20, false)]);
+    const summary = buildPositionSummary(rows, alerts);
+    const highRiskRows = rows.filter((row) => ["HIGH", "CRITICAL"].includes(String(row.position_risk_level || "").toUpperCase()));
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, summary, high_risk_positions: highRiskRows, latest_alerts: alerts.slice(0, 10), checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢最新持股風險失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢最新持股風險失敗", error: error.message });
+  }
+});
+
+app.get("/position-risk/alerts", requireAuth, async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 30, 100);
+    const unreadOnly = String(req.query.unread || "") === "1";
+    const rows = await getLatestPositionAlerts(req.user.id, limit, unreadOnly);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢持股風控提醒失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢持股風控提醒失敗", error: error.message });
+  }
+});
+
+app.post("/position-risk/alerts/:id/read", requireAuth, async (req, res) => {
+  try {
+    const alertId = Number(req.params.id);
+    if (!Number.isInteger(alertId) || alertId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "提醒 ID 不正確。" });
+    const result = await query(`UPDATE position_risk_alerts SET is_read = 1 WHERE id = ? AND user_id = ?`, [alertId, req.user.id]);
+    if (Number(result.affectedRows || 0) === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆提醒。" });
+    res.json({ success: true, version: API_VERSION, message: "已標記為已讀", id: alertId });
+  } catch (error) {
+    console.error("標記持股風控提醒失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "標記持股風控提醒失敗", error: error.message });
+  }
+});
+
+app.get("/v21/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V21_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV21Snapshot();
+    const activePositions = Number(snapshot.positions?.active_count || 0);
+    const snapshotCount = Number(snapshot.snapshots?.total_count || 0);
+    const alertCount = Number(snapshot.alerts?.total_count || 0);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v2.1.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v72" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V2.1 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.1 持股與風控資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("positions", "持股資料", activePositions > 0 ? "pass" : "warn", activePositions > 0 ? `已有 ${activePositions} 筆啟用持股。` : "尚未新增持股，功能可用但還沒有使用者持股資料。", { active_positions: activePositions }),
+      buildCheck("snapshots", "持股快照", snapshotCount > 0 ? "pass" : "warn", snapshotCount > 0 ? `已有 ${snapshotCount} 筆持股快照。` : "尚未產生持股快照，可執行 npm run position:snapshot。", { snapshot_count: snapshotCount }),
+      buildCheck("alerts", "風控提醒", alertCount > 0 ? "pass" : "warn", alertCount > 0 ? `已有 ${alertCount} 筆風控提醒。` : "目前沒有持股風控提醒。若尚未有高風險持股，這是正常狀態。", { alert_count: alertCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.1 持股與風控管理",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.1 持股、快照與提醒資料都正常。" : overallStatus === "warn" ? "V2.1 程式與資料表已就緒，但持股 / 快照 / 提醒資料可後續建立。" : "V2.1 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV21Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      modules: V21_MODULES,
+      next_actions: [
+        "執行 npm run position:setup 建立 V2.1 資料表。",
+        "登入後在前端新增我的持股。",
+        "執行 npm run position:daily 產生持股快照與風控提醒。",
+        "執行 npm run v21:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.1 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.1 持股與風控管理", message: "查詢 V2.1 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v21/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.1 持股與風控管理驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV21Progress(),
+    checklist: V21_FINAL_ACCEPTANCE_ITEMS,
+    modules: V21_MODULES,
+    recommended_commands: ["npm run position:setup", "npm run position:daily", "npm run v21:check", "npm run v21:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v21/status", "/v21/acceptance", "/positions", "/positions/summary", "/position-risk/latest", "/position-risk/alerts"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
 
 app.post("/auth/google", async (req, res) => {
   try {

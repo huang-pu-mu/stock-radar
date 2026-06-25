@@ -112,6 +112,10 @@ const state = {
   user: null,
   watchlistCodes: new Set(),
   watchlistLoaded: false,
+  positionRows: [],
+  positionSummary: null,
+  positionAlerts: [],
+  positionLastSnapshotResult: null,
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
@@ -230,6 +234,7 @@ const PAGE_GROUP_MAP = {
   majorHolder: "market",
   search: "personal",
   watchlist: "personal",
+  positions: "personal",
   strategies: "strategy",
   strategyTracks: "strategy",
   strategyOptimize: "strategy",
@@ -278,6 +283,7 @@ const PAGE_CONTENT_CONFIG = {
   majorHolder: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，主力籌碼清單會重新整理。", resultTitle: "主力籌碼清單", resultDesc: "依 TDCC 大戶持股變化觀察籌碼集中度。" },
   search: { groupLabel: "個股與自選", filterTitle: "個股查詢", filterDesc: "輸入股票代號後，下方會顯示行情、法人與籌碼資料。", resultTitle: "個股查詢結果", resultDesc: "查詢後會顯示股票目前資料。" },
   watchlist: { groupLabel: "個股與自選", filterTitle: "自選股操作", filterDesc: "登入後可查看與調整自己的自選股清單。", resultTitle: "自選股清單", resultDesc: "顯示你目前保存的股票，並可調整順序或移除。" },
+  positions: { groupLabel: "個股與自選", filterTitle: "持股與風控操作", filterDesc: "登入後可新增持股，系統會估算損益、風險狀態與 AI 建議動作。", resultTitle: "我的持股清單", resultDesc: "顯示持股成本、現價、市值、未實現損益與風控提醒。" },
   alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
   notifications: { groupLabel: "個股與自選", filterTitle: "通知外送設定", filterDesc: "設定 LINE Messaging API 收件目標，並發送測試通知。", resultTitle: "通知外送通道", resultDesc: "管理 LINE 通知通道，後續每日報告與提醒會共用這裡的設定。" },
   strategies: { groupLabel: "策略中心", filterTitle: "策略與市場篩選", filterDesc: "選擇策略與市場後，下方會顯示符合條件的股票。", resultTitle: "策略選股清單", resultDesc: "依策略分數排序，快速整理觀察名單。" },
@@ -2101,6 +2107,7 @@ function updatePageText() {
   const isSearchPage = state.page === "search";
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
+  const isPositionsPage = state.page === "positions";
   const isAlertsPage = state.page === "alerts";
   const isNotificationsPage = state.page === "notifications";
   const isStrategiesPage = state.page === "strategies";
@@ -2112,7 +2119,7 @@ function updatePageText() {
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
   updateContentFilterHeader();
   updatePageMetaBar();
@@ -2193,9 +2200,16 @@ function updatePageText() {
     return;
   }
 
+  if (state.page === "positions") {
+    pageTitle.textContent = "我的持股 / 持股風控";
+    pageDesc.textContent = "V2.1 持股與風控管理，登入後可管理買進價格、股數、停損停利、損益與 AI 建議動作。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看總損益與風險等級；跌破風控線、高風險或 AI 分數轉弱時，優先檢查持股。</span>`;
+    return;
+  }
+
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股，並檢查 V2.0 AI 多因子系統狀態、策略、報告、LINE 通知與回測資料。";
+    pageDesc.textContent = "管理登入、自選股、我的持股，並檢查 V2.1 持股與風控管理、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -2844,6 +2858,11 @@ function rerenderCurrentContent() {
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
     stockList.innerHTML = `${state.page === "radar" ? `${renderAiSelectionPanel()}${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    return;
+  }
+
+  if (state.page === "positions") {
+    renderPositionsPage();
     return;
   }
 
@@ -8085,6 +8104,392 @@ async function handleStrategyDailyReportSendLine(button) {
 }
 
 
+
+function formatPositionMoney(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  return numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 });
+}
+
+function formatPositionSignedMoney(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`;
+}
+
+function formatPositionPercent(value) {
+  const numberValue = toNumber(value);
+  if (numberValue === null) return "-";
+  const prefix = numberValue > 0 ? "+" : "";
+  return `${prefix}${numberValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`;
+}
+
+function getPositionRiskText(level) {
+  const text = String(level || "LOW").toUpperCase();
+  if (text === "CRITICAL") return "跌破風控線";
+  if (text === "HIGH") return "高風險";
+  if (text === "MEDIUM") return "觀察";
+  return "正常";
+}
+
+function getPositionRiskClass(level) {
+  const text = String(level || "LOW").toUpperCase();
+  if (text === "CRITICAL") return "risk-critical";
+  if (text === "HIGH") return "risk-high";
+  if (text === "MEDIUM") return "risk-medium";
+  return "risk-low";
+}
+
+function renderPositionsLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "持股風控", value: "需登入後使用" },
+  ], "持股資料會依 Google 帳號分開保存。初版為手動新增持股，不串券商、不自動下單。");
+  setResultHeader({ title: "請先登入", desc: "登入後才能新增持股、估算損益與產生風控提醒。", badge: "需要登入" });
+  stockList.innerHTML = `
+    <article class="search-intro-card position-login-card">
+      <div class="intro-icon">🛡️</div>
+      <h3>請先登入 Google 帳號</h3>
+      <p>登入後可以建立自己的持股清單，系統會依最新收盤價、V2.0 AI 分數與風控線估算風險。</p>
+      <div class="example-row">
+        <button class="example-btn" type="button" data-go-account="true">前往登入</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderPositionForm() {
+  return `
+    <article class="position-form-card">
+      <div class="section-title-row compact-title-row">
+        <div>
+          <p class="section-kicker">V2.1 持股管理</p>
+          <h3>新增我的持股</h3>
+          <p>先手動輸入買進資料，系統會自動計算成本、損益與風控距離。</p>
+        </div>
+        <button class="detail-btn" type="button" data-position-snapshot="all">產生全部快照</button>
+      </div>
+      <form class="position-form-grid" data-position-form novalidate>
+        <label>股票代號<input name="stock_code" inputmode="text" autocomplete="off" placeholder="2330" required /></label>
+        <label>買進日期<input name="buy_date" type="date" required /></label>
+        <label>買進價格<input name="buy_price" type="number" min="0" step="0.01" placeholder="例如 980" required /></label>
+        <label>張數<input name="lots" type="number" min="0" step="0.001" placeholder="例如 1" /></label>
+        <label>股數<input name="shares" type="number" min="0" step="1" placeholder="未填張數時可填股數" /></label>
+        <label>停損價<input name="stop_loss_price" type="number" min="0" step="0.01" placeholder="可留空" /></label>
+        <label>停利價<input name="take_profit_price" type="number" min="0" step="0.01" placeholder="可留空" /></label>
+        <label>移動停利價<input name="trailing_stop_price" type="number" min="0" step="0.01" placeholder="可留空" /></label>
+        <label class="position-form-note">備註<input name="note" type="text" maxlength="500" placeholder="例如：突破後分批買進" /></label>
+        <div class="position-form-actions">
+          <button class="search-btn" type="submit">新增持股</button>
+        </div>
+      </form>
+    </article>
+  `;
+}
+
+function renderPositionSummaryCards(summary = {}) {
+  const totalPnl = toNumber(summary.total_unrealized_profit_loss);
+  const pnlClass = getChangeClass(totalPnl);
+  return `
+    <section class="position-summary-grid" aria-label="持股總覽">
+      <article class="summary-metric-card">
+        <span>持股檔數</span>
+        <strong>${formatNumber(summary.active_positions || 0)}</strong>
+        <small>啟用持股</small>
+      </article>
+      <article class="summary-metric-card">
+        <span>總成本</span>
+        <strong>${formatPositionMoney(summary.total_cost_amount)}</strong>
+        <small>手動輸入成本</small>
+      </article>
+      <article class="summary-metric-card">
+        <span>目前市值</span>
+        <strong>${formatPositionMoney(summary.total_market_value)}</strong>
+        <small>依最新收盤價估算</small>
+      </article>
+      <article class="summary-metric-card">
+        <span>未實現損益</span>
+        <strong class="${pnlClass}">${formatPositionSignedMoney(summary.total_unrealized_profit_loss)}</strong>
+        <small class="${pnlClass}">${formatPositionPercent(summary.total_unrealized_profit_loss_pct)}</small>
+      </article>
+      <article class="summary-metric-card warning-card">
+        <span>高風險持股</span>
+        <strong>${formatNumber(summary.high_risk_positions || 0)}</strong>
+        <small>HIGH / CRITICAL</small>
+      </article>
+      <article class="summary-metric-card">
+        <span>未讀提醒</span>
+        <strong>${formatNumber(summary.unread_alerts || 0)}</strong>
+        <small>風控提醒</small>
+      </article>
+    </section>
+  `;
+}
+
+function renderPositionAlerts(alerts = []) {
+  if (!alerts.length) {
+    return `
+      <article class="position-alert-card empty-alert-card">
+        <div>
+          <p class="section-kicker">風控提醒</p>
+          <h3>目前沒有持股風控提醒</h3>
+          <p>新增持股後可按「產生全部快照」，系統會依停損、停利、AI 分數與市場風險產生提醒。</p>
+        </div>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="position-alert-card">
+      <div class="section-title-row compact-title-row">
+        <div>
+          <p class="section-kicker">風控提醒</p>
+          <h3>最新持股提醒</h3>
+        </div>
+      </div>
+      <div class="position-alert-list">
+        ${alerts.map((alert) => `
+          <div class="position-alert-item ${alert.is_read ? "is-read" : ""}">
+            <span class="status-chip ${getPositionRiskClass(alert.alert_level)}">${escapeHtml(alert.alert_level || "INFO")}</span>
+            <div>
+              <strong>${escapeHtml(alert.alert_title || "持股提醒")}</strong>
+              <p>${escapeHtml(alert.alert_message || "-")}</p>
+              <small>${escapeHtml(alert.stock_code || "-")}｜${formatDate(alert.alert_date)}｜${alert.is_read ? "已讀" : "未讀"}</small>
+            </div>
+            ${alert.is_read ? "" : `<button class="order-btn" type="button" data-position-alert-read="${escapeHtml(alert.id)}">已讀</button>`}
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderPositionEditForm(row) {
+  return `
+    <details class="position-edit-box">
+      <summary>編輯持股 / 風控設定</summary>
+      <form class="position-form-grid compact-position-form" data-position-edit-form data-position-id="${escapeHtml(row.id)}" novalidate>
+        <label>買進日期<input name="buy_date" type="date" value="${escapeHtml(formatDate(row.buy_date))}" required /></label>
+        <label>買進價格<input name="buy_price" type="number" min="0" step="0.01" value="${escapeHtml(row.buy_price ?? "")}" required /></label>
+        <label>張數<input name="lots" type="number" min="0" step="0.001" value="${escapeHtml(row.lots ?? "")}" /></label>
+        <label>股數<input name="shares" type="number" min="0" step="1" value="${escapeHtml(row.shares ?? "")}" /></label>
+        <label>停損價<input name="stop_loss_price" type="number" min="0" step="0.01" value="${escapeHtml(row.stop_loss_price ?? "")}" /></label>
+        <label>停利價<input name="take_profit_price" type="number" min="0" step="0.01" value="${escapeHtml(row.take_profit_price ?? "")}" /></label>
+        <label>移動停利價<input name="trailing_stop_price" type="number" min="0" step="0.01" value="${escapeHtml(row.trailing_stop_price ?? "")}" /></label>
+        <label class="position-form-note">備註<input name="note" type="text" maxlength="500" value="${escapeHtml(row.note || "")}" /></label>
+        <div class="position-form-actions">
+          <button class="search-btn" type="submit">儲存修改</button>
+        </div>
+      </form>
+    </details>
+  `;
+}
+
+function renderPositionCard(row) {
+  const riskClass = getPositionRiskClass(row.position_risk_level);
+  const pnlClass = getChangeClass(row.unrealized_profit_loss);
+  const aiScore = pick(row, ["ai_strength_score"], "-");
+  return `
+    <article class="position-card">
+      <div class="position-card-header">
+        <div>
+          <p class="section-kicker">${escapeHtml(row.market_type || "-")}｜${escapeHtml(row.industry || "未分類")}</p>
+          <h3>${escapeHtml(row.stock_code)} ${escapeHtml(row.stock_name || "")}</h3>
+          <p>買進日：${formatDate(row.buy_date)}｜成本：${formatPositionMoney(row.cost_amount)}</p>
+        </div>
+        <span class="status-chip ${riskClass}">${getPositionRiskText(row.position_risk_level)}</span>
+      </div>
+
+      <div class="info-grid position-info-grid">
+        ${createInfoItem("買進價", formatPrice(row.buy_price))}
+        ${createInfoItem("現價", formatPrice(row.close_price))}
+        ${createInfoItem("張數", formatNumber(row.lots))}
+        ${createInfoItem("股數", formatNumber(row.shares))}
+        ${createInfoItem("目前市值", formatPositionMoney(row.market_value))}
+        ${createInfoItem("未實現損益", formatPositionSignedMoney(row.unrealized_profit_loss), pnlClass)}
+        ${createInfoItem("報酬率", formatPositionPercent(row.unrealized_profit_loss_pct), pnlClass)}
+        ${createInfoItem("AI Strength", escapeHtml(aiScore))}
+        ${createInfoItem("停損價", formatPrice(row.stop_loss_price))}
+        ${createInfoItem("停利價", formatPrice(row.take_profit_price))}
+        ${createInfoItem("距停損", formatPositionPercent(row.distance_to_stop_loss_pct))}
+        ${createInfoItem("距停利", formatPositionPercent(row.distance_to_take_profit_pct))}
+      </div>
+
+      <div class="position-ai-action ${riskClass}">
+        <strong>${escapeHtml(row.ai_action || "可續抱")}</strong>
+        <p>${escapeHtml(row.ai_reason || row.recommend_reason || row.avoid_reason || "目前依持股損益與 AI 分數維持觀察。")}</p>
+      </div>
+
+      <div class="action-buttons">
+        <button class="detail-btn" type="button" data-position-snapshot="${escapeHtml(row.id)}">產生快照</button>
+        <button class="ghost-btn danger-ghost-btn" type="button" data-position-delete="${escapeHtml(row.id)}">刪除 / 停用</button>
+      </div>
+      ${renderPositionEditForm(row)}
+    </article>
+  `;
+}
+
+function renderPositionsPage() {
+  const rows = Array.isArray(state.positionRows) ? state.positionRows : [];
+  const summary = state.positionSummary || {};
+  const alerts = Array.isArray(state.positionAlerts) ? state.positionAlerts : [];
+
+  setContentSummary([
+    { label: "持股檔數", value: `${formatNumber(summary.active_positions || rows.length)} 檔` },
+    { label: "未實現損益", value: formatPositionSignedMoney(summary.total_unrealized_profit_loss), className: getChangeClass(summary.total_unrealized_profit_loss) },
+    { label: "高風險", value: `${formatNumber(summary.high_risk_positions || 0)} 檔` },
+    { label: "未讀提醒", value: `${formatNumber(summary.unread_alerts || 0)} 則` },
+  ], "V2.1 初版採手動持股管理，不串券商、不自動下單。損益依最新收盤價估算。");
+
+  setResultHeader({
+    title: "我的持股清單",
+    desc: rows.length ? "可查看持股損益、風險等級與 AI 建議動作。" : "目前尚未新增持股。",
+    badge: "V2.1 持股風控",
+    countText: `${rows.length} 檔`,
+  });
+
+  stockList.innerHTML = `
+    ${renderPositionForm()}
+    ${renderPositionSummaryCards(summary)}
+    ${state.positionLastSnapshotResult ? `<article class="position-alert-card success-card"><strong>快照結果：</strong>${escapeHtml(state.positionLastSnapshotResult)}</article>` : ""}
+    ${renderPositionAlerts(alerts)}
+    ${rows.length ? rows.map(renderPositionCard).join("") : `
+      <article class="search-intro-card position-empty-card">
+        <div class="intro-icon">📋</div>
+        <h3>尚未新增持股</h3>
+        <p>請先在上方輸入股票代號、買進價格與張數。新增後可產生快照與風控提醒。</p>
+      </article>
+    `}
+  `;
+}
+
+function readPositionForm(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  return {
+    stock_code: String(data.stock_code || form.dataset.stockCode || "").trim(),
+    buy_date: String(data.buy_date || "").trim(),
+    buy_price: data.buy_price,
+    shares: data.shares,
+    lots: data.lots,
+    stop_loss_price: data.stop_loss_price || null,
+    take_profit_price: data.take_profit_price || null,
+    trailing_stop_price: data.trailing_stop_price || null,
+    note: String(data.note || "").trim(),
+  };
+}
+
+async function loadPositions() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    renderPositionsLoginPrompt();
+    return;
+  }
+
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, rows, alerts] = await Promise.all([
+      fetchJson("/positions/summary", { auth: true, raw: true }),
+      fetchJson("/positions", { auth: true }),
+      fetchJson("/position-risk/alerts?limit=8", { auth: true }),
+    ]);
+    state.positionSummary = summaryResult.summary || {};
+    state.positionAlerts = Array.isArray(summaryResult.alerts) && summaryResult.alerts.length ? summaryResult.alerts : (Array.isArray(alerts) ? alerts : []);
+    state.positionRows = Array.isArray(rows) ? rows : [];
+    renderPositionsPage();
+    showTemporaryStatus(`已更新 ${state.positionRows.length} 檔持股。`, "success");
+  } catch (error) {
+    setContentSummary([
+      { label: "讀取狀態", value: "持股失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認已執行 npm run position:setup，且登入 Token 有效。",);
+    setResultHeader({ title: "持股讀取失敗", desc: "目前無法取得持股清單。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`持股讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handlePositionFormSubmit(form) {
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const payload = readPositionForm(form);
+    if (!payload.stock_code) throw new Error("請輸入股票代號。");
+    if (!payload.buy_date) throw new Error("請輸入買進日期。");
+    await fetchJson("/positions", { method: "POST", auth: true, body: payload, raw: true });
+    state.positionLastSnapshotResult = "已新增持股。";
+    form.reset();
+    await loadPositions();
+  } catch (error) {
+    showStatus(`新增持股失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function handlePositionEditSubmit(form) {
+  const positionId = form.dataset.positionId;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const row = state.positionRows.find((item) => String(item.id) === String(positionId));
+    const payload = { ...readPositionForm(form), stock_code: row?.stock_code || "" };
+    await fetchJson(`/positions/${encodeURIComponent(positionId)}`, { method: "PUT", auth: true, body: payload, raw: true });
+    state.positionLastSnapshotResult = "已更新持股資料。";
+    await loadPositions();
+  } catch (error) {
+    showStatus(`更新持股失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function handlePositionDelete(button) {
+  const positionId = button.dataset.positionDelete;
+  if (!window.confirm("確定要刪除 / 停用這筆持股嗎？")) return;
+  button.disabled = true;
+  try {
+    await fetchJson(`/positions/${encodeURIComponent(positionId)}`, { method: "DELETE", auth: true, raw: true });
+    state.positionLastSnapshotResult = "已停用持股。";
+    await loadPositions();
+  } catch (error) {
+    showStatus(`刪除持股失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handlePositionSnapshot(button) {
+  const value = button.dataset.positionSnapshot;
+  button.disabled = true;
+  try {
+    const body = value && value !== "all" ? { position_id: Number(value) } : {};
+    const result = await fetchJson("/positions/snapshot/generate", { method: "POST", auth: true, body, raw: true });
+    state.positionLastSnapshotResult = `已產生 ${formatNumber(result.generated_count || 0)} 筆持股風險快照。`;
+    await loadPositions();
+  } catch (error) {
+    showStatus(`產生快照失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handlePositionAlertRead(button) {
+  const alertId = button.dataset.positionAlertRead;
+  button.disabled = true;
+  try {
+    await fetchJson(`/position-risk/alerts/${encodeURIComponent(alertId)}/read`, { method: "POST", auth: true, raw: true });
+    await loadPositions();
+  } catch (error) {
+    showStatus(`標記提醒失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadList() {
   updatePageText();
   hideStatus();
@@ -8102,6 +8507,11 @@ async function loadList() {
     } else {
       renderSearchIntro();
     }
+    return;
+  }
+
+  if (state.page === "positions") {
+    await loadPositions();
     return;
   }
 
@@ -8477,6 +8887,20 @@ stockList.addEventListener("submit", (event) => {
     return;
   }
 
+  const positionForm = event.target.closest("[data-position-form]");
+  if (positionForm) {
+    event.preventDefault();
+    handlePositionFormSubmit(positionForm);
+    return;
+  }
+
+  const positionEditForm = event.target.closest("[data-position-edit-form]");
+  if (positionEditForm) {
+    event.preventDefault();
+    handlePositionEditSubmit(positionEditForm);
+    return;
+  }
+
   const alertRuleForm = event.target.closest("[data-alert-rule-form]");
   if (alertRuleForm) {
     event.preventDefault();
@@ -8485,6 +8909,24 @@ stockList.addEventListener("submit", (event) => {
 });
 
 stockList.addEventListener("click", (event) => {
+  const positionSnapshotButton = event.target.closest("[data-position-snapshot]");
+  if (positionSnapshotButton) {
+    handlePositionSnapshot(positionSnapshotButton);
+    return;
+  }
+
+  const positionDeleteButton = event.target.closest("[data-position-delete]");
+  if (positionDeleteButton) {
+    handlePositionDelete(positionDeleteButton);
+    return;
+  }
+
+  const positionAlertReadButton = event.target.closest("[data-position-alert-read]");
+  if (positionAlertReadButton) {
+    handlePositionAlertRead(positionAlertReadButton);
+    return;
+  }
+
   const dailyReportSendLineButton = event.target.closest("[data-strategy-daily-report-send-line]");
   if (dailyReportSendLineButton) {
     handleStrategyDailyReportSendLine(dailyReportSendLineButton);

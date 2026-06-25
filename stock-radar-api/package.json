@@ -67,7 +67,13 @@
     "v20:check": "node scripts/checkV20.js",
     "v20:test": "node scripts/runV20Acceptance.js",
     "v201:check": "node scripts/checkV20.js",
-    "v201:test": "node scripts/runV20Acceptance.js"
+    "v201:test": "node scripts/runV20Acceptance.js",
+    "position:setup": "node scripts/setupPositionRiskTables.js",
+    "position:snapshot": "node scripts/generatePositionSnapshots.js",
+    "position:alerts": "node scripts/generatePositionRiskAlerts.js",
+    "position:daily": "npm run position:setup && npm run position:snapshot && npm run position:alerts",
+    "v21:check": "node scripts/checkV21.js",
+    "v21:test": "node scripts/runV21Acceptance.js"
   },
   "keywords": [
     "stock",

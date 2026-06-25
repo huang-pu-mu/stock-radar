@@ -1,0 +1,157 @@
+====================================
+Stock Radar V2.1 持股與風控管理自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v21-acceptance-20260625-220726.log
+開始時間：2026/6/25 22:07:26
+API：http://localhost:3000
+DB流程：執行 setup / snapshot / alerts
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.1 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupPositionRiskTables.js
+完成：V2.1 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.1 snapshot script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generatePositionSnapshots.js
+完成：V2.1 snapshot script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.1 alerts script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generatePositionRiskAlerts.js
+完成：V2.1 alerts script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.1 持股與風控資料表
+指令：npm run position:setup
+
+> stock-radar-api@1.0.0 position:setup
+> node scripts/setupPositionRiskTables.js
+
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+====================================
+Stock Radar V2.1 持股與風控資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v21-position-risk.sql
+建立 / 確認完成：
+- user_positions
+- user_position_snapshots
+- position_risk_alerts
+結果：PASS
+完成：建立 V2.1 持股與風控資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.1 持股風險快照
+指令：npm run position:snapshot
+
+> stock-radar-api@1.0.0 position:snapshot
+> node scripts/generatePositionSnapshots.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V2.1 持股風險快照產生
+====================================
+快照交易日：2026-06-25
+有效持股：0
+產生 / 更新快照：0
+略過：0
+結果：PASS
+完成：產生 V2.1 持股風險快照，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.1 持股風控提醒
+指令：npm run position:alerts
+
+> stock-radar-api@1.0.0 position:alerts
+> node scripts/generatePositionRiskAlerts.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V2.1 持股風控提醒產生
+====================================
+尚未有持股快照，略過提醒產生。
+結果：PASS
+完成：產生 V2.1 持股風控提醒，耗時 0分1秒
+--------------------------------------------------
+開始：V2.1 靜態 / API 驗收
+指令：npm run v21:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v21:check
+> node scripts/checkV21.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V2.1 持股與風控管理驗收檢查
+====================================
+✅ [版本] API 版本為 V2.1.0 - stock-radar-api-v2.1.0
+✅ [版本] API 預期 PWA 版本為 v72 - stock-radar-pwa-v72
+✅ [版本] service-worker 快取版本為 v72 - stock-radar-pwa-v72
+✅ [前端] 側邊功能選單顯示 V2.1 - index.html
+✅ [npm 指令] position:setup - node scripts/setupPositionRiskTables.js
+✅ [npm 指令] position:snapshot - node scripts/generatePositionSnapshots.js
+✅ [npm 指令] position:alerts - node scripts/generatePositionRiskAlerts.js
+✅ [npm 指令] position:daily - npm run position:setup && npm run position:snapshot && npm run position:alerts
+✅ [npm 指令] v21:check - node scripts/checkV21.js
+✅ [npm 指令] v21:test - node scripts/runV21Acceptance.js
+✅ [npm 指令] v20:test - node scripts/runV20Acceptance.js
+✅ [npm 指令] ai-selection:daily - npm run ai-selection:setup && npm run ai-selection:generate
+✅ [npm 指令] alerts:generate - node scripts/generateWatchlistAlerts.js
+✅ [必要檔案] stock-radar-api/sql/v21-position-risk.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupPositionRiskTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generatePositionSnapshots.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generatePositionRiskAlerts.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV21.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV21Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] user_positions 資料表 - CREATE TABLE IF NOT EXISTS `user_positions`
+✅ [SQL] user_position_snapshots 資料表 - CREATE TABLE IF NOT EXISTS `user_position_snapshots`
+✅ [SQL] position_risk_alerts 資料表 - CREATE TABLE IF NOT EXISTS `position_risk_alerts`
+✅ [SQL] AI 建議欄位 - ai_action
+✅ [SQL] 風險等級欄位 - position_risk_level
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v21/status - server.js 靜態檢查
+✅ [API 路由] GET /v21/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /positions - server.js 靜態檢查
+✅ [API 路由] POST /positions - server.js 靜態檢查
+✅ [API 路由] PUT /positions/:id - server.js 靜態檢查
+✅ [API 路由] DELETE /positions/:id - server.js 靜態檢查
+✅ [API 路由] GET /positions/summary - server.js 靜態檢查
+✅ [API 路由] GET /positions/:id - server.js 靜態檢查
+✅ [API 路由] GET /positions/:id/risk - server.js 靜態檢查
+✅ [API 路由] GET /positions/:id/history - server.js 靜態檢查
+✅ [API 路由] POST /positions/snapshot/generate - server.js 靜態檢查
+✅ [API 路由] GET /position-risk/latest - server.js 靜態檢查
+✅ [API 路由] GET /position-risk/alerts - server.js 靜態檢查
+✅ [API 路由] POST /position-risk/alerts/:id/read - server.js 靜態檢查
+✅ [前端] 我的持股頁 - renderPositionsPage
+✅ [前端] 持股 API - /positions
+✅ [前端] 風控提醒 API - /position-risk/alerts
+✅ [前端] 持股風控文字 - 持股風控
+✅ [前端] AI 建議動作 - AI 建議動作
+✅ [前端] 不再顯示 V1.4 系統狀態 - V2.1 status copy
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v21/status - HTTP 200
+✅ [API 動態] /v21/acceptance - HTTP 200
+✅ [API 動態] /positions 需登入保護 - HTTP 401
+✅ [API 動態] /position-risk/alerts 需登入保護 - HTTP 401
+------------------------------------
+PASS：55
+WARN：0
+FAIL：0
+結果：PASS
+完成：V2.1 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 22:07:30
+總耗時：0分4秒
+結果：PASS
