@@ -5511,3 +5511,5 @@ body.chart-zoom-open {
 
 .big-holder-trend-panel { border-style: solid; }
 .big-holder-trend-panel::before { background: linear-gradient(180deg, rgba(34, 197, 94, 0.35), transparent); }
+
+.ai-selection-panel { border-width: 1px; }

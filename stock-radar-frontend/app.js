@@ -100,6 +100,8 @@ const state = {
   market: "",
   limit: 20,
   latestRows: [],
+  aiSelectionRisk: null,
+  aiSelectionRiskError: "",
   marketRisk: null,
   marketRiskError: "",
   globalRisk: null,
@@ -586,6 +588,76 @@ function renderBreakoutPanel() {
 
 
 
+
+function renderAiSelectionPanel() {
+  const payload = state.aiSelectionRisk || {};
+  const summary = payload.summary || null;
+  const topSignals = Array.isArray(payload.top_signals) ? payload.top_signals : [];
+  const advice = payload.advice || state.aiSelectionRiskError || "尚未讀取 AI 多因子選股資料。";
+
+  if (!summary && !state.aiSelectionRiskError) return "";
+
+  const score = pick(summary || {}, ["avg_ai_strength_score", "top_ai_strength_score"], "-");
+  const tone = getScoreClass(score);
+  const tradeDate = pick(summary || {}, ["trade_date"], "-");
+  const totalCount = pick(summary || {}, ["total_count"], 0);
+  const strongCount = pick(summary || {}, ["strong_count"], 0);
+  const watchCount = pick(summary || {}, ["watch_count"], 0);
+  const riskCount = pick(summary || {}, ["risk_count"], 0);
+  const topStock = `${pick(summary || {}, ["top_stock_name"], "-")} ${pick(summary || {}, ["top_stock_code"], "")}`.trim();
+  const topPills = topSignals.slice(0, 4).map((item) => {
+    const label = `${pick(item, ["stock_name"], "-")} ${pick(item, ["stock_code"], "")}`.trim();
+    const itemScore = pick(item, ["ai_strength_score"], "-");
+    const status = pick(item, ["ai_status"], "AI 觀察");
+    return `<span class="component-pill ${getScoreClass(itemScore)}">${escapeHtml(label)} ${formatNumber(itemScore)}｜${escapeHtml(status)}</span>`;
+  }).join("");
+
+  return `
+    <section class="market-risk-panel ai-selection-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V2.0 AI 多因子選股引擎</p>
+          <h3>AI 多因子每日之星｜${formatNumber(totalCount)} 檔</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">AI Strength</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("AI 強勢", `${formatNumber(strongCount)} 檔`, "score-high")}
+        ${createInfoItem("AI 觀察", `${formatNumber(watchCount)} 檔`, "score-mid")}
+        ${createInfoItem("AI 風險", `${formatNumber(riskCount)} 檔`, riskCount > 0 ? "score-low" : "score-high")}
+        ${createInfoItem("第一名", escapeHtml(topStock))}
+        ${createInfoItem("分析日", formatDate(tradeDate))}
+      </div>
+      ${topPills ? `<div class="global-component-strip">${topPills}</div>` : ""}
+    </section>
+  `;
+}
+
+async function loadAiSelectionForRadar() {
+  if (state.page !== "radar") {
+    state.aiSelectionRisk = null;
+    state.aiSelectionRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/ai-selection/latest", { method: "GET", raw: true });
+    state.aiSelectionRisk = result;
+    state.aiSelectionRiskError = "";
+  } catch (error) {
+    state.aiSelectionRisk = null;
+    state.aiSelectionRiskError = error.message || "AI 多因子選股資料讀取失敗。";
+  }
+}
+
+async function loadV20StatusForAcceptance() {
+  return fetchJson("/v20/status", { method: "GET", raw: true });
+}
+
 function renderBigHolderTrendPanel() {
   const payload = state.bigHolderTrendRisk || {};
   const summary = payload.summary || null;
@@ -1071,9 +1143,9 @@ function renderStrategyOptimizationForm() {
     <section class="strategy-dashboard-card strategy-optimization-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-2 策略參數最佳化</p>
+          <p class="section-kicker">策略參數最佳化</p>
           <h3>調整參數並預覽清單</h3>
-          <p>目前策略：${escapeHtml(activeStrategy.name)}。這裡先做參數預覽，後續 V1.4-3 會接回測條件調整。</p>
+          <p>目前策略：${escapeHtml(activeStrategy.name)}。可預覽保守 / 平衡 / 積極參數，並與回測條件共用。</p>
         </div>
         <div class="strategy-meta-box">
           <span>預設：${escapeHtml(getStrategyOptimizationPreset().name)}</span>
@@ -1141,7 +1213,7 @@ function renderStrategyOptimizationComparison() {
       <section class="strategy-dashboard-card strategy-optimization-comparison-card error-card">
         <div class="alerts-dashboard-header strategy-dashboard-header">
           <div>
-            <p class="section-kicker">V1.4.8.2 回測比較</p>
+            <p class="section-kicker">回測比較</p>
             <h3>回測比較讀取失敗</h3>
             <p>${escapeHtml(state.strategyOptimizationComparisonError)}</p>
           </div>
@@ -1155,7 +1227,7 @@ function renderStrategyOptimizationComparison() {
       <section class="strategy-dashboard-card strategy-optimization-comparison-card">
         <div class="alerts-dashboard-header strategy-dashboard-header">
           <div>
-            <p class="section-kicker">V1.4.8.2 回測比較</p>
+            <p class="section-kicker">回測比較</p>
             <h3>保守 / 平衡 / 積極比較讀取中</h3>
             <p>系統正在彙整最近回測 Run 的勝率、平均報酬與訊號數。</p>
           </div>
@@ -1172,7 +1244,7 @@ function renderStrategyOptimizationComparison() {
     <section class="strategy-dashboard-card strategy-optimization-comparison-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4.8.2 策略最佳化與回測整合</p>
+          <p class="section-kicker">策略最佳化與回測整合</p>
           <h3>保守 / 平衡 / 積極回測比較</h3>
           <p>依 ${escapeHtml(metricLabel)} 比較不同參數預設的勝率、平均報酬與樣本數，協助判斷目前哪組參數較適合。</p>
         </div>
@@ -1375,7 +1447,7 @@ async function loadStrategyOptimization() {
     setContentSummary([
       { label: "讀取狀態", value: "失敗" },
       { label: "錯誤訊息", value: error.message },
-    ], "請確認 API 是否已部署 V1.4-2，並檢查 /strategy-optimization/presets。 ");
+    ], "請確認 API 是否已部署策略參數最佳化，並檢查 /strategy-optimization/presets。 ");
     setResultHeader({ title: "策略最佳化讀取失敗", desc: "目前無法取得策略最佳化資料。", badge: "讀取失敗" });
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
@@ -2123,7 +2195,7 @@ function updatePageText() {
 
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股，並檢查 V1.4 系統狀態、策略、報告、LINE 通知與回測資料。";
+    pageDesc.textContent = "管理登入、自選股，並檢查 V2.0 AI 多因子系統狀態、策略、報告、LINE 通知與回測資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -2771,7 +2843,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderAiSelectionPanel()}${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -4627,46 +4699,43 @@ function renderV13CheckCard(check) {
 }
 
 function renderV13FeatureCards() {
-  const alerts = getV13FeatureSnapshot("watchlist_alerts") || {};
-  const tracks = getV13FeatureSnapshot("strategy_watchlists") || {};
-  const backtests = getV13FeatureSnapshot("strategy_backtests") || findV13Check("backtest_condition_adjustment")?.latest_run || {};
-  const params = getV13FeatureSnapshot("strategy_parameter_presets") || {};
-  const channels = getV13FeatureSnapshot("notification_channels") || {};
-  const sendLogs = getV13FeatureSnapshot("notification_send_logs") || {};
-  const resultCount = state.v13Status?.feature_snapshot?.backtest_result_count;
-  const runCount = state.v13Status?.feature_snapshot?.completed_backtest_run_count;
+  const summary = state.v13Status?.ai_selection?.summary || {};
+  const topSignals = Array.isArray(state.v13Status?.ai_selection?.top_signals) ? state.v13Status.ai_selection.top_signals : [];
+  const tables = Array.isArray(state.v13Status?.tables) ? state.v13Status.tables : [];
+  const topSignal = topSignals[0] || {};
+  const topStock = `${pick(summary, ["top_stock_name"], pick(topSignal, ["stock_name"], "-"))} ${pick(summary, ["top_stock_code"], pick(topSignal, ["stock_code"], ""))}`.trim();
 
   return `
     <div class="v13-feature-grid v14-feature-grid">
       <div class="v13-feature-card">
-        <span>自選股提醒</span>
-        <strong>${formatV13Count(alerts.total_count)} 筆</strong>
-        <small>未讀 ${formatV13Count(alerts.unread_count)} 筆，股票 ${formatV13Count(alerts.stock_count)} 檔</small>
+        <span>AI 多因子訊號</span>
+        <strong>${formatV13Count(summary.total_count)} 檔</strong>
+        <small>資料日 ${formatDate(summary.trade_date)}</small>
       </div>
       <div class="v13-feature-card">
-        <span>策略追蹤</span>
-        <strong>${formatV13Count(tracks.active_count)} 筆啟用</strong>
-        <small>追蹤 ${formatV13Count(tracks.stock_count)} 檔，策略 ${formatV13Count(tracks.strategy_count)} 種</small>
+        <span>AI 強勢股</span>
+        <strong>${formatV13Count(summary.strong_count)} 檔</strong>
+        <small>平均分數 ${formatNumber(summary.avg_ai_strength_score ?? "-")}</small>
       </div>
       <div class="v13-feature-card">
-        <span>策略回測</span>
-        <strong>Run ${escapeHtml(backtests.id ?? backtests.run_id ?? "-")}</strong>
-        <small>完成 Run ${formatV13Count(runCount)} 次，訊號 ${formatV13Count(resultCount ?? backtests.total_signals ?? backtests.signal_count)} 筆</small>
+        <span>AI 觀察股</span>
+        <strong>${formatV13Count(summary.watch_count)} 檔</strong>
+        <small>風險股 ${formatV13Count(summary.risk_count)} 檔</small>
       </div>
       <div class="v13-feature-card">
-        <span>策略參數</span>
-        <strong>${formatV13Count(params.active_count ?? params.total_count)} 組</strong>
-        <small>保守 / 平衡 / 積極參數預設供策略與回測共用</small>
+        <span>AI 第一名</span>
+        <strong>${escapeHtml(topStock || "-")}</strong>
+        <small>最高分 ${formatNumber(summary.top_ai_strength_score ?? topSignal.ai_strength_score ?? "-")}</small>
       </div>
       <div class="v13-feature-card">
-        <span>LINE 通知</span>
-        <strong>${formatV13Count(channels.enabled_count)} 個啟用</strong>
-        <small>LINE 通道 ${formatV13Count(channels.line_count)} 個，外送紀錄 ${formatV13Count(sendLogs.total_count)} 筆</small>
+        <span>資料表狀態</span>
+        <strong>${formatV13Count(tables.filter((item) => item.exists).length)} / ${formatV13Count(tables.length)}</strong>
+        <small>ai_selection_signals / ai_selection_summaries</small>
       </div>
       <div class="v13-feature-card">
-        <span>每日報告 / 趨勢 / 歷史</span>
-        <strong>已接 API</strong>
-        <small>每日策略報告、勝率趨勢、個股策略歷史已納入 V1.4 檢查</small>
+        <span>每日之星排序</span>
+        <strong>AI 優先</strong>
+        <small>雷達排行已優先參考 AI Strength Score</small>
       </div>
     </div>
   `;
@@ -4679,8 +4748,8 @@ function renderV14ModuleProgress() {
   return `
     <div class="v13-subsection v14-module-section">
       <div class="v13-subsection-title">
-        <strong>V1.4 功能完成度</strong>
-        <span>本輪 Email / Telegram 延後不列入</span>
+        <strong>V2.0 功能完成度</strong>
+        <span>AI 多因子第一版與 UI 狀態同步</span>
       </div>
       <div class="v14-module-grid">
         ${modules.map((module) => `
@@ -4700,13 +4769,13 @@ function renderV14ModuleProgress() {
 
 function renderV14AcceptanceSummary() {
   const nextActions = Array.isArray(state.v13Status?.next_actions) ? state.v13Status.next_actions : [];
-  const deferred = Array.isArray(state.v13Status?.deferred_modules) ? state.v13Status.deferred_modules : [];
+  const advice = state.v13Status?.ai_selection?.advice || "V2.0 已整合夜盤、全球風險、技術突破、主力籌碼與大戶趨勢。";
 
   return `
     <div class="v13-subsection v14-acceptance-section">
       <div class="v13-subsection-title">
-        <strong>收尾驗收重點</strong>
-        <span>/v14/status + npm run v14:check</span>
+        <strong>驗收與維護重點</strong>
+        <span>/v20/status + npm run v201:test</span>
       </div>
       <div class="v14-acceptance-grid">
         <div class="v13-empty-note">
@@ -4714,8 +4783,11 @@ function renderV14AcceptanceSummary() {
           <ul>${nextActions.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </div>
         <div class="v13-empty-note">
-          <strong>本輪延後：</strong>
-          <ul>${deferred.length ? deferred.map((item) => `<li>${escapeHtml(item.name || item.key)}：${escapeHtml(item.note || item.status || "延後")}</li>`).join("") : "<li>Email / Telegram 暫不開發</li>"}</ul>
+          <strong>目前定位：</strong>
+          <ul>
+            <li>${escapeHtml(advice)}</li>
+            <li>V2.0.1 已修正舊版狀態文字，避免誤判為異常。</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -4723,25 +4795,23 @@ function renderV14AcceptanceSummary() {
 }
 
 function renderV13BacktestStats() {
-  const stats = Array.isArray(state.v13Status?.latest_backtest_strategy_stats)
-    ? state.v13Status.latest_backtest_strategy_stats
-    : [];
+  const topSignals = Array.isArray(state.v13Status?.ai_selection?.top_signals) ? state.v13Status.ai_selection.top_signals : [];
 
-  if (!stats.length) {
+  if (!topSignals.length) {
     return `
       <div class="v13-empty-note">
-        尚未讀到各策略回測統計；如果剛完成回測，請按「重新檢查 V1.4」。
+        尚未讀到 AI 強勢排行；如果剛完成產生，請按「重新檢查 V2.0」。
       </div>
     `;
   }
 
   return `
     <div class="v13-backtest-list">
-      ${stats.slice(0, 6).map((item) => `
+      ${topSignals.slice(0, 6).map((item) => `
         <div class="v13-backtest-row">
-          <span>${escapeHtml(item.strategy_name || item.strategy_key || "策略")}</span>
-          <strong class="${getReturnClass(item.avg_return_5d ?? item.avg_5d)}">${formatReturnPercent(item.avg_return_5d ?? item.avg_5d)}</strong>
-          <small>5日勝率 ${formatPercent(item.win_rate_5d)}</small>
+          <span>${escapeHtml(`${pick(item, ["stock_name"], "-")} ${pick(item, ["stock_code"], "")}`.trim())}</span>
+          <strong class="${getScoreClass(item.ai_strength_score)}">${formatNumber(item.ai_strength_score)}</strong>
+          <small>${escapeHtml(item.ai_status || item.risk_level || "AI 觀察")}</small>
         </div>
       `).join("")}
     </div>
@@ -4758,9 +4828,9 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V1.4 系統狀態</p>
-            <h3>正在檢查 V1.4 功能</h3>
-            <p>正在讀取 /health 與 /v14/status。</p>
+            <p class="eyebrow">V2.0 系統狀態</p>
+            <h3>正在檢查 AI 多因子功能</h3>
+            <p>正在讀取 /health 與 /v20/status。</p>
           </div>
           <span class="v13-status-pill warn">檢查中</span>
         </div>
@@ -4774,14 +4844,14 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card error-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V1.4 系統狀態</p>
+            <p class="eyebrow">V2.0 系統狀態</p>
             <h3>狀態檢查失敗</h3>
             <p>${escapeHtml(state.v13StatusError)}</p>
           </div>
           <span class="v13-status-pill fail">異常</span>
         </div>
         <div class="account-actions">
-          <button class="detail-btn" type="button" data-refresh-v14-status="true">重新檢查 V1.4</button>
+          <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.0</button>
         </div>
       </article>
     `;
@@ -4794,21 +4864,18 @@ function renderV13StatusCard() {
   const checks = [
     findV13Check("database"),
     findV13Check("versions"),
-    findV13Check("core_market_data"),
-    findV13Check("strategy_parameter_optimization"),
-    findV13Check("backtest_condition_adjustment"),
-    findV13Check("line_notification"),
-    findV13Check("daily_strategy_report"),
-    findV13Check("strategy_win_rate_trend"),
-    findV13Check("stock_strategy_history"),
+    findV13Check("tables"),
+    findV13Check("ai_summary"),
+    findV13Check("ai_top"),
   ].filter(Boolean);
+  const summary = status.ai_selection?.summary || {};
 
   return `
     <article class="account-card v13-status-card v14-status-card ${meta.className}">
       <div class="v13-status-header">
         <div>
-          <p class="eyebrow">V1.4 系統狀態</p>
-          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V1.4 狀態檢查完成")}</h3>
+          <p class="eyebrow">V2.0 系統狀態</p>
+          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V2.0 AI 多因子狀態檢查完成")}</h3>
           <p>檢查時間：${escapeHtml(status.checked_at || "-")}</p>
         </div>
         <span class="v13-status-pill ${meta.className}">${meta.label}</span>
@@ -4818,8 +4885,8 @@ function renderV13StatusCard() {
         ${createInfoItem("API 版本", escapeHtml(status.version || "-"))}
         ${createInfoItem("PWA 預期版本", escapeHtml(status.pwa_expected_version || "-"))}
         ${createInfoItem("資料庫", escapeHtml(status.database?.database_name || "-"))}
-        ${createInfoItem("最新行情", formatDate(status.latest_data?.daily_prices))}
-        ${createInfoItem("V1.4 完成度", formatPercent(status.progress_percent))}
+        ${createInfoItem("AI 分析日", formatDate(summary.trade_date))}
+        ${createInfoItem("V2.0 完成度", formatPercent(status.progress_percent))}
       </div>
 
       <div class="v13-check-grid">
@@ -4832,18 +4899,18 @@ function renderV13StatusCard() {
 
       <div class="v13-subsection">
         <div class="v13-subsection-title">
-          <strong>策略回測統計</strong>
-          <span>取最新完成回測任務</span>
+          <strong>AI 強勢股前段班</strong>
+          <span>取最新 AI 多因子訊號</span>
         </div>
         ${renderV13BacktestStats()}
       </div>
 
       <div class="account-actions v13-actions">
-        <button class="detail-btn" type="button" data-refresh-v14-status="true">重新檢查 V1.4</button>
+        <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.0</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="radar">看 AI 每日之星</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyBacktests">看策略回測</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyReports">每日報告</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyTrends">勝率趨勢</button>
-        <button class="detail-btn secondary-action" type="button" data-go-page="strategyStockHistory">個股歷史</button>
       </div>
     </article>
   `;
@@ -4858,10 +4925,10 @@ async function loadV13Status({ force = false } = {}) {
   if (state.page === "account") renderAccountPage();
 
   try {
-    const result = await fetchJson("/v14/status", { method: "GET", raw: true });
+    const result = await fetchJson("/v20/status", { method: "GET", raw: true });
     state.v13Status = result;
   } catch (error) {
-    state.v13StatusError = error.message || "V1.4 狀態檢查失敗。";
+    state.v13StatusError = error.message || "V2.0 狀態檢查失敗。";
   } finally {
     state.v13StatusLoading = false;
     if (state.page === "account") renderAccountPage();
@@ -4875,7 +4942,7 @@ function renderAccountPage() {
     { label: "登入狀態", value: state.user ? "已登入" : "尚未登入" },
     { label: "自選股", value: `${formatNumber(state.watchlistCodes?.size || 0)} 檔` },
     { label: "未讀提醒", value: `${formatNumber(state.alertUnreadCount || 0)} 筆` },
-    { label: "V1.4 狀態", value: state.v13StatusLoading ? "檢查中" : (state.v13Status?.overall_status || state.v13StatusError || "尚未檢查") },
+    { label: "V2.0 狀態", value: state.v13StatusLoading ? "檢查中" : (state.v13Status?.overall_status || state.v13StatusError || "尚未檢查") },
   ], "我的頁已整理成帳號狀態、功能入口與系統狀態卡片。");
   setResultHeader({ title: "我的狀態卡片", desc: "查看登入、自選股、提醒與系統檢查狀態。", badge: state.user ? "已登入" : "未登入" });
 
@@ -5468,6 +5535,8 @@ function renderStockCard(row, index) {
   const code = pick(row, ["stock_code", "code"]);
   const name = pick(row, ["stock_name", "name"]);
   const market = pick(row, ["market_type", "market"]);
+  const aiStrengthScore = pick(row, ["ai_strength_score"], "");
+  const hasAiStrengthScore = aiStrengthScore !== "" && aiStrengthScore !== null && aiStrengthScore !== undefined;
   const closeScore = pick(row, ["close_score", "chip_score", "total_score", "score"], "-");
   const globalAdjustedScore = pick(row, ["global_adjusted_score"], "");
   const marketAdjustedScore = pick(row, ["market_adjusted_score", "night_adjusted_score"], "");
@@ -5475,13 +5544,20 @@ function renderStockCard(row, index) {
   const hasMarketAdjustedScore = marketAdjustedScore !== "" && marketAdjustedScore !== null && marketAdjustedScore !== undefined;
   const adjustedScore = hasGlobalAdjustedScore ? globalAdjustedScore : marketAdjustedScore;
   const hasAdjustedScore = hasGlobalAdjustedScore || hasMarketAdjustedScore;
-  const score = hasAdjustedScore ? adjustedScore : closeScore;
+  const score = hasAiStrengthScore ? aiStrengthScore : hasAdjustedScore ? adjustedScore : closeScore;
   const closePrice = pick(row, ["close_price", "closing_price", "close"], "-");
   const change = pick(row, ["price_change", "change", "change_price"], "-");
   const tradeDate = pick(row, ["trade_date", "score_date", "date"], "-");
   const scoreClass = getScoreClass(score);
   const changeClass = getChangeClass(change);
-  const scoreText = hasGlobalAdjustedScore ? "全球風險修正後" : hasMarketAdjustedScore ? "夜盤修正後" : getScoreText(score);
+  const scoreText = hasAiStrengthScore ? "AI 多因子強勢分數" : hasGlobalAdjustedScore ? "全球風險修正後" : hasMarketAdjustedScore ? "夜盤修正後" : getScoreText(score);
+  const aiStatus = pick(row, ["ai_status"], "");
+  const aiRiskLevel = pick(row, ["ai_risk_level", "risk_level"], "-");
+  const aiRecommendReason = pick(row, ["ai_recommend_reason", "recommend_reason"], "");
+  const aiAvoidReason = pick(row, ["ai_avoid_reason", "avoid_reason"], "");
+  const aiTechnicalFactor = pick(row, ["technical_factor_score"], "-");
+  const aiMainForceFactor = pick(row, ["main_force_factor_score"], "-");
+  const aiBigHolderFactor = pick(row, ["big_holder_factor_score"], "-");
   const marketRiskScore = pick(row, ["market_risk_score"], "-");
   const nightAdjustment = pick(row, ["night_adjustment"], "-");
   const marketMode = pick(row, ["market_mode"], "-");
@@ -5511,6 +5587,16 @@ function renderStockCard(row, index) {
   const hasBigHolderTrendScore = bigHolderTrendScore !== "" && bigHolderTrendScore !== null && bigHolderTrendScore !== undefined;
 
   const radarItems = [
+    ...(hasAiStrengthScore ? [
+      createInfoItem("AI 強勢", formatNumber(aiStrengthScore), getScoreClass(aiStrengthScore)),
+      createInfoItem("AI 狀態", escapeHtml(aiStatus || "AI 觀察")),
+      createInfoItem("AI 風險", escapeHtml(aiRiskLevel)),
+      createInfoItem("技術因子", formatNumber(aiTechnicalFactor), getScoreClass(aiTechnicalFactor)),
+      createInfoItem("主力因子", formatNumber(aiMainForceFactor), getScoreClass(aiMainForceFactor)),
+      createInfoItem("大戶因子", formatNumber(aiBigHolderFactor), getScoreClass(aiBigHolderFactor)),
+      createInfoItem("推薦理由", escapeHtml(aiRecommendReason || "-")),
+      createInfoItem("不推薦理由", escapeHtml(aiAvoidReason || "-")),
+    ] : []),
     ...(hasBigHolderTrendScore ? [
       createInfoItem("大戶趨勢", formatNumber(bigHolderTrendScore), getScoreClass(bigHolderTrendScore)),
       createInfoItem("大戶狀態", escapeHtml(bigHolderStatus || "大戶趨勢觀察")),
@@ -5576,7 +5662,7 @@ function renderStockCard(row, index) {
         </div>
         <div class="score-box ${scoreClass}">
           <span class="score-value">${formatNumber(score)}</span>
-          <span class="score-label">${hasGlobalAdjustedScore ? "全球修正" : hasMarketAdjustedScore ? "夜盤修正" : "籌碼分數"}</span>
+          <span class="score-label">${hasAiStrengthScore ? "AI 強勢" : hasGlobalAdjustedScore ? "全球修正" : hasMarketAdjustedScore ? "夜盤修正" : "籌碼分數"}</span>
         </div>
       </div>
 
@@ -5630,7 +5716,7 @@ function renderSearchResult(summaryData) {
     { label: "資料日", value: formatDate(tradeDate) },
     { label: "法人合計", value: formatNumber(totalNet) },
   ], "個股查詢結果已整理為行情、法人、籌碼狀態與分數拆解四個區塊。");
-  setResultHeader({ title: `查詢結果：${name} ${code}`, desc: "下方卡片顯示此股票目前資料，若要看策略歷史訊號，後續 V1.4-7 會新增個股策略歷史紀錄。", badge: "個股查詢", countText: "1 檔" });
+  setResultHeader({ title: `查詢結果：${name} ${code}`, desc: "下方卡片顯示此股票目前資料，並可切換到個股策略歷史紀錄查看過去訊號。", badge: "個股查詢", countText: "1 檔" });
 
   stockList.innerHTML = `
     <article class="stock-card search-result-card">
@@ -5903,7 +5989,7 @@ function renderStrategyBacktestConditionPanel() {
     <section class="strategy-dashboard-card strategy-backtest-condition-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-3 回測條件調整</p>
+          <p class="section-kicker">回測條件調整</p>
           <h3>產生不同參數的回測 Run ID</h3>
           <p>選好日期、策略、市場與參數預設後，複製下方指令到本機 API 專案執行，再回到此頁選新的 Run ID 比較。</p>
         </div>
@@ -6003,7 +6089,7 @@ function renderStrategyBacktestFilters() {
     <section class="strategy-track-filter-panel strategy-backtest-filter-panel">
       <div class="strategy-filter-title">
         <div>
-          <p class="section-kicker">V1.4-3 策略回測</p>
+          <p class="section-kicker">策略回測</p>
           <h3>回測條件</h3>
           <p>選擇 Run ID、策略、結果與排序方式，檢查歷史策略訊號後續表現。</p>
         </div>
@@ -6307,7 +6393,7 @@ function renderStrategyBacktestRankingPanel() {
     <section class="strategy-ranking-section strategy-backtest-ranking-section enhanced-backtest-ranking-section">
       <div class="strategy-ranking-header">
         <div>
-          <p class="section-kicker">V1.4-3 排行榜</p>
+          <p class="section-kicker">回測排行榜</p>
           <h3>回測排行榜強化</h3>
           <p>依 ${escapeHtml(metric.label)} 檢查最佳股票、最弱股票與各策略平均表現。</p>
         </div>
@@ -6638,7 +6724,7 @@ function renderStrategyTrendFilter() {
     <section class="strategy-dashboard-card strategy-trend-filter-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-6 策略勝率趨勢</p>
+          <p class="section-kicker">策略勝率趨勢</p>
           <h3>回測勝率趨勢條件</h3>
           <p>使用既有回測 Run 進行比較，不新增 SQL。建議先各跑一次平衡 / 保守 / 積極參數，再回來看趨勢。</p>
         </div>
@@ -6771,7 +6857,7 @@ function renderStrategyWinRateTrendPage() {
       { label: "趨勢狀態", value: "尚未載入" },
       { label: "指標", value: getBacktestMetric(state.strategyTrendMetric).label },
     ], "策略勝率趨勢會讀取最近多次已完成回測 Run。 ");
-    setResultHeader({ title: "策略勝率趨勢", desc: "套用條件後會顯示 Run 趨勢與策略分項趨勢。", badge: "V1.4-6" });
+    setResultHeader({ title: "策略勝率趨勢", desc: "套用條件後會顯示 Run 趨勢與策略分項趨勢。", badge: "勝率趨勢" });
     stockList.innerHTML = `${renderStrategyTrendFilter()}<article class="search-intro-card"><div class="intro-icon">📈</div><h3>尚未載入策略勝率趨勢</h3><p>請先套用條件，或確認資料庫已有已完成的策略回測 Run。</p></article>`;
     return;
   }
@@ -6837,7 +6923,7 @@ async function loadStrategyWinRateTrend() {
     setContentSummary([
       { label: "讀取狀態", value: "失敗" },
       { label: "錯誤訊息", value: error.message },
-    ], "請確認 API 已部署 V1.4-6，且已有已完成的回測 Run。 ");
+    ], "請確認 API 已部署策略勝率趨勢，且已有已完成的回測 Run。 ");
     setResultHeader({ title: "策略勝率趨勢讀取失敗", desc: "目前無法取得策略勝率趨勢。", badge: "讀取失敗" });
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
@@ -6885,7 +6971,7 @@ function renderStrategyStockHistoryFilter() {
     <section class="strategy-dashboard-card strategy-stock-history-filter-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-7 個股策略歷史紀錄</p>
+          <p class="section-kicker">個股策略歷史紀錄</p>
           <h3>查詢單一股票歷史策略訊號</h3>
           <p>輸入股票代號，例如 2330，就能看到過去在哪些 Run ID、哪些策略中出現過，以及後續 ${escapeHtml(metric.label)} 表現。</p>
         </div>
@@ -7067,7 +7153,7 @@ function renderStrategyStockHistoryPage() {
       { label: "查詢狀態", value: "尚未輸入" },
       { label: "指標", value: metric.label },
     ], "輸入股票代號後，會查詢既有策略回測結果。 ");
-    setResultHeader({ title: "個股策略歷史紀錄", desc: "請先輸入股票代號，例如 2330。", badge: "V1.4-7" });
+    setResultHeader({ title: "個股策略歷史紀錄", desc: "請先輸入股票代號，例如 2330。", badge: "個股歷史" });
     stockList.innerHTML = `${renderStrategyStockHistoryFilter()}<article class="search-intro-card"><div class="intro-icon">📚</div><h3>請輸入股票代號</h3><p>查詢後會顯示該股票過去出現過的策略訊號、勝率與後續報酬。</p></article>`;
     return;
   }
@@ -7077,7 +7163,7 @@ function renderStrategyStockHistoryPage() {
       { label: "查詢股票", value: code },
       { label: "指標", value: metric.label },
     ], "正在等待查詢結果。 ");
-    setResultHeader({ title: "個股策略歷史紀錄", desc: "套用查詢後會顯示歷史訊號。", badge: "V1.4-7" });
+    setResultHeader({ title: "個股策略歷史紀錄", desc: "套用查詢後會顯示歷史訊號。", badge: "個股歷史" });
     stockList.innerHTML = `${renderStrategyStockHistoryFilter()}<article class="search-intro-card"><div class="intro-icon">📚</div><h3>尚未載入歷史紀錄</h3><p>請按「查詢歷史」取得資料。</p></article>`;
     return;
   }
@@ -7166,7 +7252,7 @@ async function loadStrategyStockHistory() {
     setContentSummary([
       { label: "讀取狀態", value: "失敗" },
       { label: "錯誤訊息", value: error.message },
-    ], "請確認 API 已部署 V1.4-7，且 strategy_backtest_results 已有資料。 ");
+    ], "請確認 API 已部署個股策略歷史紀錄，且 strategy_backtest_results 已有資料。 ");
     setResultHeader({ title: "個股策略歷史讀取失敗", desc: "目前無法取得個股策略歷史。", badge: "讀取失敗" });
     stockList.innerHTML = `
       ${renderStrategyStockHistoryFilter()}
@@ -7210,7 +7296,7 @@ function renderLineProviderNotice() {
     <section class="strategy-dashboard-card notification-provider-card ${configured ? "" : "warning-card"}">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-4-1 LINE 通知</p>
+          <p class="section-kicker">LINE 通知</p>
           <h3>${configured ? "LINE Messaging API 已設定" : "尚未設定 LINE Channel Access Token"}</h3>
           <p>${escapeHtml(lineStatus.note || "讀取 LINE 通知設定中。")}</p>
         </div>
@@ -7248,7 +7334,7 @@ function renderLineBindingCard() {
     <section class="strategy-dashboard-card line-binding-card ${webhookReady ? "" : "warning-card"}">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4.8.4 LINE 自動綁定</p>
+          <p class="section-kicker">LINE 自動綁定</p>
           <h3>不用手動找 User ID</h3>
           <p>產生綁定碼後，到 LINE 對 Bot 傳送指令，系統會從 webhook 自動取得真正的 LINE User ID / Group ID / Room ID。</p>
         </div>
@@ -7383,7 +7469,7 @@ function renderNotificationSettingsPage() {
     { label: "通知通道", value: `${formatNumber(channels.length)} 個` },
     { label: "啟用中", value: `${formatNumber(enabledCount)} 個` },
     { label: "最後測試", value: channels.find((item) => item.last_tested_at)?.last_tested_at || "尚未測試" },
-  ], "V1.4-4-1 先完成 LINE 測試發送；Email / Telegram 會在後續版本接續。 ");
+  ], "目前先完成 LINE 測試發送；Email / Telegram 會在後續版本接續。 ");
 
   setResultHeader({
     title: "通知外送通道",
@@ -7620,7 +7706,7 @@ function renderStrategyDailyReportFilter(report = null) {
     <section class="strategy-dashboard-card daily-report-filter-card">
       <div class="alerts-dashboard-header strategy-dashboard-header">
         <div>
-          <p class="section-kicker">V1.4-5 每日策略報告</p>
+          <p class="section-kicker">每日策略報告</p>
           <h3>報告條件</h3>
           <p>可依資料日、市場與清單數量產生報告。日期留空時會抓最新籌碼資料日。</p>
         </div>
@@ -7844,7 +7930,7 @@ function renderStrategyDailyReportPage() {
       { label: "報告狀態", value: "尚未產生" },
       { label: "LINE 外送", value: getEnabledLineChannels().length ? "可外送" : "尚無通道" },
     ], "每日策略報告會依最新籌碼資料日產生。 ");
-    setResultHeader({ title: "每日策略報告", desc: "產生報告後可預覽，也可外送到 LINE。", badge: "V1.4-5" });
+    setResultHeader({ title: "每日策略報告", desc: "產生報告後可預覽，也可外送到 LINE。", badge: "每日報告" });
     renderStrategyDailyReportEmpty();
     return;
   }
@@ -7930,7 +8016,7 @@ async function loadStrategyDailyReport() {
     setContentSummary([
       { label: "讀取狀態", value: "失敗" },
       { label: "錯誤訊息", value: error.message },
-    ], "請確認 API 已部署 V1.4-5。 ");
+    ], "請確認 API 已部署每日策略報告。 ");
     setResultHeader({ title: "每日策略報告讀取失敗", desc: "目前無法產生策略報告。", badge: "讀取失敗" });
     stockList.innerHTML = `
       <article class="search-intro-card error-card">
@@ -8113,6 +8199,7 @@ async function loadList() {
 
   try {
     const rows = await fetchJson(buildListPath());
+    await loadAiSelectionForRadar();
     await loadMarketRiskForRadar();
     await loadGlobalRiskForRadar();
     await loadBreakoutForRadar();
@@ -8146,7 +8233,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderAiSelectionPanel()}${renderBigHolderTrendPanel()}${renderMainForcePanel()}${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([
@@ -8570,7 +8657,7 @@ stockList.addEventListener("click", (event) => {
     return;
   }
 
-  const v14RefreshButton = event.target.closest("[data-refresh-v14-status], [data-refresh-v13-status]");
+  const v14RefreshButton = event.target.closest("[data-refresh-v20-status], [data-refresh-v14-status], [data-refresh-v13-status]");
   if (v14RefreshButton) {
     loadV13Status({ force: true });
     return;
