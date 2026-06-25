@@ -1,0 +1,117 @@
+====================================
+Stock Radar V1.7 自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v17-acceptance-20260625-200431.log
+開始時間：2026/6/25 20:04:31
+API：http://localhost:3000
+DB流程：執行 setup / generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V1.7 技術突破資料表
+指令：npm run breakout:setup
+
+> stock-radar-api@1.0.0 breakout:setup
+> node scripts/setupBreakoutEngineTables.js
+
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V1.7 技術突破引擎資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v17-breakout-engine.sql
+建立 / 確認完成：
+- technical_breakout_signals
+- technical_breakout_summaries
+結果：PASS
+完成：建立 V1.7 技術突破資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生技術突破訊號
+指令：npm run breakout:generate
+
+> stock-radar-api@1.0.0 breakout:generate
+> node scripts/generateBreakoutSignals.js
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V1.7 技術突破訊號產生
+====================================
+分析日期：2026-06-25
+更新個股數：1954
+略過個股數：0
+突破分數區間：19.00 ～ 100.00
+平均突破分數：32.63
+等級統計：STRONG 36｜WATCH 16｜EARLY 101｜NEUTRAL 1801
+結果：PASS
+完成：產生技術突破訊號，耗時 1分0秒
+--------------------------------------------------
+開始：V1.7 靜態 / API 驗收
+指令：npm run v17:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v17:check
+> node scripts/checkV17.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V1.7 靜態 / API 驗收檢查
+====================================
+✅ [版本] API 版本為 V1.7.0 - stock-radar-api-v1.7.0
+✅ [版本] API 預期 PWA 版本為 v63 - stock-radar-pwa-v63
+✅ [版本] service-worker 快取版本為 v63 - stock-radar-pwa-v63
+✅ [npm 指令] breakout:setup - node scripts/setupBreakoutEngineTables.js
+✅ [npm 指令] breakout:generate - node scripts/generateBreakoutSignals.js
+✅ [npm 指令] breakout:daily - npm run breakout:setup && npm run breakout:generate
+✅ [npm 指令] v17:check - node scripts/checkV17.js
+✅ [npm 指令] v17:test - node scripts/runV17Acceptance.js
+✅ [npm 指令] global-risk:daily - npm run global-risk:import && npm run global-risk:score
+✅ [npm 指令] market-risk:daily - npm run market-risk:import && npm run market-risk:score
+✅ [npm 指令] official:daily - npm run official:market && npm run official:revenue && npm run official:eps && npm run official:etf && npm run official:events && npm run official:institutional-amounts
+✅ [npm 指令] alerts:generate - node scripts/generateWatchlistAlerts.js
+✅ [npm 指令] strategy-backtests:generate - node scripts/generateStrategyBacktests.js
+✅ [必要檔案] stock-radar-api/sql/v17-breakout-engine.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupBreakoutEngineTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateBreakoutSignals.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV17.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV17Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] technical_breakout_signals 資料表 - v17-breakout-engine.sql
+✅ [SQL] technical_breakout_summaries 資料表 - v17-breakout-engine.sql
+✅ [SQL] Breakout Score 欄位 - breakout_score
+✅ [SQL] 突破型態欄位 - breakout_type
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v17/status - server.js 靜態檢查
+✅ [API 路由] GET /v17/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /breakout/latest - server.js 靜態檢查
+✅ [API 路由] GET /breakout/top - server.js 靜態檢查
+✅ [API 路由] GET /radar/top - server.js 靜態檢查
+✅ [前端] 技術突破狀態卡 - renderBreakoutPanel
+✅ [前端] 首頁讀取 /breakout/latest - /breakout/latest
+✅ [前端] 股票卡顯示突破分數 - 突破分數
+✅ [前端] V1.7 狀態檢查 - /v17/status
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v17/status - HTTP 200
+✅ [API 動態] /v17/acceptance - HTTP 200
+✅ [API 動態] /breakout/latest - HTTP 200
+✅ [API 動態] /breakout/top - HTTP 200
+------------------------------------
+PASS：41
+WARN：0
+FAIL：0
+結果：PASS
+完成：V1.7 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 20:05:34
+總耗時：1分2秒
+結果：PASS

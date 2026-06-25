@@ -536,6 +536,75 @@ function renderGlobalRiskPanel() {
   `;
 }
 
+
+
+function renderBreakoutPanel() {
+  const payload = state.breakoutRisk || {};
+  const summary = payload.summary || null;
+  const topSignals = Array.isArray(payload.top_signals) ? payload.top_signals : [];
+  const advice = payload.advice || state.breakoutRiskError || "尚未讀取技術突破資料。";
+
+  if (!summary && !state.breakoutRiskError) return "";
+
+  const score = pick(summary || {}, ["avg_breakout_score", "top_breakout_score"], "-");
+  const tone = getScoreClass(score);
+  const tradeDate = pick(summary || {}, ["trade_date"], "-");
+  const totalCount = pick(summary || {}, ["total_count"], 0);
+  const strongCount = pick(summary || {}, ["strong_count"], 0);
+  const watchCount = pick(summary || {}, ["watch_count"], 0);
+  const topStock = `${pick(summary || {}, ["top_stock_name"], "-")} ${pick(summary || {}, ["top_stock_code"], "")}`.trim();
+  const topPills = topSignals.slice(0, 4).map((item) => {
+    const label = `${pick(item, ["stock_name"], "-")} ${pick(item, ["stock_code"], "")}`.trim();
+    const itemScore = pick(item, ["breakout_score"], "-");
+    const type = pick(item, ["breakout_type"], "技術觀察");
+    return `<span class="component-pill ${getScoreClass(itemScore)}">${escapeHtml(label)} ${formatNumber(itemScore)}｜${escapeHtml(type)}</span>`;
+  }).join("");
+
+  return `
+    <section class="market-risk-panel breakout-panel ${tone}">
+      <div class="market-risk-main">
+        <div>
+          <p class="section-kicker">V1.7 技術突破引擎</p>
+          <h3>技術突破雷達｜${formatNumber(totalCount)} 檔</h3>
+          <p>${escapeHtml(advice)}</p>
+        </div>
+        <div class="score-box ${tone}">
+          <span class="score-value">${formatNumber(score)}</span>
+          <span class="score-label">Breakout</span>
+        </div>
+      </div>
+      <div class="market-risk-grid">
+        ${createInfoItem("強突破", `${formatNumber(strongCount)} 檔`, "score-high")}
+        ${createInfoItem("觀察股", `${formatNumber(watchCount)} 檔`, "score-mid")}
+        ${createInfoItem("第一名", escapeHtml(topStock))}
+        ${createInfoItem("資料日", formatDate(tradeDate))}
+      </div>
+      ${topPills ? `<div class="global-component-strip">${topPills}</div>` : ""}
+    </section>
+  `;
+}
+
+async function loadBreakoutForRadar() {
+  if (state.page !== "radar") {
+    state.breakoutRisk = null;
+    state.breakoutRiskError = "";
+    return;
+  }
+
+  try {
+    const result = await fetchJson("/breakout/latest", { method: "GET", raw: true });
+    state.breakoutRisk = result;
+    state.breakoutRiskError = "";
+  } catch (error) {
+    state.breakoutRisk = null;
+    state.breakoutRiskError = error.message || "技術突破資料讀取失敗。";
+  }
+}
+
+async function loadV17StatusForAcceptance() {
+  return fetchJson("/v17/status", { method: "GET", raw: true });
+}
+
 async function loadV16StatusForAcceptance() {
   return fetchJson("/v16/status", { method: "GET", raw: true });
 }
@@ -2558,7 +2627,7 @@ function rerenderCurrentContent() {
       countUnit: state.page === "industryFlow" ? "個產業" : state.page === "watchlist" ? "檔" : "檔",
       badge: state.page === "watchlist" ? "自選股" : state.market || "全部",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     return;
   }
 
@@ -5276,8 +5345,20 @@ function renderStockCard(row, index) {
   const globalAdjustment = pick(row, ["global_adjustment"], "-");
   const globalMode = pick(row, ["global_market_mode"], "-");
   const openingGapProbability = pick(row, ["opening_gap_probability"], "-");
+  const breakoutScore = pick(row, ["breakout_score"], "");
+  const breakoutType = pick(row, ["breakout_type"], "");
+  const breakoutLevel = pick(row, ["breakout_level"], "");
+  const breakoutVolumeRatio = pick(row, ["breakout_volume_ratio_5", "volume_ratio_5"], "-");
+  const breakoutOverheatRisk = pick(row, ["breakout_overheat_risk", "overheat_risk"], "-");
+  const hasBreakoutScore = breakoutScore !== "" && breakoutScore !== null && breakoutScore !== undefined;
 
   const radarItems = [
+    ...(hasBreakoutScore ? [
+      createInfoItem("突破分數", formatNumber(breakoutScore), getScoreClass(breakoutScore)),
+      createInfoItem("突破型態", escapeHtml(breakoutType || breakoutLevel || "技術觀察")),
+      createInfoItem("量能倍數", formatNumber(breakoutVolumeRatio)),
+      createInfoItem("過熱風險", escapeHtml(breakoutOverheatRisk)),
+    ] : []),
     ...(hasGlobalAdjustedScore ? [
       createInfoItem("收盤分數", formatNumber(closeScore), getScoreClass(closeScore)),
       createInfoItem("夜盤修正", formatNumber(nightAdjustment), getChangeClass(nightAdjustment)),
@@ -7860,6 +7941,7 @@ async function loadList() {
     const rows = await fetchJson(buildListPath());
     await loadMarketRiskForRadar();
     await loadGlobalRiskForRadar();
+    await loadBreakoutForRadar();
     let latestRows = Array.isArray(rows) ? rows : [];
 
     if (state.page === "trust" || state.page === "foreignStreak" || state.page === "syncBuy" || state.page === "industryFlow" || state.page === "majorHolder") {
@@ -7888,7 +7970,7 @@ async function loadList() {
       countUnit: state.page === "industryFlow" ? "個產業" : "檔",
       topLabel: state.page === "industryFlow" ? "資金流第一名" : "清單第一檔",
     });
-    stockList.innerHTML = `${state.page === "radar" ? `${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
+    stockList.innerHTML = `${state.page === "radar" ? `${renderBreakoutPanel()}${renderGlobalRiskPanel()}${renderMarketRiskPanel()}` : ""}${state.latestRows.map(renderStockCard).join("")}`;
     showTemporaryStatus(`已更新 ${state.latestRows.length} 檔股票。`, "success");
   } catch (error) {
     setContentSummary([

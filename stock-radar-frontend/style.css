@@ -5502,3 +5502,5 @@ body.chart-zoom-open {
   font-size: 0.82rem;
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
+
+.breakout-panel { border-style: solid; }

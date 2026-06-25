@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v1.6.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v62";
+const API_VERSION = "stock-radar-api-v1.7.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v63";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1588,6 +1588,93 @@ function calculateV16Progress() {
   if (V16_MODULES.length === 0) return 0;
   const total = V16_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
   return Math.round(total / V16_MODULES.length);
+}
+
+
+const V17_FEATURE_TABLES = [
+  { name: "technical_breakout_signals", label: "V1.7 技術突破訊號", date_column: "trade_date" },
+  { name: "technical_breakout_summaries", label: "V1.7 技術突破摘要", date_column: "trade_date" },
+];
+
+const V17_MODULES = [
+  {
+    key: "breakout_tables",
+    name: "技術突破資料表",
+    progress: 100,
+    status: "completed",
+    required_tables: ["technical_breakout_signals", "technical_breakout_summaries"],
+  },
+  {
+    key: "breakout_score",
+    name: "Breakout Score 突破強度分數",
+    progress: 90,
+    status: "first_version",
+    required_apis: ["npm run breakout:generate", "GET /breakout/top"],
+  },
+  {
+    key: "breakout_patterns",
+    name: "20日新高 / 60日新高 / 爆量 / 均線突破偵測",
+    progress: 85,
+    status: "first_version",
+    required_apis: ["GET /breakout/latest", "GET /breakout/top"],
+  },
+  {
+    key: "radar_breakout_integration",
+    name: "今日雷達整合突破分數",
+    progress: 85,
+    status: "first_version",
+    required_apis: ["GET /radar/top"],
+  },
+  {
+    key: "v17_acceptance_log",
+    name: "V1.7 自動測試與 log",
+    progress: 100,
+    status: "completed",
+    required_apis: ["npm run v17:check", "npm run v17:test"],
+  },
+];
+
+const V17_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "technical_breakout_signals 已建立",
+      "technical_breakout_summaries 已建立",
+      "npm run breakout:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "技術突破引擎",
+    items: [
+      "npm run breakout:generate 可依 daily_prices 產生 Breakout Score",
+      "GET /breakout/latest 可回傳突破摘要與強勢清單",
+      "GET /breakout/top 可回傳技術突破排行",
+      "突破型態包含 20日新高、60日新高、爆量、均線多頭與資料不足觀察",
+    ],
+  },
+  {
+    group: "首頁 / 每日之星",
+    items: [
+      "首頁顯示 V1.7 技術突破雷達摘要",
+      "GET /radar/top 新增 breakout_score / breakout_type / breakout_level",
+      "股票卡片顯示突破分數、突破型態、量能倍數與過熱風險",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run v17:check",
+      "npm run v17:test -- --api=http://localhost:3000",
+      "node --check server.js",
+      "node --check ../stock-radar-frontend/app.js",
+    ],
+  },
+];
+
+function calculateV17Progress() {
+  if (V17_MODULES.length === 0) return 0;
+  const total = V17_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V17_MODULES.length);
 }
 
 const V13_MODULES = [
@@ -2044,6 +2131,133 @@ async function buildV16GlobalRiskPayload(tradeDate = null) {
     components,
     adjusted_summary: adjustedSummary,
     advice: getV16RiskAdvice(snapshot),
+  });
+}
+
+
+async function getLatestBreakoutDate() {
+  if (!(await checkTableExists("technical_breakout_signals"))) return null;
+  const rows = await safeQuery(
+    `SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_date FROM technical_breakout_signals`,
+    [],
+    [{ latest_date: null }],
+  );
+  return rows?.[0]?.latest_date || null;
+}
+
+async function getBreakoutSummary(tradeDate = null, market = "全部") {
+  if (!(await checkTableExists("technical_breakout_summaries"))) {
+    return { trade_date: tradeDate || null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0 };
+  }
+
+  const targetDate = tradeDate || await getLatestBreakoutDate();
+  if (!targetDate) {
+    return { trade_date: null, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0 };
+  }
+
+  const rows = await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      market_type,
+      total_count,
+      strong_count,
+      watch_count,
+      early_count,
+      avg_breakout_score,
+      top_breakout_score,
+      top_stock_code,
+      top_stock_name,
+      DATE_FORMAT(generated_at, '%Y-%m-%d %H:%i:%s') AS generated_at
+    FROM technical_breakout_summaries
+    WHERE trade_date = ?
+      AND market_type = ?
+    LIMIT 1
+    `,
+    [targetDate, market || "全部"],
+    [],
+  );
+
+  return rows?.[0] || { trade_date: targetDate, market_type: market || "全部", total_count: 0, strong_count: 0, watch_count: 0, early_count: 0 };
+}
+
+async function getBreakoutTopRows({ tradeDate = null, market = null, limit = 10 } = {}) {
+  if (!(await checkTableExists("technical_breakout_signals"))) return [];
+
+  const targetDate = tradeDate || await getLatestBreakoutDate();
+  if (!targetDate) return [];
+
+  const params = [targetDate];
+  let marketCondition = "";
+  if (market) {
+    marketCondition = "AND market_type = ?";
+    params.push(market);
+  }
+  params.push(limit);
+
+  return await safeQuery(
+    `
+    SELECT
+      DATE_FORMAT(trade_date, '%Y-%m-%d') AS trade_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      breakout_score,
+      breakout_level,
+      breakout_type,
+      breakout_tags,
+      close_price,
+      price_change,
+      price_change_percent,
+      CAST(volume AS CHAR) AS volume,
+      volume_ratio_5,
+      ma5,
+      ma20,
+      ma60,
+      high_20,
+      high_60,
+      is_20d_high,
+      is_60d_high,
+      is_ma_bullish,
+      is_volume_breakout,
+      is_box_breakout,
+      overheat_risk,
+      support_risk,
+      chip_score,
+      global_adjusted_score,
+      market_adjusted_score,
+      reason_summary
+    FROM technical_breakout_signals
+    WHERE trade_date = ?
+      ${marketCondition}
+    ORDER BY breakout_score DESC, is_volume_breakout DESC, is_20d_high DESC, stock_code ASC
+    LIMIT ?
+    `,
+    params,
+    [],
+  );
+}
+
+function getV17BreakoutAdvice(summary) {
+  const total = Number(summary?.total_count || 0);
+  const strong = Number(summary?.strong_count || 0);
+  const watch = Number(summary?.watch_count || 0);
+  const avg = Number(summary?.avg_breakout_score || 0);
+  if (!total) return "尚未產生技術突破訊號，請先執行 npm run breakout:generate。";
+  if (strong >= 20 || avg >= 70) return `技術突破訊號偏強，強突破 ${strong} 檔、觀察 ${watch} 檔，可優先檢查量價同步轉強股。`;
+  if (strong >= 5 || watch >= 30) return `技術突破訊號正常，強突破 ${strong} 檔、觀察 ${watch} 檔，適合搭配 V1.5 / V1.6 風險分數篩選。`;
+  return `技術突破訊號偏少，強突破 ${strong} 檔，盤面可能偏整理或資料仍不足，建議保守觀察。`;
+}
+
+async function buildV17BreakoutPayload(tradeDate = null, market = null, limit = 10) {
+  const summary = await getBreakoutSummary(tradeDate, market || "全部");
+  const topRows = await getBreakoutTopRows({ tradeDate: summary?.trade_date || tradeDate, market, limit });
+
+  return convertBigIntToString({
+    summary,
+    top_signals: topRows,
+    advice: getV17BreakoutAdvice(summary),
   });
 }
 
@@ -4424,6 +4638,188 @@ app.get("/v16/acceptance", (req, res) => {
 });
 
 
+app.get("/breakout/latest", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 10, 50);
+    const tradeDate = req.query.date || null;
+    const payload = await buildV17BreakoutPayload(tradeDate, market, limit);
+
+    res.json({
+      success: true,
+      version: API_VERSION,
+      module: "V1.7 技術突破引擎",
+      market: market || "全部",
+      ...payload,
+    });
+  } catch (error) {
+    console.error("查詢技術突破摘要失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢技術突破摘要失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/breakout/top", async (req, res) => {
+  try {
+    const market = parseMarket(req.query.market);
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const tradeDate = req.query.date || null;
+
+    if (!(await checkTableExists("technical_breakout_signals"))) {
+      return res.status(500).json({
+        success: false,
+        version: API_VERSION,
+        message: "尚未建立 technical_breakout_signals，請先執行 npm run breakout:setup。",
+      });
+    }
+
+    const targetDate = tradeDate || await getLatestBreakoutDate();
+    const rows = await getBreakoutTopRows({ tradeDate: targetDate, market, limit });
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      trade_date: targetDate,
+      market: market || "全部",
+      limit,
+      count: rows.length,
+      data: rows,
+    }));
+  } catch (error) {
+    console.error("查詢技術突破排行失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      message: "查詢技術突破排行失敗",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/v17/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const v17TableStatuses = [];
+
+    for (const tableDefinition of V17_FEATURE_TABLES) {
+      v17TableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+
+    const missingTables = v17TableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const summary = await getBreakoutSummary();
+    const topRows = await getBreakoutTopRows({ tradeDate: summary?.trade_date || null, limit: 5 });
+    const summaryReady = Number(summary?.total_count || 0) > 0;
+    const topReady = topRows.length > 0;
+
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v1.7.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v63" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck(
+        "tables",
+        "V1.7 必要資料表",
+        missingTables.length === 0 ? "pass" : "fail",
+        missingTables.length === 0 ? "V1.7 技術突破資料表都存在。" : `缺少資料表：${missingTables.join("、")}`,
+        { missing_tables: missingTables },
+      ),
+      buildCheck(
+        "breakout_summary",
+        "技術突破摘要",
+        summaryReady ? "pass" : "warn",
+        summaryReady ? "已有技術突破摘要。" : "尚未產生技術突破訊號，請執行 npm run breakout:generate。",
+        { summary },
+      ),
+      buildCheck(
+        "breakout_top",
+        "技術突破排行",
+        topReady ? "pass" : "warn",
+        topReady ? `已有 ${topRows.length} 筆技術突破排行。` : "技術突破排行尚無資料。",
+        { count: topRows.length },
+      ),
+    ];
+
+    const overallStatus = summarizeChecks(checks);
+
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V1.7 技術突破引擎",
+      overall_status: overallStatus,
+      overall_message:
+        overallStatus === "pass"
+          ? "V1.7 技術突破引擎、資料表、摘要與排行正常。"
+          : overallStatus === "warn"
+            ? "V1.7 程式已就緒，但技術突破訊號尚需產生。"
+            : "V1.7 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV17Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: v17TableStatuses,
+      breakout: {
+        summary,
+        top_signals: topRows,
+        advice: getV17BreakoutAdvice(summary),
+      },
+      modules: V17_MODULES,
+      next_actions: [
+        "執行 npm run breakout:setup 建立 V1.7 資料表。",
+        "執行 npm run breakout:generate 產生技術突破訊號。",
+        "執行 npm run v17:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V1.7 系統狀態失敗：", error);
+    res.status(500).json({
+      success: false,
+      version: API_VERSION,
+      module: "V1.7 技術突破引擎",
+      message: "查詢 V1.7 系統狀態失敗",
+      error: error.message,
+      checked_at: nowTaipeiText(),
+    });
+  }
+});
+
+app.get("/v17/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V1.7 技術突破引擎驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV17Progress(),
+    checklist: V17_FINAL_ACCEPTANCE_ITEMS,
+    modules: V17_MODULES,
+    recommended_commands: [
+      "npm run breakout:setup",
+      "npm run breakout:generate",
+      "npm run v17:check",
+      "npm run v17:test -- --api=http://localhost:3000",
+    ],
+    recommended_urls: [
+      "/health",
+      "/v17/status",
+      "/v17/acceptance",
+      "/breakout/latest",
+      "/breakout/top",
+      "/radar/top",
+    ],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+
 
 app.post("/auth/google", async (req, res) => {
   try {
@@ -6052,6 +6448,7 @@ app.get("/radar/top", async (req, res) => {
     conn = await pool.getConnection();
     const hasMarketRiskAdjustedScores = await checkTableExists("market_risk_adjusted_scores");
     const hasGlobalRiskAdjustedScores = await checkTableExists("global_risk_adjusted_scores");
+    const hasBreakoutSignals = await checkTableExists("technical_breakout_signals");
 
     let targetDate = queryDate;
 
@@ -6149,6 +6546,38 @@ app.get("/radar/top", async (req, res) => {
         NULL AS global_risk_summary,
       `;
 
+
+
+    const breakoutSelect = hasBreakoutSignals
+      ? `
+        b.breakout_score,
+        b.breakout_level,
+        b.breakout_type,
+        b.breakout_tags,
+        b.volume_ratio_5 AS breakout_volume_ratio_5,
+        b.is_20d_high,
+        b.is_60d_high,
+        b.is_ma_bullish,
+        b.is_volume_breakout,
+        b.overheat_risk AS breakout_overheat_risk,
+        b.support_risk AS breakout_support_risk,
+        b.reason_summary AS breakout_reason_summary,
+      `
+      : `
+        NULL AS breakout_score,
+        NULL AS breakout_level,
+        NULL AS breakout_type,
+        NULL AS breakout_tags,
+        NULL AS breakout_volume_ratio_5,
+        NULL AS is_20d_high,
+        NULL AS is_60d_high,
+        NULL AS is_ma_bullish,
+        NULL AS is_volume_breakout,
+        NULL AS breakout_overheat_risk,
+        NULL AS breakout_support_risk,
+        NULL AS breakout_reason_summary,
+      `;
+
     const marketRiskAdjustedJoin = hasMarketRiskAdjustedScores
       ? `
       LEFT JOIN market_risk_adjusted_scores a
@@ -6161,6 +6590,14 @@ app.get("/radar/top", async (req, res) => {
       LEFT JOIN global_risk_adjusted_scores g
         ON c.stock_code = g.stock_code
        AND c.trade_date = g.trade_date`
+      : "";
+
+
+    const breakoutJoin = hasBreakoutSignals
+      ? `
+      LEFT JOIN technical_breakout_signals b
+        ON c.stock_code = b.stock_code
+       AND c.trade_date = b.trade_date`
       : "";
 
     let marketRiskAdjustedOrder = "c.chip_score DESC, c.stock_code ASC";
@@ -6183,6 +6620,7 @@ app.get("/radar/top", async (req, res) => {
         c.chip_score,
         ${marketRiskAdjustedSelect}
         ${globalRiskAdjustedSelect}
+        ${breakoutSelect}
         c.foreign_score,
         c.investment_trust_score,
         c.dealer_score,
@@ -6203,6 +6641,7 @@ app.get("/radar/top", async (req, res) => {
         ON c.stock_code = s.stock_code
       ${marketRiskAdjustedJoin}
       ${globalRiskAdjustedJoin}
+      ${breakoutJoin}
       LEFT JOIN daily_prices p
         ON c.stock_code = p.stock_code
        AND c.trade_date = p.trade_date

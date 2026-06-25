@@ -45,7 +45,12 @@
     "global-risk:score": "node scripts/generateGlobalRiskScores.js",
     "global-risk:daily": "npm run global-risk:import && npm run global-risk:score",
     "v16:check": "node scripts/checkV16.js",
-    "v16:test": "node scripts/runV16Acceptance.js"
+    "v16:test": "node scripts/runV16Acceptance.js",
+    "breakout:setup": "node scripts/setupBreakoutEngineTables.js",
+    "breakout:generate": "node scripts/generateBreakoutSignals.js",
+    "breakout:daily": "npm run breakout:setup && npm run breakout:generate",
+    "v17:check": "node scripts/checkV17.js",
+    "v17:test": "node scripts/runV17Acceptance.js"
   },
   "keywords": [
     "stock",
