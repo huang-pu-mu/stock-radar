@@ -1,0 +1,136 @@
+====================================
+Stock Radar V2.2 交易紀錄與績效分析自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v22-acceptance-20260625-225607.log
+開始時間：2026/6/25 22:56:07
+API：http://localhost:3000
+DB流程：執行 setup / snapshot / alerts
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.2 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupTradePerformanceTables.js
+完成：V2.2 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.2 performance script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateTradePerformance.js
+完成：V2.2 performance script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.2 交易紀錄與績效資料表
+指令：npm run trade:setup
+
+> stock-radar-api@1.0.0 trade:setup
+> node scripts/setupTradePerformanceTables.js
+
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+====================================
+Stock Radar V2.2 交易紀錄與績效資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v22-trade-performance.sql
+建立 / 確認完成：
+- user_trades
+- user_realized_trades
+- user_performance_snapshots
+結果：PASS
+完成：建立 V2.2 交易紀錄與績效資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.2 交易績效快照
+指令：npm run trade:performance
+
+> stock-radar-api@1.0.0 trade:performance
+> node scripts/generateTradePerformance.js
+
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+====================================
+Stock Radar V2.2 交易績效產生
+====================================
+績效日期：2026-06-25
+檢查賣出紀錄：0
+產生 / 更新已實現損益：0
+略過賣出紀錄：0
+產生 / 更新績效快照：0
+結果：PASS
+完成：產生 V2.2 交易績效快照，耗時 0分1秒
+--------------------------------------------------
+開始：V2.2 靜態 / API 驗收
+指令：npm run v22:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v22:check
+> node scripts/checkV22.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V2.2 交易紀錄與績效分析驗收檢查
+====================================
+✅ [版本] API 版本為 V2.2.0 - stock-radar-api-v2.2.0
+✅ [版本] API 預期 PWA 版本為 v73 - stock-radar-pwa-v73
+✅ [版本] service-worker 快取版本為 v73 - stock-radar-pwa-v73
+✅ [前端] 側邊功能選單顯示 V2.2 - index.html
+✅ [npm 指令] trade:setup - node scripts/setupTradePerformanceTables.js
+✅ [npm 指令] trade:performance - node scripts/generateTradePerformance.js
+✅ [npm 指令] trade:daily - npm run trade:setup && npm run trade:performance
+✅ [npm 指令] v22:check - node scripts/checkV22.js
+✅ [npm 指令] v22:test - node scripts/runV22Acceptance.js
+✅ [npm 指令] v21:test - node scripts/runV21Acceptance.js
+✅ [npm 指令] position:daily - npm run position:setup && npm run position:snapshot && npm run position:alerts
+✅ [npm 指令] ai-selection:daily - npm run ai-selection:setup && npm run ai-selection:generate
+✅ [必要檔案] stock-radar-api/sql/v22-trade-performance.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupTradePerformanceTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateTradePerformance.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV22.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV22Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] user_trades 資料表 - CREATE TABLE IF NOT EXISTS `user_trades`
+✅ [SQL] user_realized_trades 資料表 - CREATE TABLE IF NOT EXISTS `user_realized_trades`
+✅ [SQL] user_performance_snapshots 資料表 - CREATE TABLE IF NOT EXISTS `user_performance_snapshots`
+✅ [SQL] 已實現損益欄位 - realized_profit_loss
+✅ [SQL] 勝率欄位 - win_rate_pct
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v22/status - server.js 靜態檢查
+✅ [API 路由] GET /v22/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /trades - server.js 靜態檢查
+✅ [API 路由] POST /trades - server.js 靜態檢查
+✅ [API 路由] PUT /trades/:id - server.js 靜態檢查
+✅ [API 路由] DELETE /trades/:id - server.js 靜態檢查
+✅ [API 路由] GET /trades/summary - server.js 靜態檢查
+✅ [API 路由] GET /trades/:id - server.js 靜態檢查
+✅ [API 路由] POST /trades/performance/generate - server.js 靜態檢查
+✅ [API 路由] GET /performance/latest - server.js 靜態檢查
+✅ [API 路由] GET /performance/history - server.js 靜態檢查
+✅ [API 路由] GET /performance/strategy - server.js 靜態檢查
+✅ [前端] 交易績效頁 - renderTradePerformancePage
+✅ [前端] 交易紀錄 API - /trades
+✅ [前端] 績效 API - /performance/latest
+✅ [前端] V2.2 文字 - V2.2 交易紀錄與績效分析
+✅ [前端] 已實現損益 - 已實現損益
+✅ [前端] 不再顯示 V1.4 系統狀態 - V2.2 status copy
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v22/status - HTTP 200
+✅ [API 動態] /v22/acceptance - HTTP 200
+✅ [API 動態] /trades 需登入保護 - HTTP 401
+✅ [API 動態] /performance/latest 需登入保護 - HTTP 401
+------------------------------------
+PASS：52
+WARN：0
+FAIL：0
+結果：PASS
+完成：V2.2 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 22:56:10
+總耗時：0分3秒
+結果：PASS

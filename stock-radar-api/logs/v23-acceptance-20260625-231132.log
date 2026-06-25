@@ -1,0 +1,88 @@
+====================================
+Stock Radar V2.3 AI 推薦回饋學習自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v23-acceptance-20260625-231132.log
+開始時間：2026/6/25 23:11:32
+API：http://localhost:3000
+DB流程：執行 setup / feedback / learning
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.3 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupAiFeedbackLearningTables.js
+完成：V2.3 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.3 feedback script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateAiFeedbackLearning.js
+完成：V2.3 feedback script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.3 AI 推薦回饋學習資料表
+指令：npm run ai-feedback:setup
+
+> stock-radar-api@1.0.0 ai-feedback:setup
+> node scripts/setupAiFeedbackLearningTables.js
+
+◇ injected env (7) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+====================================
+Stock Radar V2.3 AI 推薦回饋學習資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v23-ai-feedback-learning.sql
+建立 / 確認完成：
+- ai_recommendation_feedbacks
+- ai_factor_performance_snapshots
+- ai_factor_weight_suggestions
+結果：PASS
+完成：建立 V2.3 AI 推薦回饋學習資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.3 AI 推薦回饋學習
+指令：npm run ai-feedback:generate
+
+> stock-radar-api@1.0.0 ai-feedback:generate
+> node scripts/generateAiFeedbackLearning.js
+
+◇ injected env (7) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+====================================
+Stock Radar V2.3 AI 推薦回饋學習產生
+====================================
+結果：FAIL
+SqlError: Error in results, duplicate field name `trade_date`.
+(see option `checkDuplicate`)
+sql: 
+    SELECT
+      s.*,
+      DATE_FORMAT(s.trade_date, '%Y-%m-%d') AS trade_date,
+      p0.close_price AS entry_close_price,
+      (SELECT dp.close_price FROM daily_prices dp WHERE dp.stock_code = s.stock_code AND dp.trade_date > s.trade_date ORDER BY dp.t...
+    at Module.createError (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/misc/errors.js:66:10)
+    at Query.throwUnexpectedError (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/cmd/command.js:39:24)
+    at Query.checkDuplicates (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/cmd/parser.js:445:16)
+    at Query.setParser (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/cmd/parser.js:412:14)
+    at Query.readColumn (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/cmd/parser.js:370:12)
+    at PacketInputStream.onData (file:///D:/code/stock-radar/stock-radar-api/node_modules/mariadb/lib/io/packet-input-stream.js:168:27)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5) {
+  sqlMessage: 'Error in results, duplicate field name `trade_date`.\n' +
+    '(see option `checkDuplicate`)',
+  sql: '\n' +
+    '    SELECT\n' +
+    '      s.*,\n' +
+    "      DATE_FORMAT(s.trade_date, '%Y-%m-%d') AS trade_date,\n" +
+    '      p0.close_price AS entry_close_price,\n' +
+    '      (SELECT dp.close_price FROM daily_prices dp WHERE dp.stock_code = s.stock_code AND dp.trade_date > s.trade_date ORDER BY dp.t...',
+  fatal: false,
+  errno: 45040,
+  sqlState: '42000',
+  code: 'ER_DUPLICATE_FIELD'
+}
+錯誤：產生 V2.3 AI 推薦回饋學習 失敗，exit code: 1，耗時 0分2秒

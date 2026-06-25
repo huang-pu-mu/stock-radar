@@ -116,6 +116,25 @@ const state = {
   positionSummary: null,
   positionAlerts: [],
   positionLastSnapshotResult: null,
+  tradeRows: [],
+  tradeSummary: null,
+  tradeStrategies: [],
+  tradePerformance: null,
+  tradeLastResult: null,
+  aiFeedbackSummary: null,
+  aiFeedbackRows: [],
+  aiFeedbackFactors: [],
+  aiFeedbackWeights: [],
+  aiFeedbackLastResult: null,
+  portfolioSummary: null,
+  portfolioPlans: [],
+  portfolioRisks: [],
+  portfolioLastResult: null,
+  dailyWarRoomReport: null,
+  dailyWarRoomItems: [],
+  dailyWarRoomSections: {},
+  dailyWarRoomHistory: [],
+  dailyWarRoomLastResult: null,
   chartZoomRows: [],
   chartZoomRange: "60",
   chartZoomTitle: "技術圖表",
@@ -232,9 +251,13 @@ const PAGE_GROUP_MAP = {
   syncBuy: "market",
   industryFlow: "market",
   majorHolder: "market",
+  warRoom: "market",
   search: "personal",
   watchlist: "personal",
   positions: "personal",
+  portfolio: "personal",
+  trades: "personal",
+  aiFeedback: "strategy",
   strategies: "strategy",
   strategyTracks: "strategy",
   strategyOptimize: "strategy",
@@ -281,9 +304,13 @@ const PAGE_CONTENT_CONFIG = {
   syncBuy: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，法人同步買超清單會重新整理。", resultTitle: "法人同步買超清單", resultDesc: "找出外資與投信同向買超的股票。" },
   industryFlow: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，產業資金流向會重新整理。", resultTitle: "產業資金流向清單", resultDesc: "依產業彙總法人買賣超，快速看資金流向。" },
   majorHolder: { groupLabel: "市場雷達", filterTitle: "市場篩選", filterDesc: "切換市場後，主力籌碼清單會重新整理。", resultTitle: "主力籌碼清單", resultDesc: "依 TDCC 大戶持股變化觀察籌碼集中度。" },
+  warRoom: { groupLabel: "市場雷達", filterTitle: "每日作戰室", filterDesc: "整合市場風險、全球風險、今日觀察股、持股續抱、減碼檢查與風控提醒。", resultTitle: "每日投資作戰室", resultDesc: "把每天要看的資訊整理成一頁決策摘要。" },
   search: { groupLabel: "個股與自選", filterTitle: "個股查詢", filterDesc: "輸入股票代號後，下方會顯示行情、法人與籌碼資料。", resultTitle: "個股查詢結果", resultDesc: "查詢後會顯示股票目前資料。" },
   watchlist: { groupLabel: "個股與自選", filterTitle: "自選股操作", filterDesc: "登入後可查看與調整自己的自選股清單。", resultTitle: "自選股清單", resultDesc: "顯示你目前保存的股票，並可調整順序或移除。" },
   positions: { groupLabel: "個股與自選", filterTitle: "持股與風控操作", filterDesc: "登入後可新增持股，系統會估算損益、風險狀態與 AI 建議動作。", resultTitle: "我的持股清單", resultDesc: "顯示持股成本、現價、市值、未實現損益與風控提醒。" },
+  portfolio: { groupLabel: "個股與自選", filterTitle: "部位模擬操作", filterDesc: "登入後可設定總資金、現金比例、單檔上限、產業上限與市場模式。", resultTitle: "部位模擬清單", resultDesc: "顯示部位比例、現金比例、集中度與風險曝險。" },
+  trades: { groupLabel: "個股與自選", filterTitle: "交易紀錄操作", filterDesc: "登入後可新增買進 / 賣出紀錄，系統會統計已實現損益、勝率與策略來源績效。", resultTitle: "交易績效清單", resultDesc: "顯示交易紀錄、已實現損益、勝率、平均獲利與平均虧損。" },
+  aiFeedback: { groupLabel: "策略中心", filterTitle: "AI 回饋學習", filterDesc: "追蹤 AI 推薦後 1 / 3 / 5 / 10 日報酬，整理成功率、因子績效與權重建議。", resultTitle: "AI 推薦回饋學習", resultDesc: "顯示推薦成功 / 失敗標記、因子表現與權重調整建議。" },
   alerts: { groupLabel: "個股與自選", filterTitle: "提醒操作", filterDesc: "切換未讀、已讀、高重要性，或進入提醒設定。", resultTitle: "提醒清單", resultDesc: "顯示自選股產生的異常提醒。" },
   notifications: { groupLabel: "個股與自選", filterTitle: "通知外送設定", filterDesc: "設定 LINE Messaging API 收件目標，並發送測試通知。", resultTitle: "通知外送通道", resultDesc: "管理 LINE 通知通道，後續每日報告與提醒會共用這裡的設定。" },
   strategies: { groupLabel: "策略中心", filterTitle: "策略與市場篩選", filterDesc: "選擇策略與市場後，下方會顯示符合條件的股票。", resultTitle: "策略選股清單", resultDesc: "依策略分數排序，快速整理觀察名單。" },
@@ -661,7 +688,7 @@ async function loadAiSelectionForRadar() {
 }
 
 async function loadV20StatusForAcceptance() {
-  return fetchJson("/v20/status", { method: "GET", raw: true });
+  return fetchJson("/v24/status", { method: "GET", raw: true });
 }
 
 function renderBigHolderTrendPanel() {
@@ -2108,6 +2135,7 @@ function updatePageText() {
   const isAccountPage = state.page === "account";
   const isWatchlistPage = state.page === "watchlist";
   const isPositionsPage = state.page === "positions";
+  const isTradesPage = state.page === "trades";
   const isAlertsPage = state.page === "alerts";
   const isNotificationsPage = state.page === "notifications";
   const isStrategiesPage = state.page === "strategies";
@@ -2119,7 +2147,7 @@ function updatePageText() {
   const isAlertRulesMode = isAlertsPage && state.alertMode === "rules";
 
   refreshBtn.classList.toggle("hidden", isSearchPage || isAccountPage);
-  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
+  marketRow.classList.toggle("hidden", isSearchPage || isAccountPage || isWatchlistPage || isPositionsPage || isTradesPage || isAlertsPage || isNotificationsPage || isStrategyTracksPage || isStrategyBacktestsPage);
   searchPanel.classList.toggle("hidden", !isSearchPage);
   updateContentFilterHeader();
   updatePageMetaBar();
@@ -2207,9 +2235,37 @@ function updatePageText() {
     return;
   }
 
+  if (state.page === "portfolio") {
+    pageTitle.textContent = "部位模擬 / 風險觀察";
+    pageDesc.textContent = "V2.4 部位模擬與風險觀察，管理總資金、現金比例、單檔上限、產業上限與市場模式。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看部位比例與現金比例；BEAR 模式提高現金，BULL 模式再依計畫分批布局。</span>`;
+    return;
+  }
+
+  if (state.page === "trades") {
+    pageTitle.textContent = "交易紀錄 / 績效分析";
+    pageDesc.textContent = "V2.2 交易紀錄與績效分析，登入後可記錄買進賣出、已實現損益、勝率與策略來源績效。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先補買進與賣出紀錄，再按「產生績效」，系統會統計勝率、已實現損益與策略表現。</span>`;
+    return;
+  }
+
+  if (state.page === "aiFeedback") {
+    pageTitle.textContent = "AI 回饋學習";
+    pageDesc.textContent = "V2.3 AI 推薦回饋學習，追蹤推薦後表現、因子績效與權重調整建議。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>先看推薦成功率與 5 日平均報酬；因子若持續表現好，後續可考慮提高權重。</span>`;
+    return;
+  }
+
+  if (state.page === "warRoom") {
+    pageTitle.textContent = "每日投資作戰室";
+    pageDesc.textContent = "V2.5 每日投資作戰室，整合市場狀態、全球風險、今日觀察清單、持股續抱、減碼檢查與風控提醒。";
+    helpCard.innerHTML = `<strong>簡單看法：</strong><span>每天先看市場模式與作戰重點，再看觀察股、持股續抱、減碼檢查與風控提醒。</span>`;
+    return;
+  }
+
   if (state.page === "account") {
     pageTitle.textContent = "我的帳號";
-    pageDesc.textContent = "管理登入、自選股、我的持股，並檢查 V2.1 持股與風控管理、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
+    pageDesc.textContent = "管理登入、自選股、每日作戰室、我的持股、部位模擬、交易績效，並檢查 V2.5 每日作戰室、V2.4 部位風險、V2.3 AI 回饋學習、V2.2 交易績效、V2.1 持股風控、V2.0 AI 多因子、策略、報告與 LINE 通知資料。";
     helpCard.innerHTML = `<strong>簡單看法：</strong><span>這裡可確認 API、資料庫、提醒、策略追蹤與策略回測是否都正常。</span>`;
     return;
   }
@@ -4718,43 +4774,43 @@ function renderV13CheckCard(check) {
 }
 
 function renderV13FeatureCards() {
-  const summary = state.v13Status?.ai_selection?.summary || {};
-  const topSignals = Array.isArray(state.v13Status?.ai_selection?.top_signals) ? state.v13Status.ai_selection.top_signals : [];
+  const snapshot = state.v13Status?.snapshot || {};
+  const reports = snapshot.reports || {};
+  const items = snapshot.items || {};
+  const risks = snapshot.risk_snapshots || {};
   const tables = Array.isArray(state.v13Status?.tables) ? state.v13Status.tables : [];
-  const topSignal = topSignals[0] || {};
-  const topStock = `${pick(summary, ["top_stock_name"], pick(topSignal, ["stock_name"], "-"))} ${pick(summary, ["top_stock_code"], pick(topSignal, ["stock_code"], ""))}`.trim();
 
   return `
     <div class="v13-feature-grid v14-feature-grid">
       <div class="v13-feature-card">
-        <span>AI 多因子訊號</span>
-        <strong>${formatV13Count(summary.total_count)} 檔</strong>
-        <small>資料日 ${formatDate(summary.trade_date)}</small>
+        <span>作戰室報告</span>
+        <strong>${formatV13Count(reports.total_count || 0)} 份</strong>
+        <small>最新 ${formatDate(reports.latest_report_date || "-")}</small>
       </div>
       <div class="v13-feature-card">
-        <span>AI 強勢股</span>
-        <strong>${formatV13Count(summary.strong_count)} 檔</strong>
-        <small>平均分數 ${formatNumber(summary.avg_ai_strength_score ?? "-")}</small>
+        <span>作戰項目</span>
+        <strong>${formatV13Count(items.total_count || 0)} 筆</strong>
+        <small>最新 ${formatDate(items.latest_item_date || "-")}</small>
       </div>
       <div class="v13-feature-card">
-        <span>AI 觀察股</span>
-        <strong>${formatV13Count(summary.watch_count)} 檔</strong>
-        <small>風險股 ${formatV13Count(summary.risk_count)} 檔</small>
+        <span>整合範圍</span>
+        <strong>市場 / AI / 持股</strong>
+        <small>作戰室每日彙總</small>
       </div>
       <div class="v13-feature-card">
-        <span>AI 第一名</span>
-        <strong>${escapeHtml(topStock || "-")}</strong>
-        <small>最高分 ${formatNumber(summary.top_ai_strength_score ?? topSignal.ai_strength_score ?? "-")}</small>
+        <span>目前模式</span>
+        <strong>V2.5</strong>
+        <small>每日投資作戰室</small>
       </div>
       <div class="v13-feature-card">
         <span>資料表狀態</span>
         <strong>${formatV13Count(tables.filter((item) => item.exists).length)} / ${formatV13Count(tables.length)}</strong>
-        <small>ai_selection_signals / ai_selection_summaries</small>
+        <small>daily_war_room_reports / items</small>
       </div>
       <div class="v13-feature-card">
-        <span>每日之星排序</span>
-        <strong>AI 優先</strong>
-        <small>雷達排行已優先參考 AI Strength Score</small>
+        <span>相容功能</span>
+        <strong>保留</strong>
+        <small>V2.4 / V2.3 / V2.2 / V2.1 / V2.0</small>
       </div>
     </div>
   `;
@@ -4767,8 +4823,8 @@ function renderV14ModuleProgress() {
   return `
     <div class="v13-subsection v14-module-section">
       <div class="v13-subsection-title">
-        <strong>V2.0 功能完成度</strong>
-        <span>AI 多因子第一版與 UI 狀態同步</span>
+        <strong>V2.5 功能完成度</strong>
+        <span>每日作戰室、市場風險、AI 觀察與 UI 狀態同步</span>
       </div>
       <div class="v14-module-grid">
         ${modules.map((module) => `
@@ -4788,13 +4844,13 @@ function renderV14ModuleProgress() {
 
 function renderV14AcceptanceSummary() {
   const nextActions = Array.isArray(state.v13Status?.next_actions) ? state.v13Status.next_actions : [];
-  const advice = state.v13Status?.ai_selection?.advice || "V2.0 已整合夜盤、全球風險、技術突破、主力籌碼與大戶趨勢。";
+  const advice = state.v13Status?.ai_selection?.advice || "V2.5 已整合市場、全球、AI 觀察、持股續抱、減碼檢查與風控提醒。";
 
   return `
     <div class="v13-subsection v14-acceptance-section">
       <div class="v13-subsection-title">
         <strong>驗收與維護重點</strong>
-        <span>/v20/status + npm run v201:test</span>
+        <span>/v25/status + npm run v25:test</span>
       </div>
       <div class="v14-acceptance-grid">
         <div class="v13-empty-note">
@@ -4819,7 +4875,7 @@ function renderV13BacktestStats() {
   if (!topSignals.length) {
     return `
       <div class="v13-empty-note">
-        尚未讀到 AI 強勢排行；如果剛完成產生，請按「重新檢查 V2.0」。
+        尚未讀到每日作戰室；如果剛完成產生，請按「重新檢查 V2.5」。
       </div>
     `;
   }
@@ -4847,9 +4903,9 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V2.0 系統狀態</p>
-            <h3>正在檢查 AI 多因子功能</h3>
-            <p>正在讀取 /health 與 /v20/status。</p>
+            <p class="eyebrow">V2.5 系統狀態</p>
+            <h3>正在檢查每日作戰室功能</h3>
+            <p>正在讀取 /health 與 /v25/status。</p>
           </div>
           <span class="v13-status-pill warn">檢查中</span>
         </div>
@@ -4863,14 +4919,14 @@ function renderV13StatusCard() {
       <article class="account-card v13-status-card v14-status-card error-card">
         <div class="v13-status-header">
           <div>
-            <p class="eyebrow">V2.0 系統狀態</p>
+            <p class="eyebrow">V2.5 系統狀態</p>
             <h3>狀態檢查失敗</h3>
             <p>${escapeHtml(state.v13StatusError)}</p>
           </div>
           <span class="v13-status-pill fail">異常</span>
         </div>
         <div class="account-actions">
-          <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.0</button>
+          <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.5</button>
         </div>
       </article>
     `;
@@ -4884,17 +4940,17 @@ function renderV13StatusCard() {
     findV13Check("database"),
     findV13Check("versions"),
     findV13Check("tables"),
-    findV13Check("ai_summary"),
-    findV13Check("ai_top"),
+    findV13Check("plans"),
+    findV13Check("risk_snapshots"),
   ].filter(Boolean);
-  const summary = status.ai_selection?.summary || {};
+  const summary = status.snapshot?.reports || {};
 
   return `
     <article class="account-card v13-status-card v14-status-card ${meta.className}">
       <div class="v13-status-header">
         <div>
-          <p class="eyebrow">V2.0 系統狀態</p>
-          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V2.0 AI 多因子狀態檢查完成")}</h3>
+          <p class="eyebrow">V2.5 系統狀態</p>
+          <h3>${meta.icon} ${escapeHtml(status.overall_message || "V2.5 每日作戰室狀態檢查完成")}</h3>
           <p>檢查時間：${escapeHtml(status.checked_at || "-")}</p>
         </div>
         <span class="v13-status-pill ${meta.className}">${meta.label}</span>
@@ -4904,8 +4960,8 @@ function renderV13StatusCard() {
         ${createInfoItem("API 版本", escapeHtml(status.version || "-"))}
         ${createInfoItem("PWA 預期版本", escapeHtml(status.pwa_expected_version || "-"))}
         ${createInfoItem("資料庫", escapeHtml(status.database?.database_name || "-"))}
-        ${createInfoItem("AI 分析日", formatDate(summary.trade_date))}
-        ${createInfoItem("V2.0 完成度", formatPercent(status.progress_percent))}
+        ${createInfoItem("報告日期", formatDate(summary.latest_report_date))}
+        ${createInfoItem("V2.5 完成度", formatPercent(status.progress_percent))}
       </div>
 
       <div class="v13-check-grid">
@@ -4918,15 +4974,16 @@ function renderV13StatusCard() {
 
       <div class="v13-subsection">
         <div class="v13-subsection-title">
-          <strong>AI 強勢股前段班</strong>
-          <span>取最新 AI 多因子訊號</span>
+          <strong>每日作戰室摘要</strong>
+          <span>取最新作戰室與觀察項目</span>
         </div>
         ${renderV13BacktestStats()}
       </div>
 
       <div class="account-actions v13-actions">
-        <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.0</button>
-        <button class="detail-btn secondary-action" type="button" data-go-page="radar">看 AI 每日之星</button>
+        <button class="detail-btn" type="button" data-refresh-v20-status="true">重新檢查 V2.5</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="warRoom">看每日作戰室</button>
+        <button class="detail-btn secondary-action" type="button" data-go-page="portfolio">看部位模擬</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyBacktests">看策略回測</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyReports">每日報告</button>
         <button class="detail-btn secondary-action" type="button" data-go-page="strategyTrends">勝率趨勢</button>
@@ -4944,10 +5001,10 @@ async function loadV13Status({ force = false } = {}) {
   if (state.page === "account") renderAccountPage();
 
   try {
-    const result = await fetchJson("/v20/status", { method: "GET", raw: true });
+    const result = await fetchJson("/v25/status", { method: "GET", raw: true });
     state.v13Status = result;
   } catch (error) {
-    state.v13StatusError = error.message || "V2.0 狀態檢查失敗。";
+    state.v13StatusError = error.message || "V2.5 狀態檢查失敗。";
   } finally {
     state.v13StatusLoading = false;
     if (state.page === "account") renderAccountPage();
@@ -8490,6 +8547,921 @@ async function handlePositionAlertRead(button) {
   }
 }
 
+
+function formatTradeTypeText(value) {
+  return String(value || "").toUpperCase() === "SELL" ? "賣出" : "買進";
+}
+
+function renderTradesLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "交易績效", value: "需登入後使用" },
+  ], "交易紀錄會依 Google 帳號分開保存。V2.2 初版為手動輸入，不串券商、不自動下單。");
+  setResultHeader({ title: "請先登入", desc: "登入後才能新增交易紀錄與查看績效分析。", badge: "需要登入" });
+  stockList.innerHTML = `
+    <article class="search-intro-card position-login-card">
+      <div class="intro-icon">📊</div>
+      <h3>登入後開始記錄交易績效</h3>
+      <p>請先使用 Google 登入，再新增買進 / 賣出紀錄。系統會統計已實現損益、勝率與策略來源績效。</p>
+      <button class="detail-btn" type="button" data-auth-action="login">Google 登入</button>
+    </article>
+  `;
+}
+
+function renderTradeForm() {
+  const today = new Date().toISOString().slice(0, 10);
+  return `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V2.2 交易紀錄</p>
+          <h3>新增買進 / 賣出紀錄</h3>
+          <p>先補買進，之後補賣出；按「產生績效」後會估算已實現損益。</p>
+        </div>
+        <button class="detail-btn" type="button" data-trade-performance-generate="true">產生績效</button>
+      </div>
+      <form class="position-form-grid trade-form-grid" data-trade-form novalidate>
+        <label>股票代號<input name="stock_code" type="text" inputmode="text" placeholder="2330" required /></label>
+        <label>交易日期<input name="trade_date" type="date" value="${today}" required /></label>
+        <label>交易類型
+          <select name="trade_type">
+            <option value="BUY">買進</option>
+            <option value="SELL">賣出</option>
+          </select>
+        </label>
+        <label>交易價格<input name="trade_price" type="number" step="0.01" min="0" placeholder="例如 100" required /></label>
+        <label>張數<input name="lots" type="number" step="0.001" min="0" placeholder="例如 1" /></label>
+        <label>股數<input name="shares" type="number" step="1" min="0" placeholder="不填則用張數換算" /></label>
+        <label>手續費<input name="fee" type="number" step="1" min="0" value="0" /></label>
+        <label>證交稅<input name="tax" type="number" step="1" min="0" value="0" /></label>
+        <label>策略來源
+          <select name="strategy_source">
+            <option value="MANUAL">手動</option>
+            <option value="AI_MULTI_FACTOR">AI 多因子</option>
+            <option value="BREAKOUT">技術突破</option>
+            <option value="MAIN_FORCE">主力籌碼</option>
+            <option value="BIG_HOLDER">大戶趨勢</option>
+          </select>
+        </label>
+        <label>AI 分數<input name="ai_strength_score_at_trade" type="number" step="0.01" min="0" max="100" placeholder="選填" /></label>
+        <label class="position-form-note">備註<input name="note" type="text" maxlength="500" placeholder="例如：AI 強勢分數轉強買進" /></label>
+        <div class="position-form-actions"><button class="search-btn" type="submit">新增交易</button></div>
+      </form>
+    </article>
+  `;
+}
+
+function renderTradeSummaryCards(summary = {}) {
+  return `
+    <section class="position-summary-grid trade-summary-grid" aria-label="交易績效總覽">
+      <div class="position-summary-card"><span>交易筆數</span><strong>${formatNumber(summary.total_trades || 0)}</strong><small>買進 ${formatNumber(summary.buy_trades || 0)} / 賣出 ${formatNumber(summary.sell_trades || 0)}</small></div>
+      <div class="position-summary-card"><span>已實現損益</span><strong class="${getChangeClass(summary.realized_profit_loss)}">${formatPositionSignedMoney(summary.realized_profit_loss)}</strong><small>已結算 ${formatNumber(summary.closed_trades || 0)} 筆</small></div>
+      <div class="position-summary-card"><span>勝率</span><strong>${formatPercent(summary.win_rate_pct)}</strong><small>勝 ${formatNumber(summary.winning_trades || 0)} / 負 ${formatNumber(summary.losing_trades || 0)}</small></div>
+      <div class="position-summary-card"><span>平均報酬</span><strong class="${getChangeClass(summary.avg_realized_profit_loss_pct)}">${formatPercent(summary.avg_realized_profit_loss_pct)}</strong><small>獲利均值 ${formatPercent(summary.avg_win_pct)} / 虧損均值 ${formatPercent(summary.avg_loss_pct)}</small></div>
+    </section>
+  `;
+}
+
+function renderTradeStrategyPerformance(rows = []) {
+  if (!rows.length) {
+    return `<article class="position-alert-card empty-alert-card"><h3>尚無策略績效</h3><p>新增含策略來源的賣出紀錄並產生績效後，這裡會比較 AI、突破、主力與手動交易結果。</p></article>`;
+  }
+  return `
+    <article class="position-alert-card trade-strategy-card">
+      <div class="position-alert-header"><div><p class="section-kicker">策略來源績效</p><h3>不同來源實戰結果</h3></div></div>
+      <div class="v13-backtest-list">
+        ${rows.slice(0, 8).map((row) => `
+          <div class="v13-backtest-row">
+            <span>${escapeHtml(row.strategy_source || "MANUAL")}</span>
+            <strong class="${getChangeClass(row.realized_profit_loss)}">${formatPositionSignedMoney(row.realized_profit_loss)}</strong>
+            <small>勝率 ${formatPercent(row.win_rate_pct)}｜${formatNumber(row.closed_trades || 0)} 筆</small>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderTradeCard(row = {}) {
+  const isSell = String(row.trade_type || "").toUpperCase() === "SELL";
+  const pnl = row.realized_profit_loss;
+  return `
+    <article class="position-card trade-card">
+      <div class="position-card-header">
+        <div>
+          <p class="section-kicker">${escapeHtml(formatTradeTypeText(row.trade_type))}｜${escapeHtml(row.strategy_source || "MANUAL")}</p>
+          <h3>${escapeHtml(row.stock_name || row.stock_code || "-")} <span>${escapeHtml(row.stock_code || "")}</span></h3>
+          <p>${formatDate(row.trade_date)}｜${escapeHtml(row.market_type || "-")}</p>
+        </div>
+        <span class="status-chip ${isSell ? "warn" : "good"}">${escapeHtml(formatTradeTypeText(row.trade_type))}</span>
+      </div>
+      <div class="info-grid position-info-grid">
+        ${createInfoItem("價格", formatNumber(row.trade_price))}
+        ${createInfoItem("張數", formatNumber(row.lots))}
+        ${createInfoItem("股數", formatNumber(row.shares))}
+        ${createInfoItem("淨額", formatPositionSignedMoney(row.net_amount), isSell ? "score-high" : "")}
+        ${createInfoItem("手續費", formatNumber(row.fee))}
+        ${createInfoItem("證交稅", formatNumber(row.tax))}
+        ${createInfoItem("已實現損益", row.realized_profit_loss === null || row.realized_profit_loss === undefined ? "-" : formatPositionSignedMoney(pnl), getChangeClass(pnl))}
+        ${createInfoItem("已實現報酬", row.realized_profit_loss_pct === null || row.realized_profit_loss_pct === undefined ? "-" : formatPercent(row.realized_profit_loss_pct), getChangeClass(row.realized_profit_loss_pct))}
+        ${createInfoItem("持有天數", row.holding_days_estimated === null || row.holding_days_estimated === undefined ? "-" : `${formatNumber(row.holding_days_estimated)} 天`)}
+        ${createInfoItem("AI 分數", row.ai_strength_score_at_trade === null || row.ai_strength_score_at_trade === undefined ? "-" : formatNumber(row.ai_strength_score_at_trade))}
+      </div>
+      ${row.note ? `<div class="position-ai-action"><strong>備註</strong><p>${escapeHtml(row.note)}</p></div>` : ""}
+      <div class="action-buttons">
+        <button class="ghost-btn danger-ghost-btn" type="button" data-trade-delete="${escapeHtml(row.id)}">刪除 / 停用</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderTradePerformancePage() {
+  const rows = Array.isArray(state.tradeRows) ? state.tradeRows : [];
+  const summary = state.tradeSummary || {};
+  const strategies = Array.isArray(state.tradeStrategies) ? state.tradeStrategies : [];
+
+  setContentSummary([
+    { label: "交易筆數", value: `${formatNumber(summary.total_trades || rows.length)} 筆` },
+    { label: "已實現損益", value: formatPositionSignedMoney(summary.realized_profit_loss), className: getChangeClass(summary.realized_profit_loss) },
+    { label: "勝率", value: formatPercent(summary.win_rate_pct) },
+    { label: "績效快照", value: summary.latest_snapshot_date || "尚未產生" },
+  ], "V2.2 初版採手動交易紀錄，不串券商、不自動下單。賣出損益先用平均成本估算。");
+
+  setResultHeader({
+    title: "交易紀錄與績效分析",
+    desc: rows.length ? "可查看買進 / 賣出紀錄、已實現損益與策略來源績效。" : "目前尚未新增交易紀錄。",
+    badge: "V2.2 交易績效",
+    countText: `${rows.length} 筆`,
+  });
+
+  stockList.innerHTML = `
+    ${renderTradeForm()}
+    ${renderTradeSummaryCards(summary)}
+    ${state.tradeLastResult ? `<article class="position-alert-card success-card"><strong>績效結果：</strong>${escapeHtml(state.tradeLastResult)}</article>` : ""}
+    ${renderTradeStrategyPerformance(strategies)}
+    ${rows.length ? rows.map(renderTradeCard).join("") : `
+      <article class="search-intro-card position-empty-card">
+        <div class="intro-icon">📘</div>
+        <h3>尚未新增交易紀錄</h3>
+        <p>請先在上方輸入股票代號、交易日期、買進 / 賣出、價格與張數。</p>
+      </article>
+    `}
+  `;
+}
+
+function readTradeForm(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  return {
+    stock_code: String(data.stock_code || "").trim(),
+    trade_date: String(data.trade_date || "").trim(),
+    trade_type: String(data.trade_type || "BUY").trim(),
+    trade_price: data.trade_price,
+    shares: data.shares,
+    lots: data.lots,
+    fee: data.fee || 0,
+    tax: data.tax || 0,
+    strategy_source: String(data.strategy_source || "MANUAL").trim(),
+    ai_strength_score_at_trade: data.ai_strength_score_at_trade || null,
+    note: String(data.note || "").trim(),
+  };
+}
+
+async function loadTradePerformance() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    renderTradesLoginPrompt();
+    return;
+  }
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, rows, strategyResult] = await Promise.all([
+      fetchJson("/performance/latest", { auth: true, raw: true }),
+      fetchJson("/trades", { auth: true }),
+      fetchJson("/performance/strategy", { auth: true, raw: true }),
+    ]);
+    state.tradeSummary = summaryResult.summary || {};
+    state.tradePerformance = summaryResult.latest_performance || null;
+    state.tradeStrategies = Array.isArray(summaryResult.strategies) && summaryResult.strategies.length ? summaryResult.strategies : (Array.isArray(strategyResult.data) ? strategyResult.data : []);
+    state.tradeRows = Array.isArray(rows) ? rows : [];
+    renderTradePerformancePage();
+    showTemporaryStatus(`已更新 ${state.tradeRows.length} 筆交易紀錄。`, "success");
+  } catch (error) {
+    setContentSummary([
+      { label: "讀取狀態", value: "績效失敗" },
+      { label: "錯誤訊息", value: error.message },
+    ], "請確認已執行 npm run trade:setup，且登入 Token 有效。");
+    setResultHeader({ title: "交易績效讀取失敗", desc: "目前無法取得交易紀錄。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`交易績效讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleTradeFormSubmit(form) {
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const payload = readTradeForm(form);
+    if (!payload.stock_code) throw new Error("請輸入股票代號。");
+    if (!payload.trade_date) throw new Error("請輸入交易日期。");
+    await fetchJson("/trades", { method: "POST", auth: true, body: payload, raw: true });
+    state.tradeLastResult = "已新增交易紀錄。";
+    form.reset();
+    await loadTradePerformance();
+  } catch (error) {
+    showStatus(`新增交易紀錄失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function handleTradePerformanceGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/trades/performance/generate", { method: "POST", auth: true, body: {}, raw: true });
+    const generated = result.generated || {};
+    state.tradeLastResult = `已產生 ${formatNumber(generated.generatedCount || 0)} 筆已實現損益、${formatNumber(generated.snapshotCount || 0)} 筆績效快照。`;
+    await loadTradePerformance();
+  } catch (error) {
+    showStatus(`產生交易績效失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleTradeDelete(button) {
+  const tradeId = button.dataset.tradeDelete;
+  if (!window.confirm("確定要刪除 / 停用這筆交易紀錄嗎？")) return;
+  button.disabled = true;
+  try {
+    await fetchJson(`/trades/${encodeURIComponent(tradeId)}`, { method: "DELETE", auth: true, raw: true });
+    state.tradeLastResult = "已停用交易紀錄。";
+    await loadTradePerformance();
+  } catch (error) {
+    showStatus(`刪除交易紀錄失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+
+function formatAiFeedbackResult(result) {
+  const key = String(result || "WAITING").toUpperCase();
+  const map = { SUCCESS: "成功", PARTIAL: "部分成功", FAIL: "失敗", WAITING: "等待資料" };
+  return map[key] || key;
+}
+
+function getAiFeedbackResultClass(result) {
+  const key = String(result || "WAITING").toUpperCase();
+  if (key === "SUCCESS") return "good";
+  if (key === "FAIL") return "danger";
+  if (key === "PARTIAL") return "warn";
+  return "neutral";
+}
+
+function renderAiFeedbackSummaryCards(summary = {}) {
+  return `
+    <section class="position-summary-grid trade-summary-grid" aria-label="AI 推薦回饋總覽">
+      <article class="position-summary-card">
+        <span>推薦樣本</span>
+        <strong>${formatNumber(summary.total_count || 0)} 筆</strong>
+        <p>最新推薦日：${formatDate(summary.latest_signal_date || "-")}</p>
+      </article>
+      <article class="position-summary-card">
+        <span>成功率</span>
+        <strong class="${getChangeClass((summary.success_rate_pct || 0) - 50)}">${formatPercent(summary.success_rate_pct)}</strong>
+        <p>成功 ${formatNumber(summary.success_count || 0)}｜失敗 ${formatNumber(summary.fail_count || 0)}</p>
+      </article>
+      <article class="position-summary-card">
+        <span>平均品質分數</span>
+        <strong class="${getScoreClass(summary.avg_quality_score)}">${formatNumber(summary.avg_quality_score)}</strong>
+        <p>用推薦後報酬與成功 / 失敗計算</p>
+      </article>
+      <article class="position-summary-card">
+        <span>5 日平均報酬</span>
+        <strong class="${getChangeClass(summary.avg_return_5d_pct)}">${formatPercent(summary.avg_return_5d_pct)}</strong>
+        <p>1D ${formatPercent(summary.avg_return_1d_pct)}｜10D ${formatPercent(summary.avg_return_10d_pct)}</p>
+      </article>
+    </section>
+  `;
+}
+
+function renderAiFeedbackFactorCards(rows = []) {
+  if (!rows.length) return `<article class="search-intro-card position-empty-card"><div class="intro-icon">🧠</div><h3>尚未有因子績效</h3><p>請先執行 npm run ai-feedback:generate。</p></article>`;
+  return `
+    <article class="panel-card strategy-panel-card">
+      <div class="panel-card-header">
+        <div>
+          <p class="section-kicker">因子績效</p>
+          <h3>AI 因子表現</h3>
+        </div>
+      </div>
+      <div class="v13-backtest-list">
+        ${rows.slice(0, 12).map((row) => `
+          <div class="v13-backtest-row">
+            <span>${escapeHtml(row.factor_name || row.factor_key)}｜${escapeHtml(row.market_environment || "ALL")}</span>
+            <strong class="${getScoreClass(row.performance_score)}">${formatNumber(row.performance_score)}</strong>
+            <small>勝率 ${formatPercent(row.success_rate_pct)}｜5D ${formatPercent(row.avg_return_5d_pct)}｜樣本 ${formatNumber(row.sample_count || 0)}</small>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAiFeedbackWeightCards(rows = []) {
+  if (!rows.length) return `<article class="search-intro-card position-empty-card"><div class="intro-icon">⚖️</div><h3>尚未有權重建議</h3><p>資料累積後會產生 INCREASE / DECREASE / KEEP 建議。</p></article>`;
+  return `
+    <article class="panel-card strategy-panel-card">
+      <div class="panel-card-header">
+        <div>
+          <p class="section-kicker">權重建議</p>
+          <h3>因子權重調整方向</h3>
+        </div>
+      </div>
+      <div class="v13-backtest-list">
+        ${rows.slice(0, 10).map((row) => `
+          <div class="v13-backtest-row">
+            <span>${escapeHtml(row.factor_name || row.factor_key)}｜${escapeHtml(row.suggestion_action || "KEEP")}</span>
+            <strong>${formatPercent((Number(row.suggested_weight || 0)) * 100)}</strong>
+            <small>${escapeHtml(row.confidence_level || "LOW")}｜勝率 ${formatPercent(row.success_rate_pct)}｜${escapeHtml(row.reason || "")}</small>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAiFeedbackRows(rows = []) {
+  if (!rows.length) return `<article class="search-intro-card position-empty-card"><div class="intro-icon">📈</div><h3>尚未有推薦回饋</h3><p>請先確認 V2.0 AI 多因子已有訊號，再執行 npm run ai-feedback:generate。</p></article>`;
+  return rows.slice(0, 12).map((row) => `
+    <article class="position-card trade-card">
+      <div class="position-card-header">
+        <div>
+          <p class="section-kicker">${escapeHtml(row.ai_level || "AI")}｜${escapeHtml(row.market_environment || "UNKNOWN")}</p>
+          <h3>${escapeHtml(row.stock_name || row.stock_code || "-")} <span>${escapeHtml(row.stock_code || "")}</span></h3>
+          <p>${formatDate(row.signal_trade_date)}｜${escapeHtml(row.market_type || "-")}</p>
+        </div>
+        <span class="status-chip ${getAiFeedbackResultClass(row.feedback_result)}">${escapeHtml(formatAiFeedbackResult(row.feedback_result))}</span>
+      </div>
+      <div class="info-grid position-info-grid">
+        ${createInfoItem("AI 分數", formatNumber(row.ai_strength_score), getScoreClass(row.ai_strength_score))}
+        ${createInfoItem("品質分數", formatNumber(row.recommendation_quality_score), getScoreClass(row.recommendation_quality_score))}
+        ${createInfoItem("進場收盤", formatNumber(row.entry_close_price))}
+        ${createInfoItem("1 日", formatPercent(row.return_1d_pct), getChangeClass(row.return_1d_pct))}
+        ${createInfoItem("3 日", formatPercent(row.return_3d_pct), getChangeClass(row.return_3d_pct))}
+        ${createInfoItem("5 日", formatPercent(row.return_5d_pct), getChangeClass(row.return_5d_pct))}
+        ${createInfoItem("10 日", formatPercent(row.return_10d_pct), getChangeClass(row.return_10d_pct))}
+        ${createInfoItem("風險", escapeHtml(row.risk_level || "-"))}
+      </div>
+      ${row.learning_note ? `<div class="position-ai-action"><strong>學習註記</strong><p>${escapeHtml(row.learning_note)}</p></div>` : ""}
+    </article>
+  `).join("");
+}
+
+function getPortfolioRiskClass(level) {
+  const text = String(level || "NORMAL").toUpperCase();
+  if (text === "HIGH") return "risk-high";
+  if (text === "WARN") return "risk-medium";
+  if (text === "GOOD") return "risk-low";
+  return "risk-low";
+}
+
+function formatMarketModeText(value) {
+  const text = String(value || "RANGE").toUpperCase();
+  if (text === "BULL") return "BULL 多頭";
+  if (text === "BEAR") return "BEAR 空頭";
+  return "RANGE 盤整";
+}
+
+function renderPortfolioLoginPrompt() {
+  setContentSummary([
+    { label: "登入狀態", value: "尚未登入" },
+    { label: "部位模擬", value: "需登入後使用" },
+  ], "部位模擬資料會依 Google 帳號分開保存。V2.4 初版不串券商、不自動下單。 ");
+  setResultHeader({ title: "請先登入", desc: "登入後才能新增部位計畫與查看風險曝險。", badge: "需要登入" });
+  stockList.innerHTML = `
+    <article class="search-intro-card position-login-card">
+      <div class="intro-icon">💼</div>
+      <h3>登入後開始部位模擬</h3>
+      <p>請先使用 Google 登入，再建立總資金、現金比例、單檔上限、產業上限與市場模式。</p>
+      <button class="detail-btn" type="button" data-auth-action="login">Google 登入</button>
+    </article>
+  `;
+}
+
+function renderPortfolioPlanForm() {
+  return `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V2.4 部位模擬</p>
+          <h3>新增部位計畫</h3>
+          <p>先設定總資金與風控上限，後續可加入分批部位明細與產業集中度觀察。</p>
+        </div>
+        <button class="detail-btn" type="button" data-portfolio-risk-generate="true">產生風險快照</button>
+      </div>
+      <form class="position-form-grid trade-form-grid" data-portfolio-plan-form novalidate>
+        <label>計畫名稱<input name="plan_name" type="text" maxlength="100" placeholder="主要部位計畫" /></label>
+        <label>總資金<input name="total_capital" type="number" step="1" min="0" placeholder="例如 1000000" required /></label>
+        <label>現金金額<input name="cash_amount" type="number" step="1" min="0" placeholder="例如 300000" /></label>
+        <label>目標部位 %<input name="target_position_pct" type="number" step="0.1" min="0" max="100" value="70" /></label>
+        <label>單檔上限 %<input name="max_single_stock_pct" type="number" step="0.1" min="0" max="100" value="20" /></label>
+        <label>產業上限 %<input name="max_industry_pct" type="number" step="0.1" min="0" max="100" value="35" /></label>
+        <label>風險曝險上限 %<input name="max_risk_exposure_pct" type="number" step="0.1" min="0" max="150" value="70" /></label>
+        <label>市場模式
+          <select name="market_mode">
+            <option value="RANGE">RANGE 盤整</option>
+            <option value="BULL">BULL 多頭</option>
+            <option value="BEAR">BEAR 空頭</option>
+          </select>
+        </label>
+        <label class="position-form-note">備註<input name="note" type="text" maxlength="500" placeholder="例如：BEAR 模式現金至少 40%" /></label>
+        <div class="position-form-actions">
+          <button class="search-btn" type="submit">新增計畫</button>
+        </div>
+      </form>
+    </article>
+  `;
+}
+
+function renderPortfolioSummaryCards(summary = {}) {
+  return `
+    <section class="position-summary-grid trade-summary-grid" aria-label="部位總覽">
+      <article class="summary-metric-card"><span>啟用計畫</span><strong>${formatNumber(summary.active_plans || 0)}</strong><small>部位模擬數</small></article>
+      <article class="summary-metric-card"><span>總資金</span><strong>${formatNumber(summary.total_capital || 0)}</strong><small>所有啟用計畫</small></article>
+      <article class="summary-metric-card"><span>已規劃部位</span><strong>${formatPercent(summary.avg_position_ratio_pct || 0)}</strong><small>${formatNumber(summary.invested_amount || 0)}</small></article>
+      <article class="summary-metric-card"><span>現金比例</span><strong>${formatPercent(summary.avg_cash_ratio_pct || 0)}</strong><small>${formatNumber(summary.cash_amount || 0)}</small></article>
+      <article class="summary-metric-card"><span>高風險計畫</span><strong>${formatNumber(summary.high_risk_plans || 0)}</strong><small>WARN / HIGH</small></article>
+      <article class="summary-metric-card"><span>快照日期</span><strong>${formatDate(summary.latest_snapshot_date || "-")}</strong><small>最新風險觀察</small></article>
+    </section>
+  `;
+}
+
+function renderPortfolioRiskRows(rows = []) {
+  if (!rows.length) {
+    return `<article class="search-intro-card position-empty-card"><div class="intro-icon">📉</div><h3>尚未有部位風險快照</h3><p>新增部位計畫後按「產生風險快照」，或執行 npm run portfolio:risk。</p></article>`;
+  }
+  return rows.map((row) => `
+    <article class="stock-card position-card ${getPortfolioRiskClass(row.portfolio_risk_level)}">
+      <div class="stock-main-row">
+        <div>
+          <p class="stock-code">${escapeHtml(row.plan_name || `計畫 ${row.plan_id}`)}</p>
+          <h3>部位風險｜${escapeHtml(row.portfolio_risk_level || "NORMAL")}</h3>
+          <p class="stock-subtitle">${formatDate(row.snapshot_date)}｜${formatMarketModeText(row.market_mode)}</p>
+        </div>
+        <div class="score-pill ${getPortfolioRiskClass(row.portfolio_risk_level)}">${formatPercent(row.risk_exposure_pct)}</div>
+      </div>
+      <div class="info-grid position-info-grid">
+        ${createInfoItem("總資金", formatNumber(row.total_capital))}
+        ${createInfoItem("已規劃", formatNumber(row.invested_amount))}
+        ${createInfoItem("現金", formatNumber(row.cash_amount))}
+        ${createInfoItem("部位比例", formatPercent(row.position_ratio_pct))}
+        ${createInfoItem("現金比例", formatPercent(row.cash_ratio_pct))}
+        ${createInfoItem("單檔最大", formatPercent(row.largest_single_stock_pct))}
+        ${createInfoItem("產業最大", formatPercent(row.largest_industry_pct))}
+        ${createInfoItem("檔數", `${formatNumber(row.position_count)} 檔`)}
+      </div>
+      <div class="position-ai-action"><strong>${escapeHtml(row.ai_action || "維持紀律")}</strong><p>${escapeHtml(row.risk_summary || "目前部位仍在可觀察範圍。")}</p></div>
+    </article>
+  `).join("");
+}
+
+function renderPortfolioPlanRows(rows = []) {
+  if (!rows.length) {
+    return `<article class="search-intro-card position-empty-card"><div class="intro-icon">💼</div><h3>尚未新增部位計畫</h3><p>先新增總資金與風控上限，後續再加入分批部位明細。</p></article>`;
+  }
+  return rows.map((row) => `
+    <article class="stock-card position-card">
+      <div class="stock-main-row">
+        <div>
+          <p class="stock-code">${escapeHtml(row.plan_name || "部位計畫")}</p>
+          <h3>${formatMarketModeText(row.market_mode)}</h3>
+          <p class="stock-subtitle">更新：${escapeHtml(row.updated_at || "-")}</p>
+        </div>
+        <div class="score-pill ${getScoreClass(row.position_ratio_pct)}">${formatPercent(row.position_ratio_pct)}</div>
+      </div>
+      <div class="info-grid position-info-grid">
+        ${createInfoItem("總資金", formatNumber(row.total_capital))}
+        ${createInfoItem("現金", formatNumber(row.cash_amount))}
+        ${createInfoItem("目標部位", formatPercent(row.target_position_pct))}
+        ${createInfoItem("單檔上限", formatPercent(row.max_single_stock_pct))}
+        ${createInfoItem("產業上限", formatPercent(row.max_industry_pct))}
+        ${createInfoItem("曝險上限", formatPercent(row.max_risk_exposure_pct))}
+        ${createInfoItem("規劃金額", formatNumber(row.invested_amount))}
+        ${createInfoItem("明細檔數", `${formatNumber(row.planned_positions)} 檔`)}
+      </div>
+      <details class="position-edit-details">
+        <summary>編輯部位計畫</summary>
+        <form class="position-form-grid trade-form-grid" data-portfolio-plan-edit-form data-plan-id="${escapeHtml(row.id)}" novalidate>
+          <label>計畫名稱<input name="plan_name" value="${escapeHtml(row.plan_name || "")}" /></label>
+          <label>總資金<input name="total_capital" type="number" step="1" min="0" value="${escapeHtml(row.total_capital || "")}" required /></label>
+          <label>現金金額<input name="cash_amount" type="number" step="1" min="0" value="${escapeHtml(row.cash_amount || "")}" /></label>
+          <label>目標部位 %<input name="target_position_pct" type="number" step="0.1" value="${escapeHtml(row.target_position_pct || 70)}" /></label>
+          <label>單檔上限 %<input name="max_single_stock_pct" type="number" step="0.1" value="${escapeHtml(row.max_single_stock_pct || 20)}" /></label>
+          <label>產業上限 %<input name="max_industry_pct" type="number" step="0.1" value="${escapeHtml(row.max_industry_pct || 35)}" /></label>
+          <label>曝險上限 %<input name="max_risk_exposure_pct" type="number" step="0.1" value="${escapeHtml(row.max_risk_exposure_pct || 70)}" /></label>
+          <label>市場模式<select name="market_mode"><option value="RANGE" ${row.market_mode === "RANGE" ? "selected" : ""}>RANGE 盤整</option><option value="BULL" ${row.market_mode === "BULL" ? "selected" : ""}>BULL 多頭</option><option value="BEAR" ${row.market_mode === "BEAR" ? "selected" : ""}>BEAR 空頭</option></select></label>
+          <label class="position-form-note">備註<input name="note" value="${escapeHtml(row.note || "")}" /></label>
+          <div class="position-form-actions">
+            <button class="search-btn" type="submit">儲存</button>
+            <button class="detail-btn danger-action" type="button" data-portfolio-plan-delete="${escapeHtml(row.id)}">停用</button>
+          </div>
+        </form>
+      </details>
+    </article>
+  `).join("");
+}
+
+function getPortfolioPayloadFromForm(form) {
+  const data = new FormData(form);
+  return {
+    plan_name: String(data.get("plan_name") || "").trim() || "主要部位計畫",
+    total_capital: Number(data.get("total_capital") || 0),
+    cash_amount: Number(data.get("cash_amount") || 0),
+    target_position_pct: Number(data.get("target_position_pct") || 70),
+    max_single_stock_pct: Number(data.get("max_single_stock_pct") || 20),
+    max_industry_pct: Number(data.get("max_industry_pct") || 35),
+    max_risk_exposure_pct: Number(data.get("max_risk_exposure_pct") || 70),
+    market_mode: String(data.get("market_mode") || "RANGE").toUpperCase(),
+    note: String(data.get("note") || "").trim(),
+  };
+}
+
+function renderPortfolioRiskPage() {
+  if (!isAuthenticated()) {
+    renderPortfolioLoginPrompt();
+    return;
+  }
+  const summary = state.portfolioSummary || {};
+  const plans = Array.isArray(state.portfolioPlans) ? state.portfolioPlans : [];
+  const risks = Array.isArray(state.portfolioRisks) ? state.portfolioRisks : [];
+  setContentSummary([
+    { label: "總資金", value: formatNumber(summary.total_capital || 0) },
+    { label: "部位比例", value: formatPercent(summary.avg_position_ratio_pct || 0) },
+    { label: "現金比例", value: formatPercent(summary.avg_cash_ratio_pct || 0) },
+    { label: "高風險", value: `${formatNumber(summary.high_risk_plans || 0)} 筆` },
+  ], "V2.4 初版做部位模擬與風險觀察，不串券商、不自動下單。 ");
+  setResultHeader({ title: "部位模擬與風險觀察", desc: plans.length ? "檢查總資金、現金比例、集中度與市場模式。" : "目前尚未新增部位計畫。", badge: "V2.4 部位模擬", countText: `${formatNumber(plans.length)} 筆` });
+  stockList.innerHTML = `
+    ${renderPortfolioPlanForm()}
+    ${state.portfolioLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.portfolioLastResult)}</article>` : ""}
+    ${renderPortfolioSummaryCards(summary)}
+    <div class="v13-subsection-title"><strong>最新風險快照</strong><span>/portfolio/risk/latest</span></div>
+    ${renderPortfolioRiskRows(risks)}
+    <div class="v13-subsection-title"><strong>部位計畫</strong><span>/portfolio/plans</span></div>
+    ${renderPortfolioPlanRows(plans)}
+  `;
+}
+
+async function loadPortfolioRisk() {
+  if (!isAuthenticated()) {
+    setLoading(false);
+    renderPortfolioRiskPage();
+    return;
+  }
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, riskResult] = await Promise.all([
+      fetchJson("/portfolio/summary", { auth: true, raw: true }),
+      fetchJson("/portfolio/risk/latest", { auth: true, raw: true }).catch(() => ({ data: [] })),
+    ]);
+    state.portfolioSummary = summaryResult.summary || {};
+    state.portfolioPlans = Array.isArray(summaryResult.plans) ? summaryResult.plans : [];
+    state.portfolioRisks = Array.isArray(riskResult.data) ? riskResult.data : (Array.isArray(summaryResult.latest_risks) ? summaryResult.latest_risks : []);
+    renderPortfolioRiskPage();
+    showTemporaryStatus(`已更新部位計畫：${formatNumber(state.portfolioPlans.length)} 筆。`, "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "部位模擬失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run portfolio:setup。 ");
+    setResultHeader({ title: "部位模擬讀取失敗", desc: "目前無法取得部位計畫。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`部位模擬讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handlePortfolioPlanSubmit(form) {
+  try {
+    await fetchJson("/portfolio/plans", { method: "POST", auth: true, body: getPortfolioPayloadFromForm(form), raw: true });
+    state.portfolioLastResult = "已新增部位計畫。";
+    await loadPortfolioRisk();
+  } catch (error) {
+    showStatus(`新增部位計畫失敗：${escapeHtml(error.message)}`, "error");
+  }
+}
+
+async function handlePortfolioPlanEdit(form) {
+  const planId = form.dataset.planId;
+  if (!planId) return;
+  try {
+    await fetchJson(`/portfolio/plans/${encodeURIComponent(planId)}`, { method: "PUT", auth: true, body: getPortfolioPayloadFromForm(form), raw: true });
+    state.portfolioLastResult = "已更新部位計畫。";
+    await loadPortfolioRisk();
+  } catch (error) {
+    showStatus(`更新部位計畫失敗：${escapeHtml(error.message)}`, "error");
+  }
+}
+
+async function handlePortfolioPlanDelete(button) {
+  const planId = button.dataset.portfolioPlanDelete;
+  if (!planId) return;
+  if (!window.confirm("確定要停用這筆部位計畫嗎？")) return;
+  try {
+    await fetchJson(`/portfolio/plans/${encodeURIComponent(planId)}`, { method: "DELETE", auth: true, raw: true });
+    state.portfolioLastResult = "已停用部位計畫。";
+    await loadPortfolioRisk();
+  } catch (error) {
+    showStatus(`停用部位計畫失敗：${escapeHtml(error.message)}`, "error");
+  }
+}
+
+async function handlePortfolioRiskGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/portfolio/risk/generate", { method: "POST", auth: true, body: {}, raw: true });
+    state.portfolioLastResult = result.message || "已產生部位風險快照。";
+    await loadPortfolioRisk();
+  } catch (error) {
+    showStatus(`產生部位風險快照失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function getWarRoomSectionTitle(sectionType) {
+  const map = {
+    MARKET: "市場狀態",
+    GLOBAL: "全球市場",
+    WATCH: "今日觀察清單",
+    HOLD: "持股續抱清單",
+    REDUCE: "減碼檢查清單",
+    RISK: "風控提醒",
+    INDUSTRY: "產業強弱",
+    ACTION: "作戰動作",
+  };
+  return map[sectionType] || sectionType || "其他";
+}
+
+function getWarRoomCardClass(sectionType) {
+  const text = String(sectionType || "").toUpperCase();
+  if (["REDUCE", "RISK"].includes(text)) return "danger-card";
+  if (["WATCH", "HOLD", "INDUSTRY"].includes(text)) return "success-card";
+  return "";
+}
+
+function renderWarRoomSummaryCards(report = {}) {
+  return renderDetailSection("作戰室總覽", [
+    createInfoItem("報告日期", formatDate(report.report_date)),
+    createInfoItem("市場模式", report.market_mode || "RANGE"),
+    createInfoItem("Market Risk", formatNumber(report.market_risk_score)),
+    createInfoItem("Global Risk", formatNumber(report.global_risk_score)),
+    createInfoItem("今日觀察", `${formatNumber(report.top_watch_count || 0)} 檔`),
+    createInfoItem("續抱清單", `${formatNumber(report.hold_count || 0)} 檔`),
+    createInfoItem("減碼檢查", `${formatNumber(report.reduce_count || 0)} 檔`),
+    createInfoItem("風控提醒", `${formatNumber(report.risk_alert_count || 0)} 則`),
+  ], report.action_summary || "每日作戰室會整合市場、全球、AI 選股、持股與風控提醒。 ");
+}
+
+function renderWarRoomMainMessages(report = {}) {
+  return `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V2.5 每日作戰室</p>
+          <h3>${escapeHtml(report.action_summary || "尚未產生作戰重點")}</h3>
+          <p>${escapeHtml(report.market_summary || "尚未有市場摘要。")}</p>
+          <p>${escapeHtml(report.global_summary || "尚未有全球市場摘要。")}</p>
+        </div>
+        <button class="detail-btn" type="button" data-war-room-generate="true">產生作戰室</button>
+      </div>
+    </article>
+    ${report.industry_strength_summary ? `<article class="position-alert-card"><strong>產業強弱：</strong>${escapeHtml(report.industry_strength_summary)}</article>` : ""}
+    ${report.position_summary ? `<article class="position-alert-card"><strong>持股摘要：</strong>${escapeHtml(report.position_summary)}</article>` : ""}
+    ${report.ai_strategy_summary ? `<article class="position-alert-card"><strong>AI 策略：</strong>${escapeHtml(report.ai_strategy_summary)}</article>` : ""}
+  `;
+}
+
+function renderWarRoomItemCard(row = {}) {
+  const section = String(row.section_type || "OTHER").toUpperCase();
+  const title = row.title || `${row.stock_code || "作戰項目"} ${row.stock_name || ""}`.trim();
+  return `
+    <article class="stock-card position-card ${getWarRoomCardClass(section)}">
+      <div class="stock-card-head">
+        <div>
+          <p class="section-kicker">${escapeHtml(getWarRoomSectionTitle(section))}</p>
+          <h3>${escapeHtml(title)}</h3>
+          <div class="stock-meta-row">
+            ${row.stock_code ? `<span class="stock-code">${escapeHtml(row.stock_code)}</span>` : ""}
+            ${row.stock_name ? `<span class="badge">${escapeHtml(row.stock_name)}</span>` : ""}
+            ${row.industry ? `<span class="badge">${escapeHtml(normalizeIndustryDisplayName(row.industry))}</span>` : ""}
+          </div>
+        </div>
+        ${row.score !== null && row.score !== undefined ? `<div class="score-pill ${getScoreClass(row.score)}">${formatNumber(row.score)}</div>` : ""}
+      </div>
+      <p>${escapeHtml(row.message || "-")}</p>
+      ${row.action_text ? `<p class="stock-card-note"><strong>建議：</strong>${escapeHtml(row.action_text)}</p>` : ""}
+    </article>
+  `;
+}
+
+function renderWarRoomSection(sectionType, rows = []) {
+  if (!rows.length) return "";
+  return `
+    <div class="v13-subsection-title"><strong>${escapeHtml(getWarRoomSectionTitle(sectionType))}</strong><span>${escapeHtml(sectionType)}</span></div>
+    <div class="position-card-grid">${rows.map(renderWarRoomItemCard).join("")}</div>
+  `;
+}
+
+function renderWarRoomHistory(rows = []) {
+  if (!rows.length) return "";
+  return `
+    <div class="v13-subsection-title"><strong>歷史作戰室</strong><span>/war-room/history</span></div>
+    <div class="position-card-grid">
+      ${rows.slice(0, 6).map((row) => `
+        <article class="stock-card position-card">
+          <div class="stock-card-head">
+            <div>
+              <p class="section-kicker">${escapeHtml(formatDate(row.report_date))}</p>
+              <h3>${escapeHtml(row.market_mode || "RANGE")}</h3>
+            </div>
+            <div class="score-pill ${getScoreClass(row.market_risk_score)}">${formatNumber(row.market_risk_score)}</div>
+          </div>
+          <p>${escapeHtml(row.action_summary || "-")}</p>
+          <div class="stock-mini-grid">
+            ${createInfoItem("觀察", formatNumber(row.top_watch_count || 0))}
+            ${createInfoItem("續抱", formatNumber(row.hold_count || 0))}
+            ${createInfoItem("減碼", formatNumber(row.reduce_count || 0))}
+            ${createInfoItem("提醒", formatNumber(row.risk_alert_count || 0))}
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderDailyWarRoomPage() {
+  const report = state.dailyWarRoomReport || {};
+  const sections = state.dailyWarRoomSections || {};
+  const history = Array.isArray(state.dailyWarRoomHistory) ? state.dailyWarRoomHistory : [];
+
+  setContentSummary([
+    { label: "報告日期", value: formatDate(report.report_date) || "-" },
+    { label: "市場模式", value: report.market_mode || "-" },
+    { label: "今日觀察", value: `${formatNumber(report.top_watch_count || 0)} 檔` },
+    { label: "風控提醒", value: `${formatNumber(report.risk_alert_count || 0)} 則` },
+  ], "V2.5 把每日需要看的市場、全球、AI 觀察、持股風控與作戰動作整合成一頁。 ");
+  setResultHeader({ title: "每日投資作戰室", desc: report.report_date ? "已讀取最新作戰室。" : "目前尚未產生作戰室報告。", badge: "V2.5 作戰室", countText: report.report_date ? formatDate(report.report_date) : "未產生" });
+
+  if (!report.report_date) {
+    stockList.innerHTML = `
+      <article class="position-form-card trade-form-card">
+        <div class="position-form-header">
+          <div>
+            <p class="section-kicker">V2.5 每日作戰室</p>
+            <h3>尚未產生每日投資作戰室</h3>
+            <p>請先按「產生作戰室」，或在 API 執行 npm run war-room:generate。</p>
+          </div>
+          <button class="detail-btn" type="button" data-war-room-generate="true">產生作戰室</button>
+        </div>
+      </article>
+    `;
+    return;
+  }
+
+  stockList.innerHTML = `
+    ${state.dailyWarRoomLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.dailyWarRoomLastResult)}</article>` : ""}
+    ${renderWarRoomSummaryCards(report)}
+    ${renderWarRoomMainMessages(report)}
+    ${renderWarRoomSection("WATCH", sections.WATCH || [])}
+    ${renderWarRoomSection("HOLD", sections.HOLD || [])}
+    ${renderWarRoomSection("REDUCE", sections.REDUCE || [])}
+    ${renderWarRoomSection("RISK", sections.RISK || [])}
+    ${renderWarRoomSection("INDUSTRY", sections.INDUSTRY || [])}
+    ${renderWarRoomSection("MARKET", sections.MARKET || [])}
+    ${renderWarRoomSection("GLOBAL", sections.GLOBAL || [])}
+    ${report.line_message ? `<article class="position-form-card"><p class="section-kicker">LINE 每日作戰摘要</p><pre class="command-preview">${escapeHtml(report.line_message)}</pre></article>` : ""}
+    ${renderWarRoomHistory(history)}
+  `;
+}
+
+async function loadDailyWarRoom() {
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [latestResult, historyResult] = await Promise.all([
+      fetchJson("/war-room/latest", { raw: true }),
+      fetchJson("/war-room/history", { raw: true }).catch(() => ({ data: [] })),
+    ]);
+    state.dailyWarRoomReport = latestResult.report || null;
+    state.dailyWarRoomItems = Array.isArray(latestResult.items) ? latestResult.items : [];
+    state.dailyWarRoomSections = latestResult.sections || {};
+    state.dailyWarRoomHistory = Array.isArray(historyResult.data) ? historyResult.data : [];
+    renderDailyWarRoomPage();
+    showTemporaryStatus(state.dailyWarRoomReport?.report_date ? `已更新每日作戰室：${formatDate(state.dailyWarRoomReport.report_date)}。` : "尚未產生每日作戰室。", "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "作戰室失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run war-room:setup。 ");
+    setResultHeader({ title: "每日作戰室讀取失敗", desc: "目前無法取得每日投資作戰室。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`每日作戰室讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleDailyWarRoomGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/war-room/generate", { method: "POST", body: {}, raw: true });
+    state.dailyWarRoomLastResult = result.message || "已產生每日投資作戰室。";
+    await loadDailyWarRoom();
+  } catch (error) {
+    showStatus(`產生每日作戰室失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderAiFeedbackPage() {
+  const summary = state.aiFeedbackSummary || {};
+  const rows = Array.isArray(state.aiFeedbackRows) ? state.aiFeedbackRows : [];
+  const factors = Array.isArray(state.aiFeedbackFactors) ? state.aiFeedbackFactors : [];
+  const weights = Array.isArray(state.aiFeedbackWeights) ? state.aiFeedbackWeights : [];
+
+  setContentSummary([
+    { label: "推薦樣本", value: `${formatNumber(summary.total_count || 0)} 筆` },
+    { label: "成功率", value: formatPercent(summary.success_rate_pct), className: getChangeClass((summary.success_rate_pct || 0) - 50) },
+    { label: "品質分數", value: formatNumber(summary.avg_quality_score), className: getScoreClass(summary.avg_quality_score) },
+    { label: "最新推薦日", value: formatDate(summary.latest_signal_date || "-") },
+  ], "V2.3 初版是回饋學習資料層，先提供權重建議，不會自動改公式、不會自動下單。");
+
+  setResultHeader({
+    title: "AI 推薦回饋學習",
+    desc: rows.length ? "追蹤 AI 推薦後報酬、成功 / 失敗與因子績效。" : "目前尚未產生 AI 推薦回饋資料。",
+    badge: "V2.3 AI 回饋學習",
+    countText: `${formatNumber(summary.total_count || rows.length)} 筆`,
+  });
+
+  stockList.innerHTML = `
+    <article class="position-form-card trade-form-card">
+      <div class="position-form-header">
+        <div>
+          <p class="section-kicker">V2.3 產生流程</p>
+          <h3>更新 AI 回饋學習</h3>
+          <p>會依 AI 多因子訊號與後續收盤價產生回饋、因子績效與權重建議。</p>
+        </div>
+        <button class="detail-btn" type="button" data-ai-feedback-generate="true">產生回饋</button>
+      </div>
+    </article>
+    ${state.aiFeedbackLastResult ? `<article class="position-alert-card success-card"><strong>執行結果：</strong>${escapeHtml(state.aiFeedbackLastResult)}</article>` : ""}
+    ${renderAiFeedbackSummaryCards(summary)}
+    ${renderAiFeedbackFactorCards(factors)}
+    ${renderAiFeedbackWeightCards(weights)}
+    ${renderAiFeedbackRows(rows)}
+  `;
+}
+
+async function loadAiFeedback() {
+  setLoading(true);
+  renderLoadingCards();
+  try {
+    const [summaryResult, factorResult, weightResult] = await Promise.all([
+      fetchJson("/ai-feedback/summary", { raw: true }),
+      fetchJson("/ai-feedback/factors", { raw: true }),
+      fetchJson("/ai-feedback/weights", { raw: true }),
+    ]);
+    state.aiFeedbackSummary = summaryResult.summary || {};
+    state.aiFeedbackRows = Array.isArray(summaryResult.latest_rows) ? summaryResult.latest_rows : [];
+    state.aiFeedbackFactors = Array.isArray(factorResult.data) ? factorResult.data : [];
+    state.aiFeedbackWeights = Array.isArray(weightResult.data) ? weightResult.data : [];
+    renderAiFeedbackPage();
+    showTemporaryStatus(`已更新 AI 回饋學習資料：${formatNumber(state.aiFeedbackSummary.total_count || 0)} 筆。`, "success");
+  } catch (error) {
+    setContentSummary([{ label: "讀取狀態", value: "AI 回饋失敗" }, { label: "錯誤訊息", value: error.message }], "請確認已執行 npm run ai-feedback:setup。");
+    setResultHeader({ title: "AI 回饋學習讀取失敗", desc: "目前無法取得 AI 回饋資料。", badge: "讀取失敗" });
+    stockList.innerHTML = "";
+    showStatus(`AI 回饋學習讀取失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleAiFeedbackGenerate(button) {
+  button.disabled = true;
+  try {
+    const result = await fetchJson("/ai-feedback/generate", { method: "POST", body: {}, raw: true });
+    state.aiFeedbackLastResult = result.message || "已產生 AI 推薦回饋學習資料。";
+    await loadAiFeedback();
+  } catch (error) {
+    showStatus(`產生 AI 回饋學習失敗：${escapeHtml(error.message)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadList() {
   updatePageText();
   hideStatus();
@@ -8510,8 +9482,28 @@ async function loadList() {
     return;
   }
 
+  if (state.page === "warRoom") {
+    await loadDailyWarRoom();
+    return;
+  }
+
   if (state.page === "positions") {
     await loadPositions();
+    return;
+  }
+
+  if (state.page === "portfolio") {
+    await loadPortfolioRisk();
+    return;
+  }
+
+  if (state.page === "trades") {
+    await loadTradePerformance();
+    return;
+  }
+
+  if (state.page === "aiFeedback") {
+    await loadAiFeedback();
     return;
   }
 
@@ -8798,6 +9790,15 @@ function switchPage(page) {
   if (page === "strategyReports") {
     state.strategyDailyReportLastSendResult = null;
   }
+  if (page === "portfolio") {
+    state.portfolioLastResult = null;
+  }
+  if (page === "warRoom") {
+    state.dailyWarRoomLastResult = null;
+  }
+  if (page === "aiFeedback") {
+    state.aiFeedbackLastResult = null;
+  }
   loadList();
 }
 
@@ -8894,10 +9895,31 @@ stockList.addEventListener("submit", (event) => {
     return;
   }
 
+  const portfolioPlanForm = event.target.closest("[data-portfolio-plan-form]");
+  if (portfolioPlanForm) {
+    event.preventDefault();
+    handlePortfolioPlanSubmit(portfolioPlanForm);
+    return;
+  }
+
+  const portfolioPlanEditForm = event.target.closest("[data-portfolio-plan-edit-form]");
+  if (portfolioPlanEditForm) {
+    event.preventDefault();
+    handlePortfolioPlanEdit(portfolioPlanEditForm);
+    return;
+  }
+
   const positionEditForm = event.target.closest("[data-position-edit-form]");
   if (positionEditForm) {
     event.preventDefault();
     handlePositionEditSubmit(positionEditForm);
+    return;
+  }
+
+  const tradeForm = event.target.closest("[data-trade-form]");
+  if (tradeForm) {
+    event.preventDefault();
+    handleTradeFormSubmit(tradeForm);
     return;
   }
 
@@ -8924,6 +9946,42 @@ stockList.addEventListener("click", (event) => {
   const positionAlertReadButton = event.target.closest("[data-position-alert-read]");
   if (positionAlertReadButton) {
     handlePositionAlertRead(positionAlertReadButton);
+    return;
+  }
+
+  const portfolioRiskGenerateButton = event.target.closest("[data-portfolio-risk-generate]");
+  if (portfolioRiskGenerateButton) {
+    handlePortfolioRiskGenerate(portfolioRiskGenerateButton);
+    return;
+  }
+
+  const portfolioPlanDeleteButton = event.target.closest("[data-portfolio-plan-delete]");
+  if (portfolioPlanDeleteButton) {
+    handlePortfolioPlanDelete(portfolioPlanDeleteButton);
+    return;
+  }
+
+  const tradeGenerateButton = event.target.closest("[data-trade-performance-generate]");
+  if (tradeGenerateButton) {
+    handleTradePerformanceGenerate(tradeGenerateButton);
+    return;
+  }
+
+  const tradeDeleteButton = event.target.closest("[data-trade-delete]");
+  if (tradeDeleteButton) {
+    handleTradeDelete(tradeDeleteButton);
+    return;
+  }
+
+  const dailyWarRoomGenerateButton = event.target.closest("[data-war-room-generate]");
+  if (dailyWarRoomGenerateButton) {
+    handleDailyWarRoomGenerate(dailyWarRoomGenerateButton);
+    return;
+  }
+
+  const aiFeedbackGenerateButton = event.target.closest("[data-ai-feedback-generate]");
+  if (aiFeedbackGenerateButton) {
+    handleAiFeedbackGenerate(aiFeedbackGenerateButton);
     return;
   }
 

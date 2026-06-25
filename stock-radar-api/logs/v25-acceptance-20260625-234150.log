@@ -1,0 +1,133 @@
+====================================
+Stock Radar V2.5 每日投資作戰室自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v25-acceptance-20260625-234150.log
+開始時間：2026/6/25 23:41:50
+API：http://localhost:3000
+DB流程：執行 setup / war room generate
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.5 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupDailyWarRoomTables.js
+完成：V2.5 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.5 generate script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateDailyWarRoomReport.js
+完成：V2.5 generate script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.5 每日投資作戰室資料表
+指令：npm run war-room:setup
+
+> stock-radar-api@1.0.0 war-room:setup
+> node scripts/setupDailyWarRoomTables.js
+
+◇ injected env (7) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+====================================
+Stock Radar V2.5 每日投資作戰室資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v25-daily-war-room.sql
+建立 / 確認完成：
+- daily_war_room_reports
+- daily_war_room_items
+結果：PASS
+完成：建立 V2.5 每日投資作戰室資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.5 每日投資作戰室報告
+指令：npm run war-room:generate
+
+> stock-radar-api@1.0.0 war-room:generate
+> node scripts/generateDailyWarRoomReport.js
+
+◇ injected env (7) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+====================================
+Stock Radar V2.5 每日投資作戰室產生
+====================================
+報告日期：2026-06-25
+報告 ID：1
+作戰項目：15
+AI 觀察股：10
+風控提醒：0
+結果：PASS
+完成：產生 V2.5 每日投資作戰室報告，耗時 0分1秒
+--------------------------------------------------
+開始：V2.5 靜態 / API 驗收
+指令：npm run v25:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v25:check
+> node scripts/checkV25.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V2.5 每日投資作戰室驗收檢查
+====================================
+✅ [版本] API 版本為 V2.5.0 - stock-radar-api-v2.5.0
+✅ [版本] API 預期 PWA 版本為 v76 - stock-radar-pwa-v76
+✅ [版本] service-worker 快取版本為 v76 - stock-radar-pwa-v76
+✅ [前端] 側邊功能選單顯示 V2.5 - index.html
+✅ [npm 指令] war-room:setup - node scripts/setupDailyWarRoomTables.js
+✅ [npm 指令] war-room:generate - node scripts/generateDailyWarRoomReport.js
+✅ [npm 指令] war-room:daily - npm run war-room:setup && npm run war-room:generate
+✅ [npm 指令] v25:check - node scripts/checkV25.js
+✅ [npm 指令] v25:test - node scripts/runV25Acceptance.js
+✅ [npm 指令] v24:test - node scripts/runV24Acceptance.js
+✅ [npm 指令] portfolio:daily - npm run portfolio:setup && npm run portfolio:risk
+✅ [npm 指令] ai-feedback:daily - npm run ai-feedback:setup && npm run ai-feedback:generate
+✅ [npm 指令] trade:daily - npm run trade:setup && npm run trade:performance
+✅ [npm 指令] position:daily - npm run position:setup && npm run position:snapshot && npm run position:alerts
+✅ [必要檔案] stock-radar-api/sql/v25-daily-war-room.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupDailyWarRoomTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateDailyWarRoomReport.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV25.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV25Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] daily_war_room_reports 資料表 - CREATE TABLE IF NOT EXISTS `daily_war_room_reports`
+✅ [SQL] daily_war_room_items 資料表 - CREATE TABLE IF NOT EXISTS `daily_war_room_items`
+✅ [SQL] 市場模式欄位 - market_mode
+✅ [SQL] LINE 訊息欄位 - line_message
+✅ [SQL] 作戰項目類型 - section_type
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v25/status - server.js 靜態檢查
+✅ [API 路由] GET /v25/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /war-room/latest - server.js 靜態檢查
+✅ [API 路由] GET /war-room/history - server.js 靜態檢查
+✅ [API 路由] POST /war-room/generate - server.js 靜態檢查
+✅ [前端] 每日作戰室頁 - renderDailyWarRoomPage
+✅ [前端] 作戰室 API - /war-room/latest
+✅ [前端] 產生作戰室 API - /war-room/generate
+✅ [前端] V2.5 文字 - V2.5 每日投資作戰室
+✅ [前端] 作戰室按鈕 - data-war-room-generate
+✅ [前端] 不再顯示 V1.4 系統狀態 - V2.5 status copy
+✅ [相容] 保留 V2.4 部位模擬 - V2.4 routes
+✅ [相容] 保留 V2.3 AI 回饋學習 - V2.3 routes
+✅ [相容] 保留 V2.2 交易績效 - V2.2 routes
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v25/status - HTTP 200
+✅ [API 動態] /v25/acceptance - HTTP 200
+✅ [API 動態] /war-room/latest - HTTP 200
+✅ [API 動態] /war-room/history - HTTP 200
+------------------------------------
+PASS：50
+WARN：0
+FAIL：0
+結果：PASS
+完成：V2.5 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 23:41:53
+總耗時：0分3秒
+結果：PASS

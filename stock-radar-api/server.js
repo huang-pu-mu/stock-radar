@@ -2,10 +2,12 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import { spawn } from "child_process";
 import { OAuth2Client } from "google-auth-library";
 import pool from "./db.js";
 import { query, testConnection } from "./db.js";
 import { generateWatchlistAlerts } from "./scripts/generateWatchlistAlerts.js";
+import { generateTradePerformance } from "./scripts/generateTradePerformance.js";
 
 dotenv.config();
 
@@ -1273,8 +1275,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v2.1.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v72";
+const API_VERSION = "stock-radar-api-v2.5.0";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v76";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -1853,6 +1855,289 @@ function calculateV19Progress() {
 }
 
 
+const V25_FEATURE_TABLES = [
+  { name: "daily_war_room_reports", label: "V2.5 每日投資作戰室主報告", date_column: "report_date" },
+  { name: "daily_war_room_items", label: "V2.5 每日投資作戰室明細", date_column: "report_date" },
+];
+
+const V25_MODULES = [
+  { key: "war_room_tables", name: "每日作戰室資料表", progress: 100, status: "completed", required_tables: ["daily_war_room_reports", "daily_war_room_items"] },
+  { key: "market_global_summary", name: "市場 / 全球風險摘要", progress: 95, status: "first_version", required_tables: ["market_risk_snapshots", "global_market_snapshots"] },
+  { key: "watch_list_summary", name: "今日 AI 觀察清單", progress: 95, status: "first_version", required_apis: ["GET /war-room/latest", "GET /ai-selection/top"] },
+  { key: "position_action_list", name: "持股續抱 / 減碼清單", progress: 92, status: "first_version", required_tables: ["user_position_snapshots", "position_risk_alerts"] },
+  { key: "industry_rotation", name: "產業強弱與資金輪動摘要", progress: 90, status: "first_version", required_tables: ["ai_selection_signals"] },
+  { key: "frontend_war_room_page", name: "前端每日作戰室頁", progress: 92, status: "first_version", required_apis: ["每日投資作戰室頁", "作戰室總覽", "LINE 訊息摘要"] },
+  { key: "v25_acceptance_log", name: "V2.5 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v25:check", "npm run v25:test"] },
+];
+
+const V25_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "daily_war_room_reports 已建立",
+      "daily_war_room_items 已建立",
+      "npm run war-room:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "每日作戰室產生流程",
+    items: [
+      "npm run war-room:generate 可產生每日投資作戰室報告",
+      "作戰室整合 Market Risk、Global Risk、AI 多因子、持股快照與風控提醒",
+      "作戰室可整理今日觀察、持股續抱、檢查減碼、風險提醒與產業強弱",
+    ],
+  },
+  {
+    group: "API",
+    items: [
+      "GET /war-room/latest 可取得最新每日作戰室",
+      "GET /war-room/history 可取得歷史作戰室報告",
+      "POST /war-room/generate 可手動產生最新作戰室",
+      "GET /v25/status 與 GET /v25/acceptance 可驗收版本狀態",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增每日作戰室頁",
+      "前端顯示市場狀態、全球狀態、今日觀察、持股續抱、減碼檢查、風控提醒與 LINE 摘要",
+      "PWA 快取版本升級至 stock-radar-pwa-v76",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run war-room:setup",
+      "npm run war-room:generate",
+      "npm run v25:check",
+      "npm run v25:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV25Progress() {
+  if (V25_MODULES.length === 0) return 0;
+  const total = V25_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V25_MODULES.length);
+}
+
+
+
+
+const V24_FEATURE_TABLES = [
+  { name: "portfolio_plans", label: "V2.4 部位模擬計畫", date_column: "updated_at" },
+  { name: "portfolio_plan_positions", label: "V2.4 部位模擬明細", date_column: "updated_at" },
+  { name: "portfolio_risk_snapshots", label: "V2.4 部位風險快照", date_column: "snapshot_date" },
+];
+
+const V24_MODULES = [
+  { key: "portfolio_tables", name: "部位模擬與風險資料表", progress: 100, status: "completed", required_tables: ["portfolio_plans", "portfolio_plan_positions", "portfolio_risk_snapshots"] },
+  { key: "portfolio_plan_crud", name: "部位計畫 CRUD", progress: 100, status: "completed", required_apis: ["GET /portfolio/plans", "POST /portfolio/plans", "PUT /portfolio/plans/:id", "DELETE /portfolio/plans/:id"] },
+  { key: "position_ratio", name: "部位比例與現金比例", progress: 95, status: "first_version", required_apis: ["GET /portfolio/summary", "GET /portfolio/risk/latest"] },
+  { key: "concentration_risk", name: "單檔 / 產業集中度風控", progress: 95, status: "first_version", required_tables: ["portfolio_plan_positions", "portfolio_risk_snapshots"] },
+  { key: "market_mode_mapping", name: "市場模式對照部位風險", progress: 92, status: "first_version", required_apis: ["npm run portfolio:risk"] },
+  { key: "frontend_portfolio_page", name: "前端部位模擬頁", progress: 92, status: "first_version", required_apis: ["部位模擬頁", "部位總覽", "風險快照"] },
+  { key: "v24_acceptance_log", name: "V2.4 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v24:check", "npm run v24:test"] },
+];
+
+const V24_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "portfolio_plans 已建立",
+      "portfolio_plan_positions 已建立",
+      "portfolio_risk_snapshots 已建立",
+      "npm run portfolio:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "部位模擬",
+    items: [
+      "GET /portfolio/plans 可依 Google 登入使用者查詢自己的部位計畫",
+      "POST /portfolio/plans 可新增總額、現金、目標部位與風控上限",
+      "PUT /portfolio/plans/:id 可編輯部位計畫",
+      "DELETE /portfolio/plans/:id 可停用部位計畫",
+    ],
+  },
+  {
+    group: "風險觀察",
+    items: [
+      "npm run portfolio:risk 可產生部位風險快照",
+      "可計算部位比例、現金比例、單檔集中、產業集中與風險曝險",
+      "可依 BULL / RANGE / BEAR 市場模式調整曝險判斷",
+      "GET /portfolio/risk/latest 可讀取登入使用者最新風險快照",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增部位模擬頁",
+      "前端顯示總資金、現金、目標部位、風險上限與最新快照",
+      "前端可手動新增 / 編輯 / 停用部位計畫",
+      "PWA 快取版本升級至 stock-radar-pwa-v75",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run portfolio:setup",
+      "npm run portfolio:risk",
+      "npm run v24:check",
+      "npm run v24:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV24Progress() {
+  if (V24_MODULES.length === 0) return 0;
+  const total = V24_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V24_MODULES.length);
+}
+
+
+
+const V23_FEATURE_TABLES = [
+  { name: "ai_recommendation_feedbacks", label: "V2.3 AI 推薦結果回饋", date_column: "signal_trade_date" },
+  { name: "ai_factor_performance_snapshots", label: "V2.3 AI 因子績效快照", date_column: "snapshot_date" },
+  { name: "ai_factor_weight_suggestions", label: "V2.3 AI 因子權重建議", date_column: "suggestion_date" },
+];
+
+const V23_MODULES = [
+  { key: "feedback_tables", name: "AI 推薦回饋學習資料表", progress: 100, status: "completed", required_tables: ["ai_recommendation_feedbacks", "ai_factor_performance_snapshots", "ai_factor_weight_suggestions"] },
+  { key: "recommendation_tracking", name: "推薦後 1/3/5/10 日表現追蹤", progress: 95, status: "first_version", required_apis: ["npm run ai-feedback:generate", "GET /ai-feedback/summary"] },
+  { key: "success_failure_labeling", name: "推薦成功 / 失敗標記", progress: 95, status: "first_version", required_tables: ["ai_recommendation_feedbacks"] },
+  { key: "factor_performance", name: "AI 因子績效統計", progress: 92, status: "first_version", required_apis: ["GET /ai-feedback/factors"] },
+  { key: "weight_suggestions", name: "因子權重調整建議", progress: 90, status: "first_version", required_apis: ["GET /ai-feedback/weights"] },
+  { key: "frontend_ai_feedback_page", name: "前端 AI 回饋學習頁", progress: 90, status: "first_version", required_apis: ["AI 回饋學習頁", "因子績效", "權重建議"] },
+  { key: "v23_acceptance_log", name: "V2.3 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v23:check", "npm run v23:test"] },
+];
+
+const V23_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "ai_recommendation_feedbacks 已建立",
+      "ai_factor_performance_snapshots 已建立",
+      "ai_factor_weight_suggestions 已建立",
+      "npm run ai-feedback:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "推薦回饋學習",
+    items: [
+      "npm run ai-feedback:generate 可追蹤 AI 推薦後 1 / 3 / 5 / 10 日報酬",
+      "可標記 SUCCESS / PARTIAL / FAIL / WAITING",
+      "可產生 recommendation_quality_score",
+      "可依市場環境 BULL / RANGE / BEAR / HIGH_RISK 分組",
+    ],
+  },
+  {
+    group: "API",
+    items: [
+      "GET /ai-feedback/summary 可讀取推薦回饋總覽",
+      "GET /ai-feedback/factors 可讀取因子績效",
+      "GET /ai-feedback/weights 可讀取權重建議",
+      "POST /ai-feedback/generate 可觸發本機回饋學習產生流程",
+      "GET /v23/status 與 GET /v23/acceptance 可檢查 V2.3 狀態",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增 AI 回饋學習頁",
+      "前端顯示推薦成功率、失敗率、品質分數與樣本數",
+      "前端顯示因子績效與權重建議",
+      "PWA 快取版本升級至 stock-radar-pwa-v74",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run ai-feedback:setup",
+      "npm run ai-feedback:generate",
+      "npm run v23:check",
+      "npm run v23:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV23Progress() {
+  if (V23_MODULES.length === 0) return 0;
+  const total = V23_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V23_MODULES.length);
+}
+
+
+
+const V22_FEATURE_TABLES = [
+  { name: "user_trades", label: "V2.2 使用者交易紀錄", date_column: "trade_date" },
+  { name: "user_realized_trades", label: "V2.2 已實現損益紀錄", date_column: "sell_date" },
+  { name: "user_performance_snapshots", label: "V2.2 交易績效快照", date_column: "snapshot_date" },
+];
+
+const V22_MODULES = [
+  { key: "trade_tables", name: "交易紀錄與績效資料表", progress: 100, status: "completed", required_tables: ["user_trades", "user_realized_trades", "user_performance_snapshots"] },
+  { key: "trade_crud", name: "交易紀錄 CRUD", progress: 100, status: "completed", required_apis: ["GET /trades", "POST /trades", "PUT /trades/:id", "DELETE /trades/:id"] },
+  { key: "realized_pnl", name: "已實現損益計算", progress: 95, status: "first_version", required_apis: ["npm run trade:performance", "GET /trades/summary"] },
+  { key: "performance_summary", name: "勝率與績效摘要", progress: 95, status: "first_version", required_apis: ["GET /performance/latest", "GET /performance/history"] },
+  { key: "strategy_performance", name: "策略來源績效統計", progress: 92, status: "first_version", required_apis: ["GET /performance/strategy"] },
+  { key: "frontend_trade_page", name: "前端交易績效頁", progress: 92, status: "first_version", required_apis: ["交易績效頁", "交易表單", "績效摘要"] },
+  { key: "v22_acceptance_log", name: "V2.2 自動測試與 log", progress: 100, status: "completed", required_apis: ["npm run v22:check", "npm run v22:test"] },
+];
+
+const V22_FINAL_ACCEPTANCE_ITEMS = [
+  {
+    group: "資料庫",
+    items: [
+      "user_trades 已建立",
+      "user_realized_trades 已建立",
+      "user_performance_snapshots 已建立",
+      "npm run trade:setup 可重複執行且不破壞既有資料",
+    ],
+  },
+  {
+    group: "交易紀錄",
+    items: [
+      "GET /trades 可依 Google 登入使用者查詢自己的交易紀錄",
+      "POST /trades 可新增買進 / 賣出紀錄",
+      "PUT /trades/:id 可編輯交易紀錄",
+      "DELETE /trades/:id 可停用交易紀錄",
+    ],
+  },
+  {
+    group: "績效分析",
+    items: [
+      "npm run trade:performance 可依賣出紀錄產生已實現損益",
+      "GET /trades/summary 可統計交易總覽、勝率與已實現損益",
+      "GET /performance/latest 可讀取最新績效快照",
+      "GET /performance/strategy 可依策略來源統計績效",
+    ],
+  },
+  {
+    group: "前端",
+    items: [
+      "前端新增交易績效頁",
+      "前端可新增買進 / 賣出交易紀錄",
+      "前端顯示已實現損益、勝率、平均獲利與平均虧損",
+      "PWA 快取版本升級至 stock-radar-pwa-v73",
+    ],
+  },
+  {
+    group: "驗收指令",
+    items: [
+      "npm run trade:setup",
+      "npm run trade:performance",
+      "npm run v22:check",
+      "npm run v22:test -- --api=http://localhost:3000",
+    ],
+  },
+];
+
+function calculateV22Progress() {
+  if (V22_MODULES.length === 0) return 0;
+  const total = V22_MODULES.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+  return Math.round(total / V22_MODULES.length);
+}
 
 const V21_FEATURE_TABLES = [
   { name: "user_positions", label: "V2.1 使用者持股清單", date_column: "updated_at" },
@@ -5969,7 +6254,7 @@ app.get("/v20/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        (API_VERSION === "stock-radar-api-v2.0.0" || API_VERSION === "stock-radar-api-v2.0.1" || API_VERSION === "stock-radar-api-v2.1.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v71" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v72") ? "pass" : "fail",
+        (API_VERSION === "stock-radar-api-v2.0.0" || API_VERSION === "stock-radar-api-v2.0.1" || API_VERSION === "stock-radar-api-v2.1.0" || API_VERSION === "stock-radar-api-v2.2.0" || API_VERSION === "stock-radar-api-v2.3.0" || API_VERSION === "stock-radar-api-v2.4.0" || API_VERSION === "stock-radar-api-v2.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v71" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v72" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v73" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v74" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v75" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v76") ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V2.1 會相容保留 V2.0 AI 多因子功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -6391,6 +6676,765 @@ async function getV21Snapshot() {
   return snapshot;
 }
 
+
+function normalizeTradeType(value) {
+  const text = String(value || "").trim().toUpperCase();
+  if (["BUY", "B"].includes(text) || text === "買" || text === "買進") return "BUY";
+  if (["SELL", "S"].includes(text) || text === "賣" || text === "賣出") return "SELL";
+  return text;
+}
+
+function normalizeTradePayload(body = {}, existing = {}) {
+  const stockCode = normalizeStockCodeValue(body.stock_code ?? existing.stock_code);
+  const tradeDate = String(body.trade_date ?? existing.trade_date ?? todayTaipeiDateText()).slice(0, 10);
+  const tradeType = normalizeTradeType(body.trade_type ?? existing.trade_type ?? "BUY");
+  const tradePrice = parsePositiveNumber(body.trade_price ?? existing.trade_price, null);
+  const inputShares = parsePositiveNumber(body.shares, null);
+  const inputLots = parsePositiveNumber(body.lots, null);
+  const existingShares = parsePositiveNumber(existing.shares, null);
+  const existingLots = parsePositiveNumber(existing.lots, null);
+  const shares = inputShares !== null
+    ? inputShares
+    : inputLots !== null
+      ? inputLots * 1000
+      : existingShares !== null
+        ? existingShares
+        : existingLots !== null
+          ? existingLots * 1000
+          : null;
+  const lots = inputLots !== null ? inputLots : shares !== null ? shares / 1000 : null;
+  const fee = roundNumber(parsePositiveNumber(body.fee ?? existing.fee, 0), 2) || 0;
+  const tax = roundNumber(parsePositiveNumber(body.tax ?? existing.tax, 0), 2) || 0;
+  const grossAmount = tradePrice !== null && shares !== null ? roundNumber(tradePrice * shares, 2) : null;
+  const netAmount = grossAmount === null ? null : tradeType === "SELL" ? roundNumber(grossAmount - fee - tax, 2) : roundNumber(grossAmount + fee, 2);
+  const positionId = body.position_id === null || body.position_id === "" || body.position_id === undefined
+    ? (existing.position_id ?? null)
+    : Number(body.position_id);
+
+  return {
+    stockCode,
+    tradeDate,
+    tradeType,
+    tradePrice: tradePrice === null ? null : roundNumber(tradePrice, 2),
+    shares: shares === null ? null : roundNumber(shares, 2),
+    lots: lots === null ? null : roundNumber(lots, 3),
+    fee,
+    tax,
+    grossAmount,
+    netAmount,
+    positionId: Number.isFinite(positionId) && positionId > 0 ? positionId : null,
+    strategySource: String(body.strategy_source ?? existing.strategy_source ?? "MANUAL").trim().slice(0, 100) || "MANUAL",
+    aiStrengthScoreAtTrade: normalizeNullablePrice(body.ai_strength_score_at_trade ?? existing.ai_strength_score_at_trade),
+    riskScoreAtTrade: normalizeNullablePrice(body.risk_score_at_trade ?? existing.risk_score_at_trade),
+    note: String(body.note ?? existing.note ?? "").trim().slice(0, 500) || null,
+  };
+}
+
+function validateTradePayload(payload) {
+  if (!payload.stockCode) return "請提供股票代號。";
+  if (!isValidStockCodeValue(payload.stockCode)) return "股票代號格式不正確。";
+  if (!isValidDateText(payload.tradeDate)) return "交易日期格式不正確，請使用 YYYY-MM-DD。";
+  if (!["BUY", "SELL"].includes(payload.tradeType)) return "交易類型必須是 BUY 或 SELL。";
+  if (payload.tradePrice === null || payload.tradePrice <= 0) return "交易價格必須大於 0。";
+  if (payload.shares === null || payload.shares <= 0) return "請提供交易股數或張數，且必須大於 0。";
+  return "";
+}
+
+async function getStockBasic(stockCode) {
+  const rows = await query(
+    `SELECT stock_code, stock_name, market_type FROM stocks WHERE stock_code = ? AND is_active = 1 LIMIT 1`,
+    [stockCode],
+  );
+  return rows[0] || null;
+}
+
+async function getTradeRowsForUser(userId, tradeId = null, activeOnly = true) {
+  if (!(await checkTableExists("user_trades"))) return [];
+  const params = [userId];
+  let idCondition = "";
+  let activeCondition = "";
+  if (tradeId !== null) {
+    idCondition = "AND t.id = ?";
+    params.push(tradeId);
+  }
+  if (activeOnly) activeCondition = "AND t.is_active = 1";
+
+  return query(
+    `
+    SELECT
+      t.id,
+      t.user_id,
+      t.position_id,
+      t.stock_code,
+      t.stock_name,
+      t.market_type,
+      DATE_FORMAT(t.trade_date, '%Y-%m-%d') AS trade_date,
+      t.trade_type,
+      t.trade_price,
+      t.shares,
+      t.lots,
+      t.fee,
+      t.tax,
+      t.gross_amount,
+      t.net_amount,
+      t.strategy_source,
+      t.ai_strength_score_at_trade,
+      t.risk_score_at_trade,
+      t.note,
+      t.is_active,
+      r.realized_profit_loss,
+      r.realized_profit_loss_pct,
+      r.holding_days_estimated,
+      r.result_status,
+      DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM user_trades t
+    LEFT JOIN user_realized_trades r ON r.source_trade_id = t.id
+    WHERE t.user_id = ?
+      ${idCondition}
+      ${activeCondition}
+    ORDER BY t.trade_date DESC, t.id DESC
+    `,
+    params,
+  );
+}
+
+function summarizeTradeRows(trades = [], realizedRows = [], performance = null) {
+  const summary = {
+    total_trades: trades.length,
+    buy_trades: 0,
+    sell_trades: 0,
+    total_buy_amount: 0,
+    total_sell_amount: 0,
+    closed_trades: realizedRows.length,
+    winning_trades: 0,
+    losing_trades: 0,
+    flat_trades: 0,
+    win_rate_pct: 0,
+    realized_profit_loss: 0,
+    avg_realized_profit_loss_pct: 0,
+    avg_win_pct: 0,
+    avg_loss_pct: 0,
+    latest_snapshot_date: performance?.snapshot_date || null,
+    performance_level: performance?.performance_level || "NEUTRAL",
+  };
+
+  for (const trade of trades) {
+    if (String(trade.trade_type).toUpperCase() === "BUY") {
+      summary.buy_trades += 1;
+      summary.total_buy_amount += parsePositiveNumber(trade.net_amount, 0) || 0;
+    } else if (String(trade.trade_type).toUpperCase() === "SELL") {
+      summary.sell_trades += 1;
+      summary.total_sell_amount += parsePositiveNumber(trade.net_amount, 0) || 0;
+    }
+  }
+
+  let pctSum = 0;
+  let winPctSum = 0;
+  let lossPctSum = 0;
+  for (const row of realizedRows) {
+    const pnl = parsePositiveNumber(row.realized_profit_loss, 0) || 0;
+    const pct = parsePositiveNumber(row.realized_profit_loss_pct, 0) || 0;
+    summary.realized_profit_loss += pnl;
+    pctSum += pct;
+    if (pnl > 0) {
+      summary.winning_trades += 1;
+      winPctSum += pct;
+    } else if (pnl < 0) {
+      summary.losing_trades += 1;
+      lossPctSum += pct;
+    } else {
+      summary.flat_trades += 1;
+    }
+  }
+
+  summary.win_rate_pct = summary.closed_trades > 0 ? roundNumber((summary.winning_trades / summary.closed_trades) * 100, 4) : 0;
+  summary.avg_realized_profit_loss_pct = summary.closed_trades > 0 ? roundNumber(pctSum / summary.closed_trades, 4) : 0;
+  summary.avg_win_pct = summary.winning_trades > 0 ? roundNumber(winPctSum / summary.winning_trades, 4) : 0;
+  summary.avg_loss_pct = summary.losing_trades > 0 ? roundNumber(lossPctSum / summary.losing_trades, 4) : 0;
+  summary.total_buy_amount = roundNumber(summary.total_buy_amount, 2) || 0;
+  summary.total_sell_amount = roundNumber(summary.total_sell_amount, 2) || 0;
+  summary.realized_profit_loss = roundNumber(summary.realized_profit_loss, 2) || 0;
+
+  if (performance) {
+    summary.latest_snapshot_date = performance.snapshot_date;
+    summary.performance_level = performance.performance_level;
+    summary.best_stock_code = performance.best_stock_code;
+    summary.worst_stock_code = performance.worst_stock_code;
+    summary.best_strategy_source = performance.best_strategy_source;
+  }
+
+  return summary;
+}
+
+async function getTradeSummaryForUser(userId) {
+  const trades = await getTradeRowsForUser(userId, null, true);
+  const realizedRows = await safeQuery(
+    `
+    SELECT *
+    FROM user_realized_trades
+    WHERE user_id = ?
+    ORDER BY sell_date DESC, id DESC
+    `,
+    [userId],
+    [],
+  );
+  const performanceRows = await safeQuery(
+    `
+    SELECT *, DATE_FORMAT(snapshot_date, '%Y-%m-%d') AS snapshot_date
+    FROM user_performance_snapshots
+    WHERE user_id = ?
+    ORDER BY snapshot_date DESC
+    LIMIT 1
+    `,
+    [userId],
+    [],
+  );
+  const performance = performanceRows[0] || null;
+  return { summary: summarizeTradeRows(trades, realizedRows, performance), trades, realized_trades: realizedRows, latest_performance: performance };
+}
+
+async function getV22Snapshot() {
+  const snapshot = { trades: null, realized_trades: null, performance_snapshots: null };
+  if (await checkTableExists("user_trades")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count, DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS latest_trade_date FROM user_trades`, [], [{ total_count: 0, active_count: 0, latest_trade_date: null }]);
+    snapshot.trades = rows?.[0] || null;
+  }
+  if (await checkTableExists("user_realized_trades")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(sell_date), '%Y-%m-%d') AS latest_sell_date, COALESCE(SUM(realized_profit_loss), 0) AS total_realized_profit_loss FROM user_realized_trades`, [], [{ total_count: 0, latest_sell_date: null, total_realized_profit_loss: 0 }]);
+    snapshot.realized_trades = rows?.[0] || null;
+  }
+  if (await checkTableExists("user_performance_snapshots")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(snapshot_date), '%Y-%m-%d') AS latest_snapshot_date FROM user_performance_snapshots`, [], [{ total_count: 0, latest_snapshot_date: null }]);
+    snapshot.performance_snapshots = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+async function getPerformanceHistoryRows(userId, limit = 30) {
+  if (!(await checkTableExists("user_performance_snapshots"))) return [];
+  return query(
+    `
+    SELECT
+      id,
+      user_id,
+      DATE_FORMAT(snapshot_date, '%Y-%m-%d') AS snapshot_date,
+      total_trades,
+      buy_trades,
+      sell_trades,
+      closed_trades,
+      winning_trades,
+      losing_trades,
+      flat_trades,
+      win_rate_pct,
+      total_buy_amount,
+      total_sell_amount,
+      realized_profit_loss,
+      avg_realized_profit_loss_pct,
+      avg_win_pct,
+      avg_loss_pct,
+      best_stock_code,
+      worst_stock_code,
+      best_strategy_source,
+      performance_level,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM user_performance_snapshots
+    WHERE user_id = ?
+    ORDER BY snapshot_date DESC
+    LIMIT ?
+    `,
+    [userId, limit],
+  );
+}
+
+async function getStrategyPerformanceRows(userId) {
+  if (!(await checkTableExists("user_realized_trades"))) return [];
+  return query(
+    `
+    SELECT
+      COALESCE(NULLIF(strategy_source, ''), 'MANUAL') AS strategy_source,
+      COUNT(*) AS closed_trades,
+      SUM(result_status = 'WIN') AS winning_trades,
+      SUM(result_status = 'LOSS') AS losing_trades,
+      SUM(result_status = 'FLAT') AS flat_trades,
+      ROUND(CASE WHEN COUNT(*) > 0 THEN SUM(result_status = 'WIN') / COUNT(*) * 100 ELSE 0 END, 4) AS win_rate_pct,
+      COALESCE(SUM(realized_profit_loss), 0) AS realized_profit_loss,
+      COALESCE(AVG(realized_profit_loss_pct), 0) AS avg_realized_profit_loss_pct,
+      COALESCE(AVG(holding_days_estimated), 0) AS avg_holding_days
+    FROM user_realized_trades
+    WHERE user_id = ?
+    GROUP BY COALESCE(NULLIF(strategy_source, ''), 'MANUAL')
+    ORDER BY realized_profit_loss DESC, win_rate_pct DESC
+    `,
+    [userId],
+  );
+}
+
+
+async function getV23Snapshot() {
+  const snapshot = { feedbacks: null, factor_snapshots: null, weight_suggestions: null };
+  if (await checkTableExists("ai_recommendation_feedbacks")) {
+    const rows = await safeQuery(
+      `SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(signal_trade_date), '%Y-%m-%d') AS latest_signal_date, COALESCE(AVG(recommendation_quality_score), 0) AS avg_quality_score FROM ai_recommendation_feedbacks`,
+      [],
+      [{ total_count: 0, latest_signal_date: null, avg_quality_score: 0 }],
+    );
+    snapshot.feedbacks = rows?.[0] || null;
+  }
+  if (await checkTableExists("ai_factor_performance_snapshots")) {
+    const rows = await safeQuery(
+      `SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(snapshot_date), '%Y-%m-%d') AS latest_snapshot_date FROM ai_factor_performance_snapshots`,
+      [],
+      [{ total_count: 0, latest_snapshot_date: null }],
+    );
+    snapshot.factor_snapshots = rows?.[0] || null;
+  }
+  if (await checkTableExists("ai_factor_weight_suggestions")) {
+    const rows = await safeQuery(
+      `SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(suggestion_date), '%Y-%m-%d') AS latest_suggestion_date FROM ai_factor_weight_suggestions`,
+      [],
+      [{ total_count: 0, latest_suggestion_date: null }],
+    );
+    snapshot.weight_suggestions = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+function normalizeMarketMode(value) {
+  const mode = String(value || "RANGE").trim().toUpperCase();
+  return ["BULL", "RANGE", "BEAR"].includes(mode) ? mode : "RANGE";
+}
+
+function normalizePortfolioPlanPayload(body = {}, existing = {}) {
+  return {
+    planName: String(body.plan_name ?? existing.plan_name ?? "主要部位計畫").trim().slice(0, 100) || "主要部位計畫",
+    totalCapital: roundNumber(parsePositiveNumber(body.total_capital ?? existing.total_capital, 0), 2) || 0,
+    cashAmount: roundNumber(parsePositiveNumber(body.cash_amount ?? existing.cash_amount, 0), 2) || 0,
+    targetPositionPct: roundNumber(parsePositiveNumber(body.target_position_pct ?? existing.target_position_pct, 70), 4) || 0,
+    maxSingleStockPct: roundNumber(parsePositiveNumber(body.max_single_stock_pct ?? existing.max_single_stock_pct, 20), 4) || 0,
+    maxIndustryPct: roundNumber(parsePositiveNumber(body.max_industry_pct ?? existing.max_industry_pct, 35), 4) || 0,
+    maxRiskExposurePct: roundNumber(parsePositiveNumber(body.max_risk_exposure_pct ?? existing.max_risk_exposure_pct, 70), 4) || 0,
+    marketMode: normalizeMarketMode(body.market_mode ?? existing.market_mode ?? "RANGE"),
+    note: String(body.note ?? existing.note ?? "").trim().slice(0, 500) || null,
+  };
+}
+
+function validatePortfolioPlanPayload(payload) {
+  if (payload.totalCapital <= 0) return "總資金必須大於 0。";
+  if (payload.cashAmount < 0) return "現金金額不可小於 0。";
+  if (payload.targetPositionPct < 0 || payload.targetPositionPct > 100) return "目標部位比例必須介於 0 到 100。";
+  if (payload.maxSingleStockPct <= 0 || payload.maxSingleStockPct > 100) return "單檔上限必須介於 0 到 100。";
+  if (payload.maxIndustryPct <= 0 || payload.maxIndustryPct > 100) return "產業上限必須介於 0 到 100。";
+  if (payload.maxRiskExposurePct <= 0 || payload.maxRiskExposurePct > 150) return "風險曝險上限必須介於 0 到 150。";
+  return "";
+}
+
+async function getPortfolioPlansForUser(userId, planId = null, activeOnly = true) {
+  if (!(await checkTableExists("portfolio_plans"))) return [];
+  const params = [userId];
+  let idCondition = "";
+  let activeCondition = "";
+  if (planId !== null) {
+    idCondition = "AND p.id = ?";
+    params.push(planId);
+  }
+  if (activeOnly) activeCondition = "AND p.is_active = 1";
+
+  return safeQuery(
+    `
+    SELECT
+      p.id,
+      p.user_id,
+      p.plan_name,
+      p.total_capital,
+      p.cash_amount,
+      p.target_position_pct,
+      p.max_single_stock_pct,
+      p.max_industry_pct,
+      p.max_risk_exposure_pct,
+      p.market_mode,
+      p.note,
+      p.is_active,
+      COALESCE(SUM(CASE WHEN pp.is_active = 1 THEN pp.planned_amount ELSE 0 END), 0) AS invested_amount,
+      COUNT(CASE WHEN pp.is_active = 1 THEN pp.id ELSE NULL END) AS planned_positions,
+      ROUND(CASE WHEN p.total_capital > 0 THEN COALESCE(SUM(CASE WHEN pp.is_active = 1 THEN pp.planned_amount ELSE 0 END), 0) / p.total_capital * 100 ELSE 0 END, 4) AS position_ratio_pct,
+      ROUND(CASE WHEN p.total_capital > 0 THEN p.cash_amount / p.total_capital * 100 ELSE 0 END, 4) AS cash_ratio_pct,
+      DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(p.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM portfolio_plans p
+    LEFT JOIN portfolio_plan_positions pp ON pp.plan_id = p.id AND pp.user_id = p.user_id
+    WHERE p.user_id = ?
+      ${idCondition}
+      ${activeCondition}
+    GROUP BY p.id
+    ORDER BY p.updated_at DESC, p.id DESC
+    `,
+    params,
+    [],
+  );
+}
+
+async function getPortfolioRiskRows(userId, limit = 20, planId = null) {
+  if (!(await checkTableExists("portfolio_risk_snapshots"))) return [];
+  const params = [userId];
+  let planCondition = "";
+  if (planId !== null) {
+    planCondition = "AND s.plan_id = ?";
+    params.push(planId);
+  }
+  params.push(limit);
+
+  return safeQuery(
+    `
+    SELECT
+      s.id,
+      s.user_id,
+      s.plan_id,
+      p.plan_name,
+      DATE_FORMAT(s.snapshot_date, '%Y-%m-%d') AS snapshot_date,
+      s.total_capital,
+      s.invested_amount,
+      s.cash_amount,
+      s.position_count,
+      s.position_ratio_pct,
+      s.cash_ratio_pct,
+      s.largest_single_stock_pct,
+      s.largest_industry_pct,
+      s.risk_exposure_pct,
+      s.market_mode,
+      s.portfolio_risk_level,
+      s.risk_summary,
+      s.ai_action,
+      DATE_FORMAT(s.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+    FROM portfolio_risk_snapshots s
+    LEFT JOIN portfolio_plans p ON p.id = s.plan_id
+    WHERE s.user_id = ?
+      ${planCondition}
+    ORDER BY s.snapshot_date DESC, s.id DESC
+    LIMIT ?
+    `,
+    params,
+    [],
+  );
+}
+
+async function getPortfolioSummaryForUser(userId) {
+  const plans = await getPortfolioPlansForUser(userId, null, true);
+  const latestRisks = await getPortfolioRiskRows(userId, 10, null);
+  const totals = {
+    active_plans: plans.length,
+    total_capital: 0,
+    invested_amount: 0,
+    cash_amount: 0,
+    avg_position_ratio_pct: 0,
+    avg_cash_ratio_pct: 0,
+    high_risk_plans: 0,
+    latest_snapshot_date: latestRisks[0]?.snapshot_date || null,
+  };
+
+  for (const plan of plans) {
+    totals.total_capital += parsePositiveNumber(plan.total_capital, 0) || 0;
+    totals.invested_amount += parsePositiveNumber(plan.invested_amount, 0) || 0;
+    totals.cash_amount += parsePositiveNumber(plan.cash_amount, 0) || 0;
+  }
+  totals.avg_position_ratio_pct = totals.total_capital > 0 ? roundNumber((totals.invested_amount / totals.total_capital) * 100, 4) : 0;
+  totals.avg_cash_ratio_pct = totals.total_capital > 0 ? roundNumber((totals.cash_amount / totals.total_capital) * 100, 4) : 0;
+  totals.high_risk_plans = latestRisks.filter((row) => ["HIGH", "WARN"].includes(String(row.portfolio_risk_level || "").toUpperCase())).length;
+  totals.total_capital = roundNumber(totals.total_capital, 2) || 0;
+  totals.invested_amount = roundNumber(totals.invested_amount, 2) || 0;
+  totals.cash_amount = roundNumber(totals.cash_amount, 2) || 0;
+  return { summary: totals, plans, latest_risks: latestRisks };
+}
+
+async function getV24Snapshot() {
+  const snapshot = { plans: null, plan_positions: null, risk_snapshots: null };
+  if (await checkTableExists("portfolio_plans")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count FROM portfolio_plans`, [], [{ total_count: 0, active_count: 0 }]);
+    snapshot.plans = rows?.[0] || null;
+  }
+  if (await checkTableExists("portfolio_plan_positions")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, SUM(is_active = 1) AS active_count FROM portfolio_plan_positions`, [], [{ total_count: 0, active_count: 0 }]);
+    snapshot.plan_positions = rows?.[0] || null;
+  }
+  if (await checkTableExists("portfolio_risk_snapshots")) {
+    const rows = await safeQuery(`SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(snapshot_date), '%Y-%m-%d') AS latest_snapshot_date FROM portfolio_risk_snapshots`, [], [{ total_count: 0, latest_snapshot_date: null }]);
+    snapshot.risk_snapshots = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+async function getV25Snapshot() {
+  const snapshot = { reports: null, items: null };
+  if (await checkTableExists("daily_war_room_reports")) {
+    const rows = await safeQuery(
+      `SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(report_date), '%Y-%m-%d') AS latest_report_date FROM daily_war_room_reports`,
+      [],
+      [{ total_count: 0, latest_report_date: null }],
+    );
+    snapshot.reports = rows?.[0] || null;
+  }
+  if (await checkTableExists("daily_war_room_items")) {
+    const rows = await safeQuery(
+      `SELECT COUNT(*) AS total_count, DATE_FORMAT(MAX(report_date), '%Y-%m-%d') AS latest_item_date FROM daily_war_room_items`,
+      [],
+      [{ total_count: 0, latest_item_date: null }],
+    );
+    snapshot.items = rows?.[0] || null;
+  }
+  return snapshot;
+}
+
+async function getDailyWarRoomLatest(reportId = null) {
+  if (!(await checkTableExists("daily_war_room_reports")) || !(await checkTableExists("daily_war_room_items"))) {
+    return { report: null, items: [], sections: {} };
+  }
+
+  const params = [];
+  let where = "";
+  if (reportId !== null) {
+    where = "WHERE id = ?";
+    params.push(reportId);
+  }
+
+  const reports = await safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(report_date, '%Y-%m-%d') AS report_date,
+      market_mode,
+      market_risk_score,
+      global_risk_score,
+      portfolio_risk_level,
+      top_watch_count,
+      hold_count,
+      reduce_count,
+      risk_alert_count,
+      industry_strength_summary,
+      market_summary,
+      global_summary,
+      position_summary,
+      ai_strategy_summary,
+      action_summary,
+      line_message,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM daily_war_room_reports
+    ${where}
+    ORDER BY report_date DESC, id DESC
+    LIMIT 1
+    `,
+    params,
+    [],
+  );
+  const report = reports[0] || null;
+  if (!report) return { report: null, items: [], sections: {} };
+
+  const items = await safeQuery(
+    `
+    SELECT
+      id,
+      report_id,
+      DATE_FORMAT(report_date, '%Y-%m-%d') AS report_date,
+      section_type,
+      stock_code,
+      stock_name,
+      industry,
+      priority,
+      score,
+      title,
+      message,
+      action_text,
+      meta_json,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+    FROM daily_war_room_items
+    WHERE report_id = ?
+    ORDER BY priority ASC, id ASC
+    `,
+    [report.id],
+    [],
+  );
+  const sections = items.reduce((acc, item) => {
+    const key = item.section_type || "OTHER";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(item);
+    return acc;
+  }, {});
+  return { report, items, sections };
+}
+
+async function getDailyWarRoomHistory(limit = 20) {
+  if (!(await checkTableExists("daily_war_room_reports"))) return [];
+  return safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(report_date, '%Y-%m-%d') AS report_date,
+      market_mode,
+      market_risk_score,
+      global_risk_score,
+      portfolio_risk_level,
+      top_watch_count,
+      hold_count,
+      reduce_count,
+      risk_alert_count,
+      action_summary,
+      DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM daily_war_room_reports
+    ORDER BY report_date DESC, id DESC
+    LIMIT ?
+    `,
+    [limit],
+    [],
+  );
+}
+
+async function getAiFeedbackSummary(limit = 12) {
+  if (!(await checkTableExists("ai_recommendation_feedbacks"))) {
+    return {
+      summary: { total_count: 0, success_count: 0, partial_count: 0, fail_count: 0, waiting_count: 0, success_rate_pct: 0, avg_quality_score: 0 },
+      latest_rows: [],
+      result_breakdown: [],
+    };
+  }
+  const summaryRows = await safeQuery(
+    `
+    SELECT
+      COUNT(*) AS total_count,
+      SUM(feedback_result = 'SUCCESS') AS success_count,
+      SUM(feedback_result = 'PARTIAL') AS partial_count,
+      SUM(feedback_result = 'FAIL') AS fail_count,
+      SUM(feedback_result = 'WAITING') AS waiting_count,
+      ROUND(CASE WHEN SUM(feedback_result <> 'WAITING') > 0 THEN SUM(feedback_result = 'SUCCESS') / SUM(feedback_result <> 'WAITING') * 100 ELSE 0 END, 4) AS success_rate_pct,
+      ROUND(COALESCE(AVG(recommendation_quality_score), 0), 4) AS avg_quality_score,
+      ROUND(COALESCE(AVG(return_1d_pct), 0), 4) AS avg_return_1d_pct,
+      ROUND(COALESCE(AVG(return_3d_pct), 0), 4) AS avg_return_3d_pct,
+      ROUND(COALESCE(AVG(return_5d_pct), 0), 4) AS avg_return_5d_pct,
+      ROUND(COALESCE(AVG(return_10d_pct), 0), 4) AS avg_return_10d_pct,
+      DATE_FORMAT(MAX(signal_trade_date), '%Y-%m-%d') AS latest_signal_date
+    FROM ai_recommendation_feedbacks
+    `,
+    [],
+    [{ total_count: 0, success_count: 0, partial_count: 0, fail_count: 0, waiting_count: 0, success_rate_pct: 0, avg_quality_score: 0, latest_signal_date: null }],
+  );
+  const latestRows = await safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(signal_trade_date, '%Y-%m-%d') AS signal_trade_date,
+      stock_code,
+      stock_name,
+      market_type,
+      industry,
+      ai_strength_score,
+      ai_level,
+      risk_level,
+      market_environment,
+      entry_close_price,
+      return_1d_pct,
+      return_3d_pct,
+      return_5d_pct,
+      return_10d_pct,
+      feedback_result,
+      recommendation_quality_score,
+      learning_note
+    FROM ai_recommendation_feedbacks
+    ORDER BY signal_trade_date DESC, recommendation_quality_score DESC, id DESC
+    LIMIT ?
+    `,
+    [limit],
+    [],
+  );
+  const resultBreakdown = await safeQuery(
+    `
+    SELECT feedback_result, COUNT(*) AS total_count, ROUND(COALESCE(AVG(recommendation_quality_score), 0), 4) AS avg_quality_score
+    FROM ai_recommendation_feedbacks
+    GROUP BY feedback_result
+    ORDER BY FIELD(feedback_result, 'SUCCESS', 'PARTIAL', 'FAIL', 'WAITING')
+    `,
+    [],
+    [],
+  );
+  return { summary: summaryRows[0] || {}, latest_rows: latestRows, result_breakdown: resultBreakdown };
+}
+
+async function getAiFeedbackFactorRows(limit = 35) {
+  if (!(await checkTableExists("ai_factor_performance_snapshots"))) return [];
+  return safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(snapshot_date, '%Y-%m-%d') AS snapshot_date,
+      factor_key,
+      factor_name,
+      market_environment,
+      sample_count,
+      success_count,
+      partial_count,
+      fail_count,
+      waiting_count,
+      success_rate_pct,
+      avg_return_1d_pct,
+      avg_return_3d_pct,
+      avg_return_5d_pct,
+      avg_return_10d_pct,
+      avg_factor_score,
+      performance_score,
+      learning_status
+    FROM ai_factor_performance_snapshots
+    ORDER BY snapshot_date DESC, FIELD(market_environment, 'ALL', 'BULL', 'RANGE', 'BEAR', 'HIGH_RISK'), performance_score DESC
+    LIMIT ?
+    `,
+    [limit],
+    [],
+  );
+}
+
+async function getAiFeedbackWeightRows(limit = 20) {
+  if (!(await checkTableExists("ai_factor_weight_suggestions"))) return [];
+  return safeQuery(
+    `
+    SELECT
+      id,
+      DATE_FORMAT(suggestion_date, '%Y-%m-%d') AS suggestion_date,
+      factor_key,
+      factor_name,
+      current_weight,
+      suggested_weight,
+      suggestion_action,
+      confidence_level,
+      sample_count,
+      success_rate_pct,
+      avg_return_5d_pct,
+      reason,
+      is_applied
+    FROM ai_factor_weight_suggestions
+    ORDER BY suggestion_date DESC, FIELD(suggestion_action, 'INCREASE', 'DECREASE', 'KEEP'), confidence_level DESC, sample_count DESC
+    LIMIT ?
+    `,
+    [limit],
+    [],
+  );
+}
+
+function runLocalScript(scriptName, args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("npm", ["run", scriptName, ...(args.length ? ["--", ...args] : [])], {
+      cwd: process.cwd(),
+      shell: process.platform === "win32",
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (data) => { stdout += data.toString(); });
+    child.stderr.on("data", (data) => { stderr += data.toString(); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr || stdout || `${scriptName} exit code ${code}`));
+    });
+  });
+}
+
 app.get("/positions", requireAuth, async (req, res) => {
   try {
     const includeInactive = String(req.query.include_inactive || "") === "1";
@@ -6637,6 +7681,686 @@ app.post("/position-risk/alerts/:id/read", requireAuth, async (req, res) => {
   }
 });
 
+
+app.get("/trades", requireAuth, async (req, res) => {
+  try {
+    const includeInactive = String(req.query.include_inactive || "") === "1";
+    const rows = await getTradeRowsForUser(req.user.id, null, !includeInactive);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢交易紀錄失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易紀錄失敗", error: error.message });
+  }
+});
+
+app.post("/trades", requireAuth, async (req, res) => {
+  try {
+    if (!(await checkTableExists("user_trades"))) {
+      return res.status(500).json({ success: false, version: API_VERSION, message: "尚未建立 user_trades，請先執行 npm run trade:setup。" });
+    }
+    const payload = normalizeTradePayload(req.body || {});
+    const errorMessage = validateTradePayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+
+    const stock = await getStockBasic(payload.stockCode);
+    if (!stock) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+
+    const result = await query(
+      `
+      INSERT INTO user_trades (
+        user_id, position_id, stock_code, stock_name, market_type, trade_date, trade_type,
+        trade_price, shares, lots, fee, tax, gross_amount, net_amount,
+        strategy_source, ai_strength_score_at_trade, risk_score_at_trade, note, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `,
+      [
+        req.user.id,
+        payload.positionId,
+        payload.stockCode,
+        stock.stock_name,
+        stock.market_type,
+        payload.tradeDate,
+        payload.tradeType,
+        payload.tradePrice,
+        payload.shares,
+        payload.lots,
+        payload.fee,
+        payload.tax,
+        payload.grossAmount,
+        payload.netAmount,
+        payload.strategySource,
+        payload.aiStrengthScoreAtTrade,
+        payload.riskScoreAtTrade,
+        payload.note,
+      ],
+    );
+    const createdId = Number(result.insertId || 0);
+    const rows = await getTradeRowsForUser(req.user.id, createdId, false);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已新增交易紀錄", data: rows[0] || { id: createdId } }));
+  } catch (error) {
+    console.error("新增交易紀錄失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "新增交易紀錄失敗", error: error.message });
+  }
+});
+
+app.get("/trades/summary", requireAuth, async (req, res) => {
+  try {
+    const payload = await getTradeSummaryForUser(req.user.id);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, ...payload }));
+  } catch (error) {
+    console.error("查詢交易績效摘要失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易績效摘要失敗", error: error.message });
+  }
+});
+
+app.post("/trades/performance/generate", requireAuth, async (req, res) => {
+  try {
+    const result = await generateTradePerformance();
+    const payload = await getTradeSummaryForUser(req.user.id);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生交易績效", generated: result, ...payload }));
+  } catch (error) {
+    console.error("產生交易績效失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生交易績效失敗", error: error.message });
+  }
+});
+
+app.get("/trades/:id", requireAuth, async (req, res) => {
+  try {
+    const tradeId = Number(req.params.id);
+    if (!Number.isInteger(tradeId) || tradeId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "交易 ID 不正確。" });
+    const rows = await getTradeRowsForUser(req.user.id, tradeId, false);
+    if (rows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆交易紀錄。" });
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, data: rows[0] }));
+  } catch (error) {
+    console.error("查詢交易明細失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易明細失敗", error: error.message });
+  }
+});
+
+app.put("/trades/:id", requireAuth, async (req, res) => {
+  try {
+    const tradeId = Number(req.params.id);
+    if (!Number.isInteger(tradeId) || tradeId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "交易 ID 不正確。" });
+    const currentRows = await query(`SELECT * FROM user_trades WHERE id = ? AND user_id = ? LIMIT 1`, [tradeId, req.user.id]);
+    if (currentRows.length === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆交易紀錄。" });
+    const payload = normalizeTradePayload(req.body || {}, currentRows[0]);
+    const errorMessage = validateTradePayload(payload);
+    if (errorMessage) return res.status(400).json({ success: false, version: API_VERSION, message: errorMessage });
+    const stock = await getStockBasic(payload.stockCode);
+    if (!stock) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這檔股票，請確認股票代號是否正確。" });
+
+    await query(`DELETE FROM user_realized_trades WHERE source_trade_id = ?`, [tradeId]);
+    await query(
+      `
+      UPDATE user_trades
+      SET position_id = ?, stock_code = ?, stock_name = ?, market_type = ?, trade_date = ?, trade_type = ?,
+          trade_price = ?, shares = ?, lots = ?, fee = ?, tax = ?, gross_amount = ?, net_amount = ?,
+          strategy_source = ?, ai_strength_score_at_trade = ?, risk_score_at_trade = ?, note = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+      `,
+      [payload.positionId, payload.stockCode, stock.stock_name, stock.market_type, payload.tradeDate, payload.tradeType, payload.tradePrice, payload.shares, payload.lots, payload.fee, payload.tax, payload.grossAmount, payload.netAmount, payload.strategySource, payload.aiStrengthScoreAtTrade, payload.riskScoreAtTrade, payload.note, tradeId, req.user.id],
+    );
+    const rows = await getTradeRowsForUser(req.user.id, tradeId, false);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已更新交易紀錄", data: rows[0] }));
+  } catch (error) {
+    console.error("更新交易紀錄失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "更新交易紀錄失敗", error: error.message });
+  }
+});
+
+app.delete("/trades/:id", requireAuth, async (req, res) => {
+  try {
+    const tradeId = Number(req.params.id);
+    if (!Number.isInteger(tradeId) || tradeId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "交易 ID 不正確。" });
+    const result = await query(`UPDATE user_trades SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, [tradeId, req.user.id]);
+    await query(`DELETE FROM user_realized_trades WHERE source_trade_id = ?`, [tradeId]);
+    if (Number(result.affectedRows || 0) === 0) return res.status(404).json({ success: false, version: API_VERSION, message: "查不到這筆交易紀錄。" });
+    res.json({ success: true, version: API_VERSION, message: "已停用交易紀錄", id: tradeId });
+  } catch (error) {
+    console.error("停用交易紀錄失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "停用交易紀錄失敗", error: error.message });
+  }
+});
+
+app.get("/performance/latest", requireAuth, async (req, res) => {
+  try {
+    const payload = await getTradeSummaryForUser(req.user.id);
+    const history = await getPerformanceHistoryRows(req.user.id, 5);
+    const strategies = await getStrategyPerformanceRows(req.user.id);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, ...payload, history, strategies, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢最新交易績效失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢最新交易績效失敗", error: error.message });
+  }
+});
+
+app.get("/performance/history", requireAuth, async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 30, 260);
+    const rows = await getPerformanceHistoryRows(req.user.id, limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢交易績效歷史失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢交易績效歷史失敗", error: error.message });
+  }
+});
+
+app.get("/performance/strategy", requireAuth, async (req, res) => {
+  try {
+    const rows = await getStrategyPerformanceRows(req.user.id);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows }));
+  } catch (error) {
+    console.error("查詢策略來源績效失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢策略來源績效失敗", error: error.message });
+  }
+});
+
+
+app.get("/war-room/latest", async (req, res) => {
+  try {
+    const payload = await getDailyWarRoomLatest();
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V2.5 每日投資作戰室", ...payload, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢每日投資作戰室失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢每日投資作戰室失敗", error: error.message });
+  }
+});
+
+app.get("/war-room/history", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const rows = await getDailyWarRoomHistory(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢每日作戰室歷史失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢每日作戰室歷史失敗", error: error.message });
+  }
+});
+
+app.post("/war-room/generate", async (req, res) => {
+  try {
+    const date = String(req.body?.date || req.query.date || "").trim();
+    const args = /^\d{4}-\d{2}-\d{2}$/.test(date) ? [date] : [];
+    const result = await runLocalScript("war-room:generate", args);
+    const payload = await getDailyWarRoomLatest();
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生每日投資作戰室", ...payload, output: result.stdout.slice(-2000), checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("產生每日投資作戰室失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生每日投資作戰室失敗", error: error.message });
+  }
+});
+
+app.get("/v25/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V25_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV25Snapshot();
+    const reportCount = Number(snapshot.reports?.total_count || 0);
+    const itemCount = Number(snapshot.items?.total_count || 0);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        API_VERSION === "stock-radar-api-v2.5.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v76" ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V2.5 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.5 每日投資作戰室資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("reports", "每日作戰室報告", reportCount > 0 ? "pass" : "warn", reportCount > 0 ? `已有 ${reportCount} 份作戰室報告。` : "尚未產生每日作戰室，可執行 npm run war-room:generate。", { report_count: reportCount }),
+      buildCheck("items", "作戰室明細項目", itemCount > 0 ? "pass" : "warn", itemCount > 0 ? `已有 ${itemCount} 筆作戰室明細。` : "尚未產生作戰室明細項目。", { item_count: itemCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.5 每日投資作戰室",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.5 每日作戰室、作戰項目與前端頁面都正常。" : overallStatus === "warn" ? "V2.5 程式與資料表已就緒，可產生每日作戰室報告。" : "V2.5 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV25Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      modules: V25_MODULES,
+      next_actions: [
+        "執行 npm run war-room:setup 建立 V2.5 資料表。",
+        "執行 npm run war-room:generate 產生每日投資作戰室。",
+        "前端進入每日作戰室頁檢查市場、全球、觀察股、持股與風控提醒。",
+        "執行 npm run v25:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.5 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.5 每日投資作戰室", message: "查詢 V2.5 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v25/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.5 每日投資作戰室驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV25Progress(),
+    checklist: V25_FINAL_ACCEPTANCE_ITEMS,
+    modules: V25_MODULES,
+    recommended_commands: ["npm run war-room:setup", "npm run war-room:generate", "npm run v25:check", "npm run v25:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v25/status", "/v25/acceptance", "/war-room/latest", "/war-room/history"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+app.get("/portfolio/summary", requireAuth, async (req, res) => {
+  try {
+    const payload = await getPortfolioSummaryForUser(req.user.id);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V2.4 部位模擬與風險觀察", ...payload, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢部位總覽失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢部位總覽失敗", error: error.message });
+  }
+});
+
+app.get("/portfolio/plans", requireAuth, async (req, res) => {
+  try {
+    const rows = await getPortfolioPlansForUser(req.user.id, null, true);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢部位計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢部位計畫失敗", error: error.message });
+  }
+});
+
+app.post("/portfolio/plans", requireAuth, async (req, res) => {
+  try {
+    const payload = normalizePortfolioPlanPayload(req.body || {});
+    const validationError = validatePortfolioPlanPayload(payload);
+    if (validationError) return res.status(400).json({ success: false, version: API_VERSION, message: validationError });
+
+    const result = await query(
+      `
+      INSERT INTO portfolio_plans (
+        user_id, plan_name, total_capital, cash_amount, target_position_pct,
+        max_single_stock_pct, max_industry_pct, max_risk_exposure_pct,
+        market_mode, note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        req.user.id,
+        payload.planName,
+        payload.totalCapital,
+        payload.cashAmount,
+        payload.targetPositionPct,
+        payload.maxSingleStockPct,
+        payload.maxIndustryPct,
+        payload.maxRiskExposurePct,
+        payload.marketMode,
+        payload.note,
+      ],
+    );
+    const insertId = Number(result.insertId || 0);
+    const rows = await getPortfolioPlansForUser(req.user.id, insertId, true);
+    res.status(201).json(convertBigIntToString({ success: true, version: API_VERSION, message: "已新增部位計畫", data: rows[0] || null }));
+  } catch (error) {
+    console.error("新增部位計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "新增部位計畫失敗", error: error.message });
+  }
+});
+
+app.put("/portfolio/plans/:id", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.id);
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "部位計畫 ID 不正確。" });
+    const existingRows = await getPortfolioPlansForUser(req.user.id, planId, true);
+    if (!existingRows.length) return res.status(404).json({ success: false, version: API_VERSION, message: "找不到部位計畫。" });
+
+    const payload = normalizePortfolioPlanPayload(req.body || {}, existingRows[0]);
+    const validationError = validatePortfolioPlanPayload(payload);
+    if (validationError) return res.status(400).json({ success: false, version: API_VERSION, message: validationError });
+
+    await query(
+      `
+      UPDATE portfolio_plans
+      SET plan_name = ?, total_capital = ?, cash_amount = ?, target_position_pct = ?,
+          max_single_stock_pct = ?, max_industry_pct = ?, max_risk_exposure_pct = ?,
+          market_mode = ?, note = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+      `,
+      [
+        payload.planName,
+        payload.totalCapital,
+        payload.cashAmount,
+        payload.targetPositionPct,
+        payload.maxSingleStockPct,
+        payload.maxIndustryPct,
+        payload.maxRiskExposurePct,
+        payload.marketMode,
+        payload.note,
+        planId,
+        req.user.id,
+      ],
+    );
+    const rows = await getPortfolioPlansForUser(req.user.id, planId, true);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已更新部位計畫", data: rows[0] || null }));
+  } catch (error) {
+    console.error("更新部位計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "更新部位計畫失敗", error: error.message });
+  }
+});
+
+app.delete("/portfolio/plans/:id", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.id);
+    if (!Number.isInteger(planId) || planId <= 0) return res.status(400).json({ success: false, version: API_VERSION, message: "部位計畫 ID 不正確。" });
+    const result = await query(`UPDATE portfolio_plans SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, [planId, req.user.id]);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已停用部位計畫", affected_rows: result.affectedRows || 0 }));
+  } catch (error) {
+    console.error("停用部位計畫失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "停用部位計畫失敗", error: error.message });
+  }
+});
+
+app.get("/portfolio/risk/latest", requireAuth, async (req, res) => {
+  try {
+    const rows = await getPortfolioRiskRows(req.user.id, 10, null);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢部位風險快照失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢部位風險快照失敗", error: error.message });
+  }
+});
+
+app.get("/portfolio/risk/history", requireAuth, async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 30, 200);
+    const planId = req.query.plan_id ? Number(req.query.plan_id) : null;
+    const rows = await getPortfolioRiskRows(req.user.id, limit, Number.isInteger(planId) && planId > 0 ? planId : null);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢部位風險歷史失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢部位風險歷史失敗", error: error.message });
+  }
+});
+
+app.post("/portfolio/risk/generate", requireAuth, async (req, res) => {
+  try {
+    const date = String(req.body?.date || req.query.date || "").trim();
+    const args = /^\d{4}-\d{2}-\d{2}$/.test(date) ? [date] : [];
+    const result = await runLocalScript("portfolio:risk", args);
+    const rows = await getPortfolioRiskRows(req.user.id, 10, null);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, message: "已產生部位風險快照", count: rows.length, data: rows, output: result.stdout.slice(-2000), checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("產生部位風險快照失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生部位風險快照失敗", error: error.message });
+  }
+});
+
+app.get("/v24/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V24_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV24Snapshot();
+    const planCount = Number(snapshot.plans?.active_count || 0);
+    const riskCount = Number(snapshot.risk_snapshots?.total_count || 0);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        (API_VERSION === "stock-radar-api-v2.4.0" || API_VERSION === "stock-radar-api-v2.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v75" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v76") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V2.4 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.4 部位模擬與風險資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("plans", "部位計畫", planCount > 0 ? "pass" : "warn", planCount > 0 ? `已有 ${planCount} 筆啟用部位計畫。` : "尚未新增部位計畫，功能可用但還沒有使用者資料。", { active_plans: planCount }),
+      buildCheck("risk_snapshots", "部位風險快照", riskCount > 0 ? "pass" : "warn", riskCount > 0 ? `已有 ${riskCount} 筆部位風險快照。` : "尚未產生部位風險快照，可執行 npm run portfolio:risk。", { risk_snapshot_count: riskCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.4 部位模擬與風險觀察",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.4 部位模擬、集中度與風險快照都正常。" : overallStatus === "warn" ? "V2.4 程式與資料表已就緒，部位計畫可後續建立。" : "V2.4 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV24Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      modules: V24_MODULES,
+      next_actions: [
+        "執行 npm run portfolio:setup 建立 V2.4 資料表。",
+        "登入後在前端新增部位模擬計畫。",
+        "執行 npm run portfolio:risk 產生部位風險快照。",
+        "執行 npm run v24:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.4 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.4 部位模擬與風險觀察", message: "查詢 V2.4 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v24/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.4 部位模擬與風險觀察驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV24Progress(),
+    checklist: V24_FINAL_ACCEPTANCE_ITEMS,
+    modules: V24_MODULES,
+    recommended_commands: ["npm run portfolio:setup", "npm run portfolio:risk", "npm run v24:check", "npm run v24:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v24/status", "/v24/acceptance", "/portfolio/summary", "/portfolio/plans", "/portfolio/risk/latest"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+app.get("/ai-feedback/summary", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 12, 100);
+    const payload = await getAiFeedbackSummary(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, module: "V2.3 AI 推薦回饋學習", ...payload, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢 AI 推薦回饋總覽失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 推薦回饋總覽失敗", error: error.message });
+  }
+});
+
+app.get("/ai-feedback/factors", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 35, 200);
+    const rows = await getAiFeedbackFactorRows(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢 AI 因子績效失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 因子績效失敗", error: error.message });
+  }
+});
+
+app.get("/ai-feedback/weights", async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    const rows = await getAiFeedbackWeightRows(limit);
+    res.json(convertBigIntToString({ success: true, version: API_VERSION, count: rows.length, data: rows, checked_at: nowTaipeiText() }));
+  } catch (error) {
+    console.error("查詢 AI 權重建議失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "查詢 AI 權重建議失敗", error: error.message });
+  }
+});
+
+app.post("/ai-feedback/generate", async (req, res) => {
+  try {
+    const date = String(req.body?.date || req.query.date || "").trim();
+    const args = date ? [date] : [];
+    const result = await runLocalScript("ai-feedback:generate", args);
+    res.json({ success: true, version: API_VERSION, message: "已產生 AI 推薦回饋學習資料", output: result.stdout.slice(-2000), checked_at: nowTaipeiText() });
+  } catch (error) {
+    console.error("產生 AI 推薦回饋學習失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, message: "產生 AI 推薦回饋學習失敗", error: error.message });
+  }
+});
+
+app.get("/v23/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V23_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV23Snapshot();
+    const feedbackCount = Number(snapshot.feedbacks?.total_count || 0);
+    const factorCount = Number(snapshot.factor_snapshots?.total_count || 0);
+    const weightCount = Number(snapshot.weight_suggestions?.total_count || 0);
+    const feedbackPayload = await getAiFeedbackSummary(8);
+    const factorRows = await getAiFeedbackFactorRows(10);
+    const weightRows = await getAiFeedbackWeightRows(10);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        (API_VERSION === "stock-radar-api-v2.3.0" || API_VERSION === "stock-radar-api-v2.4.0" || API_VERSION === "stock-radar-api-v2.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v74" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v75" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v76") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V2.3 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.3 AI 推薦回饋學習資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("feedback", "推薦回饋紀錄", feedbackCount > 0 ? "pass" : "warn", feedbackCount > 0 ? `已有 ${feedbackCount} 筆推薦回饋。` : "尚未產生 AI 推薦回饋，可執行 npm run ai-feedback:generate。", { feedback_count: feedbackCount }),
+      buildCheck("factors", "因子績效快照", factorCount > 0 ? "pass" : "warn", factorCount > 0 ? `已有 ${factorCount} 筆因子績效快照。` : "尚未產生因子績效快照。", { factor_count: factorCount }),
+      buildCheck("weights", "權重調整建議", weightCount > 0 ? "pass" : "warn", weightCount > 0 ? `已有 ${weightCount} 筆權重建議。` : "尚未產生權重建議。", { weight_count: weightCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.3 AI 推薦回饋學習",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.3 AI 推薦回饋、因子績效與權重建議都正常。" : overallStatus === "warn" ? "V2.3 程式與資料表已就緒，回饋資料可後續持續累積。" : "V2.3 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV23Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      ai_feedback: feedbackPayload,
+      factor_performance: factorRows,
+      weight_suggestions: weightRows,
+      modules: V23_MODULES,
+      next_actions: [
+        "執行 npm run ai-feedback:setup 建立 V2.3 資料表。",
+        "執行 npm run ai-feedback:generate 追蹤 AI 推薦後績效。",
+        "前端查看 AI 回饋學習頁的成功率、因子績效與權重建議。",
+        "執行 npm run v23:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.3 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.3 AI 推薦回饋學習", message: "查詢 V2.3 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v23/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.3 AI 推薦回饋學習驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV23Progress(),
+    checklist: V23_FINAL_ACCEPTANCE_ITEMS,
+    modules: V23_MODULES,
+    recommended_commands: ["npm run ai-feedback:setup", "npm run ai-feedback:generate", "npm run v23:check", "npm run v23:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v23/status", "/v23/acceptance", "/ai-feedback/summary", "/ai-feedback/factors", "/ai-feedback/weights"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
+app.get("/v22/status", async (req, res) => {
+  try {
+    const dbInfo = await testConnection();
+    const tableStatuses = [];
+    for (const tableDefinition of V22_FEATURE_TABLES) {
+      tableStatuses.push(await getV13TableStatus(tableDefinition));
+    }
+    const missingTables = tableStatuses.filter((item) => !item.exists).map((item) => item.table_name);
+    const snapshot = await getV22Snapshot();
+    const activeTrades = Number(snapshot.trades?.active_count || 0);
+    const realizedCount = Number(snapshot.realized_trades?.total_count || 0);
+    const performanceCount = Number(snapshot.performance_snapshots?.total_count || 0);
+    const checks = [
+      buildCheck("database", "MariaDB 連線", "pass", "API 可以正常連線到 MariaDB。", { database: dbInfo }),
+      buildCheck(
+        "versions",
+        "API / PWA 版本",
+        (API_VERSION === "stock-radar-api-v2.2.0" || API_VERSION === "stock-radar-api-v2.3.0" || API_VERSION === "stock-radar-api-v2.4.0" || API_VERSION === "stock-radar-api-v2.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v73" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v74" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v75" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v76") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
+      ),
+      buildCheck("tables", "V2.2 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.2 交易紀錄與績效資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),
+      buildCheck("trades", "交易紀錄", activeTrades > 0 ? "pass" : "warn", activeTrades > 0 ? `已有 ${activeTrades} 筆啟用交易紀錄。` : "尚未新增交易紀錄，功能可用但還沒有使用者資料。", { active_trades: activeTrades }),
+      buildCheck("realized", "已實現損益", realizedCount > 0 ? "pass" : "warn", realizedCount > 0 ? `已有 ${realizedCount} 筆已實現損益。` : "尚未有賣出紀錄或尚未產生已實現損益，可執行 npm run trade:performance。", { realized_count: realizedCount }),
+      buildCheck("performance", "績效快照", performanceCount > 0 ? "pass" : "warn", performanceCount > 0 ? `已有 ${performanceCount} 筆績效快照。` : "尚未產生績效快照，可執行 npm run trade:performance。", { performance_count: performanceCount }),
+    ];
+    const overallStatus = summarizeChecks(checks);
+    res.json(convertBigIntToString({
+      success: true,
+      version: API_VERSION,
+      pwa_expected_version: PWA_EXPECTED_VERSION,
+      module: "V2.2 交易紀錄與績效分析",
+      overall_status: overallStatus,
+      overall_message: overallStatus === "pass" ? "V2.2 交易紀錄、已實現損益與績效快照都正常。" : overallStatus === "warn" ? "V2.2 程式與資料表已就緒，但交易 / 績效資料可後續建立。" : "V2.2 有必要資料表或版本狀態異常，需要修正。",
+      progress_percent: calculateV22Progress(),
+      checked_at: nowTaipeiText(),
+      database: dbInfo,
+      checks,
+      tables: tableStatuses,
+      snapshot,
+      modules: V22_MODULES,
+      next_actions: [
+        "執行 npm run trade:setup 建立 V2.2 資料表。",
+        "登入後在前端新增買進 / 賣出交易紀錄。",
+        "執行 npm run trade:performance 產生已實現損益與績效快照。",
+        "執行 npm run v22:test -- --api=http://localhost:3000 產生驗收 log。",
+      ],
+    }));
+  } catch (error) {
+    console.error("查詢 V2.2 系統狀態失敗：", error);
+    res.status(500).json({ success: false, version: API_VERSION, module: "V2.2 交易紀錄與績效分析", message: "查詢 V2.2 系統狀態失敗", error: error.message, checked_at: nowTaipeiText() });
+  }
+});
+
+app.get("/v22/acceptance", (req, res) => {
+  res.json({
+    success: true,
+    version: API_VERSION,
+    pwa_expected_version: PWA_EXPECTED_VERSION,
+    module: "V2.2 交易紀錄與績效分析驗收清單",
+    acceptance_status: "ready_for_validation",
+    progress_percent: calculateV22Progress(),
+    checklist: V22_FINAL_ACCEPTANCE_ITEMS,
+    modules: V22_MODULES,
+    recommended_commands: ["npm run trade:setup", "npm run trade:performance", "npm run v22:check", "npm run v22:test -- --api=http://localhost:3000"],
+    recommended_urls: ["/health", "/v22/status", "/v22/acceptance", "/trades", "/trades/summary", "/performance/latest", "/performance/strategy"],
+    checked_at: nowTaipeiText(),
+  });
+});
+
 app.get("/v21/status", async (req, res) => {
   try {
     const dbInfo = await testConnection();
@@ -6654,8 +8378,8 @@ app.get("/v21/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v2.1.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v72" ? "pass" : "fail",
-        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
+        (API_VERSION === "stock-radar-api-v2.1.0" || API_VERSION === "stock-radar-api-v2.2.0" || API_VERSION === "stock-radar-api-v2.3.0" || API_VERSION === "stock-radar-api-v2.4.0" || API_VERSION === "stock-radar-api-v2.5.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v72" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v73" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v74" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v75" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v76") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V2.2 會相容保留 V2.1 功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
       buildCheck("tables", "V2.1 必要資料表", missingTables.length === 0 ? "pass" : "fail", missingTables.length === 0 ? "V2.1 持股與風控資料表都存在。" : `缺少資料表：${missingTables.join("、")}`, { missing_tables: missingTables }),

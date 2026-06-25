@@ -1,0 +1,137 @@
+====================================
+Stock Radar V2.4 部位模擬與風險觀察自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v24-acceptance-20260625-233204.log
+開始時間：2026/6/25 23:32:04
+API：http://localhost:3000
+DB流程：執行 setup / portfolio risk
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.4 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupPortfolioRiskTables.js
+完成：V2.4 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.4 risk script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generatePortfolioRiskSnapshots.js
+完成：V2.4 risk script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.4 部位模擬與風險觀察資料表
+指令：npm run portfolio:setup
+
+> stock-radar-api@1.0.0 portfolio:setup
+> node scripts/setupPortfolioRiskTables.js
+
+◇ injected env (7) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+====================================
+Stock Radar V2.4 部位模擬與風險觀察資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v24-portfolio-risk.sql
+建立 / 確認完成：
+- portfolio_plans
+- portfolio_plan_positions
+- portfolio_risk_snapshots
+結果：PASS
+完成：建立 V2.4 部位模擬與風險觀察資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.4 部位風險快照
+指令：npm run portfolio:risk
+
+> stock-radar-api@1.0.0 portfolio:risk
+> node scripts/generatePortfolioRiskSnapshots.js
+
+◇ injected env (7) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+====================================
+Stock Radar V2.4 部位模擬與風險觀察產生
+====================================
+快照日期：2026-06-25
+啟用計畫：0
+產生快照：0
+結果：PASS
+完成：產生 V2.4 部位風險快照，耗時 0分1秒
+--------------------------------------------------
+開始：V2.4 靜態 / API 驗收
+指令：npm run v24:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v24:check
+> node scripts/checkV24.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V2.4 部位模擬與風險觀察驗收檢查
+====================================
+✅ [版本] API 版本為 V2.4.0 - stock-radar-api-v2.4.0
+✅ [版本] API 預期 PWA 版本為 v75 - stock-radar-pwa-v75
+✅ [版本] service-worker 快取版本為 v75 - stock-radar-pwa-v75
+✅ [前端] 側邊功能選單顯示 V2.4 - index.html
+✅ [npm 指令] portfolio:setup - node scripts/setupPortfolioRiskTables.js
+✅ [npm 指令] portfolio:risk - node scripts/generatePortfolioRiskSnapshots.js
+✅ [npm 指令] portfolio:daily - npm run portfolio:setup && npm run portfolio:risk
+✅ [npm 指令] v24:check - node scripts/checkV24.js
+✅ [npm 指令] v24:test - node scripts/runV24Acceptance.js
+✅ [npm 指令] v23:test - node scripts/runV23Acceptance.js
+✅ [npm 指令] ai-feedback:daily - npm run ai-feedback:setup && npm run ai-feedback:generate
+✅ [npm 指令] trade:daily - npm run trade:setup && npm run trade:performance
+✅ [npm 指令] position:daily - npm run position:setup && npm run position:snapshot && npm run position:alerts
+✅ [必要檔案] stock-radar-api/sql/v24-portfolio-risk.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupPortfolioRiskTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generatePortfolioRiskSnapshots.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV24.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV24Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] portfolio_plans 資料表 - CREATE TABLE IF NOT EXISTS `portfolio_plans`
+✅ [SQL] portfolio_plan_positions 資料表 - CREATE TABLE IF NOT EXISTS `portfolio_plan_positions`
+✅ [SQL] portfolio_risk_snapshots 資料表 - CREATE TABLE IF NOT EXISTS `portfolio_risk_snapshots`
+✅ [SQL] 部位比例欄位 - position_ratio_pct
+✅ [SQL] 現金比例欄位 - cash_ratio_pct
+✅ [SQL] 風險曝險欄位 - risk_exposure_pct
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v24/status - server.js 靜態檢查
+✅ [API 路由] GET /v24/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /portfolio/summary - server.js 靜態檢查
+✅ [API 路由] GET /portfolio/plans - server.js 靜態檢查
+✅ [API 路由] POST /portfolio/plans - server.js 靜態檢查
+✅ [API 路由] PUT /portfolio/plans/:id - server.js 靜態檢查
+✅ [API 路由] DELETE /portfolio/plans/:id - server.js 靜態檢查
+✅ [API 路由] GET /portfolio/risk/latest - server.js 靜態檢查
+✅ [API 路由] GET /portfolio/risk/history - server.js 靜態檢查
+✅ [API 路由] POST /portfolio/risk/generate - server.js 靜態檢查
+✅ [前端] 部位模擬頁 - renderPortfolioRiskPage
+✅ [前端] 部位總覽 API - /portfolio/summary
+✅ [前端] 部位計畫 API - /portfolio/plans
+✅ [前端] 部位風險 API - /portfolio/risk/latest
+✅ [前端] V2.4 文字 - V2.4 部位模擬與風險觀察
+✅ [前端] 不再顯示 V1.4 系統狀態 - V2.4 status copy
+✅ [相容] 保留 V2.3 AI 回饋學習 - V2.3 routes
+✅ [相容] 保留 V2.2 交易績效 - V2.2 routes
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v24/status - HTTP 200
+✅ [API 動態] /v24/acceptance - HTTP 200
+✅ [API 動態] /portfolio/summary 需登入保護 - HTTP 401
+✅ [API 動態] /portfolio/plans 需登入保護 - HTTP 401
+✅ [API 動態] /portfolio/risk/latest 需登入保護 - HTTP 401
+------------------------------------
+PASS：55
+WARN：0
+FAIL：0
+結果：PASS
+完成：V2.4 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 23:32:07
+總耗時：0分3秒
+結果：PASS

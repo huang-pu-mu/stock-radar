@@ -1,0 +1,136 @@
+====================================
+Stock Radar V2.3 AI 推薦回饋學習自動驗收測試
+====================================
+工作目錄：D:\code\stock-radar\stock-radar-api
+Log 檔案：D:\code\stock-radar\stock-radar-api\logs\v23-acceptance-20260625-231701.log
+開始時間：2026/6/25 23:17:01
+API：http://localhost:3000
+DB流程：執行 setup / feedback / learning
+--------------------------------------------------
+開始：API 語法檢查
+指令：node --check server.js
+完成：API 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：PWA app.js 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-frontend\app.js
+完成：PWA app.js 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.3 setup script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\setupAiFeedbackLearningTables.js
+完成：V2.3 setup script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：V2.3 feedback script 語法檢查
+指令：node --check D:\code\stock-radar\stock-radar-api\scripts\generateAiFeedbackLearning.js
+完成：V2.3 feedback script 語法檢查，耗時 0分0秒
+--------------------------------------------------
+開始：建立 V2.3 AI 推薦回饋學習資料表
+指令：npm run ai-feedback:setup
+
+> stock-radar-api@1.0.0 ai-feedback:setup
+> node scripts/setupAiFeedbackLearningTables.js
+
+◇ injected env (7) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+====================================
+Stock Radar V2.3 AI 推薦回饋學習資料表建立
+====================================
+SQL：D:\code\stock-radar\stock-radar-api\sql\v23-ai-feedback-learning.sql
+建立 / 確認完成：
+- ai_recommendation_feedbacks
+- ai_factor_performance_snapshots
+- ai_factor_weight_suggestions
+結果：PASS
+完成：建立 V2.3 AI 推薦回饋學習資料表，耗時 0分1秒
+--------------------------------------------------
+開始：產生 V2.3 AI 推薦回饋學習
+指令：npm run ai-feedback:generate
+
+> stock-radar-api@1.0.0 ai-feedback:generate
+> node scripts/generateAiFeedbackLearning.js
+
+◇ injected env (7) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+====================================
+Stock Radar V2.3 AI 推薦回饋學習產生
+====================================
+分析截止日期：2026-06-25
+推薦回饋筆數：800
+SUCCESS：0
+PARTIAL：0
+FAIL：0
+WAITING：800
+因子績效快照：35
+權重建議：7
+結果：PASS
+完成：產生 V2.3 AI 推薦回饋學習，耗時 0分8秒
+--------------------------------------------------
+開始：V2.3 靜態 / API 驗收
+指令：npm run v23:check -- --api=http://localhost:3000
+
+> stock-radar-api@1.0.0 v23:check
+> node scripts/checkV23.js --api=http://localhost:3000
+
+
+[API 動態檢查] http://localhost:3000
+====================================
+Stock Radar V2.3 AI 推薦回饋學習驗收檢查
+====================================
+✅ [版本] API 版本為 V2.3.0 - stock-radar-api-v2.3.0
+✅ [版本] API 預期 PWA 版本為 v74 - stock-radar-pwa-v74
+✅ [版本] service-worker 快取版本為 v74 - stock-radar-pwa-v74
+✅ [前端] 側邊功能選單顯示 V2.3 - index.html
+✅ [npm 指令] ai-feedback:setup - node scripts/setupAiFeedbackLearningTables.js
+✅ [npm 指令] ai-feedback:generate - node scripts/generateAiFeedbackLearning.js
+✅ [npm 指令] ai-feedback:daily - npm run ai-feedback:setup && npm run ai-feedback:generate
+✅ [npm 指令] v23:check - node scripts/checkV23.js
+✅ [npm 指令] v23:test - node scripts/runV23Acceptance.js
+✅ [npm 指令] v22:test - node scripts/runV22Acceptance.js
+✅ [npm 指令] trade:daily - npm run trade:setup && npm run trade:performance
+✅ [npm 指令] ai-selection:daily - npm run ai-selection:setup && npm run ai-selection:generate
+✅ [必要檔案] stock-radar-api/sql/v23-ai-feedback-learning.sql - 存在
+✅ [必要檔案] stock-radar-api/scripts/setupAiFeedbackLearningTables.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/generateAiFeedbackLearning.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/checkV23.js - 存在
+✅ [必要檔案] stock-radar-api/scripts/runV23Acceptance.js - 存在
+✅ [必要檔案] stock-radar-api/server.js - 存在
+✅ [必要檔案] stock-radar-frontend/app.js - 存在
+✅ [必要檔案] stock-radar-frontend/style.css - 存在
+✅ [必要檔案] stock-radar-frontend/service-worker.js - 存在
+✅ [SQL] ai_recommendation_feedbacks 資料表 - CREATE TABLE IF NOT EXISTS `ai_recommendation_feedbacks`
+✅ [SQL] ai_factor_performance_snapshots 資料表 - CREATE TABLE IF NOT EXISTS `ai_factor_performance_snapshots`
+✅ [SQL] ai_factor_weight_suggestions 資料表 - CREATE TABLE IF NOT EXISTS `ai_factor_weight_suggestions`
+✅ [SQL] 推薦結果欄位 - feedback_result
+✅ [SQL] 權重建議欄位 - suggestion_action
+✅ [API 路由] GET /health - server.js 靜態檢查
+✅ [API 路由] GET /v23/status - server.js 靜態檢查
+✅ [API 路由] GET /v23/acceptance - server.js 靜態檢查
+✅ [API 路由] GET /ai-feedback/summary - server.js 靜態檢查
+✅ [API 路由] GET /ai-feedback/factors - server.js 靜態檢查
+✅ [API 路由] GET /ai-feedback/weights - server.js 靜態檢查
+✅ [API 路由] POST /ai-feedback/generate - server.js 靜態檢查
+✅ [API 路由] GET /ai-selection/top - server.js 靜態檢查
+✅ [前端] AI 回饋學習頁 - renderAiFeedbackPage
+✅ [前端] AI 回饋 API - /ai-feedback/summary
+✅ [前端] 因子績效 API - /ai-feedback/factors
+✅ [前端] 權重建議 API - /ai-feedback/weights
+✅ [前端] V2.3 文字 - V2.3 AI 推薦回饋學習
+✅ [前端] 不再顯示 V1.4 系統狀態 - V2.3 status copy
+✅ [相容] 保留 V2.2 交易績效 - V2.2 routes
+✅ [相容] 保留 V2.1 持股風控 - V2.1 routes
+✅ [相容] 保留 V2.0 AI 多因子 - V2.0 routes
+✅ [API 動態] /health - HTTP 200
+✅ [API 動態] /v23/status - HTTP 200
+✅ [API 動態] /v23/acceptance - HTTP 200
+✅ [API 動態] /ai-feedback/summary - HTTP 200
+✅ [API 動態] /ai-feedback/factors - HTTP 200
+✅ [API 動態] /ai-feedback/weights - HTTP 200
+------------------------------------
+PASS：49
+WARN：0
+FAIL：0
+結果：PASS
+完成：V2.3 靜態 / API 驗收，耗時 0分1秒
+--------------------------------------------------
+結束時間：2026/6/25 23:17:12
+總耗時：0分10秒
+結果：PASS
