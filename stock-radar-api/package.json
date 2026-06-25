@@ -65,7 +65,9 @@
     "ai-selection:generate": "node scripts/generateAiSelectionSignals.js",
     "ai-selection:daily": "npm run ai-selection:setup && npm run ai-selection:generate",
     "v20:check": "node scripts/checkV20.js",
-    "v20:test": "node scripts/runV20Acceptance.js"
+    "v20:test": "node scripts/runV20Acceptance.js",
+    "v201:check": "node scripts/checkV20.js",
+    "v201:test": "node scripts/runV20Acceptance.js"
   },
   "keywords": [
     "stock",

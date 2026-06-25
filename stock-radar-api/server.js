@@ -1273,8 +1273,8 @@ async function buildDailyStrategyReport(options = {}) {
 
 
 
-const API_VERSION = "stock-radar-api-v2.0.0";
-const PWA_EXPECTED_VERSION = "stock-radar-pwa-v70";
+const API_VERSION = "stock-radar-api-v2.0.1";
+const PWA_EXPECTED_VERSION = "stock-radar-pwa-v71";
 
 const V13_CORE_TABLES = [
   { name: "stocks", label: "股票主檔", date_column: "updated_at" },
@@ -4568,8 +4568,8 @@ app.get("/v14/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        (API_VERSION === "stock-radar-api-v1.4.8.6" || API_VERSION === "stock-radar-api-v1.5.0" || API_VERSION === "stock-radar-api-v1.6.0") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v62") ? "pass" : "fail",
-        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。V1.5 會相容保留 V1.4 功能。`,
+        (API_VERSION === "stock-radar-api-v1.4.8.6" || API_VERSION === "stock-radar-api-v1.5.0" || API_VERSION === "stock-radar-api-v1.6.0" || API_VERSION === "stock-radar-api-v1.7.0" || API_VERSION === "stock-radar-api-v1.8.0" || API_VERSION === "stock-radar-api-v1.9.0" || API_VERSION === "stock-radar-api-v2.0.0" || API_VERSION === "stock-radar-api-v2.0.1") && (PWA_EXPECTED_VERSION === "stock-radar-pwa-v60" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v61" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v62" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v63" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v64" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v65" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" || PWA_EXPECTED_VERSION === "stock-radar-pwa-v71") ? "pass" : "fail",
+        `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。新版會相容保留既有功能。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
       buildCheck(
@@ -5854,7 +5854,7 @@ app.get("/ai-selection/latest", async (req, res) => {
     res.json({
       success: true,
       version: API_VERSION,
-      module: "V2.0 AI 多因子選股引擎",
+      module: "V2.0.1 AI 多因子選股引擎",
       market: market || "全部",
       ...payload,
     });
@@ -5898,7 +5898,7 @@ app.get("/v20/status", async (req, res) => {
       buildCheck(
         "versions",
         "API / PWA 版本",
-        API_VERSION === "stock-radar-api-v2.0.0" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v70" ? "pass" : "fail",
+        API_VERSION === "stock-radar-api-v2.0.1" && PWA_EXPECTED_VERSION === "stock-radar-pwa-v71" ? "pass" : "fail",
         `API ${API_VERSION}，PWA ${PWA_EXPECTED_VERSION}。`,
         { api_version: API_VERSION, pwa_expected_version: PWA_EXPECTED_VERSION },
       ),
@@ -5919,7 +5919,7 @@ app.get("/v20/status", async (req, res) => {
       pwa_expected_version: PWA_EXPECTED_VERSION,
       module: "V2.0 AI 多因子選股引擎",
       overall_status: overallStatus,
-      overall_message: overallStatus === "pass" ? "V2.0 AI 多因子選股引擎、資料表、摘要與排行正常。" : overallStatus === "warn" ? "V2.0 程式已就緒，但 AI 訊號尚需產生。" : "V2.0 有必要資料表或版本狀態異常，需要修正。",
+      overall_message: overallStatus === "pass" ? "V2.0.1 AI 多因子選股引擎、資料表、摘要、排行與狀態頁正常。" : overallStatus === "warn" ? "V2.0 程式已就緒，但 AI 訊號尚需產生。" : "V2.0 有必要資料表或版本狀態異常，需要修正。",
       progress_percent: calculateV20Progress(),
       checked_at: nowTaipeiText(),
       database: dbInfo,

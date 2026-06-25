@@ -7,8 +7,8 @@ const __dirname = path.dirname(__filename);
 const apiDir = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(apiDir, "..");
 const args = process.argv.slice(2);
-const EXPECTED_API_VERSION = "stock-radar-api-v2.0.0";
-const EXPECTED_PWA_VERSION = "stock-radar-pwa-v70";
+const EXPECTED_API_VERSION = "stock-radar-api-v2.0.1";
+const EXPECTED_PWA_VERSION = "stock-radar-pwa-v71";
 
 function getArg(name) {
   const prefix = `--${name}=`;
@@ -55,9 +55,9 @@ async function main() {
   const packageJson = JSON.parse(read("stock-radar-api/package.json"));
   const checks = [];
 
-  checks.push(createCheck("版本", "API 版本為 V2.0.0", serverSource.includes(`const API_VERSION = "${EXPECTED_API_VERSION}"`), EXPECTED_API_VERSION));
-  checks.push(createCheck("版本", "API 預期 PWA 版本為 v70", serverSource.includes(`const PWA_EXPECTED_VERSION = "${EXPECTED_PWA_VERSION}"`), EXPECTED_PWA_VERSION));
-  checks.push(createCheck("版本", "service-worker 快取版本為 v70", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "API 版本為 V2.0.1", serverSource.includes(`const API_VERSION = "${EXPECTED_API_VERSION}"`), EXPECTED_API_VERSION));
+  checks.push(createCheck("版本", "API 預期 PWA 版本為 v71", serverSource.includes(`const PWA_EXPECTED_VERSION = "${EXPECTED_PWA_VERSION}"`), EXPECTED_PWA_VERSION));
+  checks.push(createCheck("版本", "service-worker 快取版本為 v71", serviceWorkerSource.includes(EXPECTED_PWA_VERSION), EXPECTED_PWA_VERSION));
 
   const requiredScripts = [
     "ai-selection:setup",
@@ -65,6 +65,8 @@ async function main() {
     "ai-selection:daily",
     "v20:check",
     "v20:test",
+    "v201:check",
+    "v201:test",
     "big-holder:daily",
     "main-force:daily",
     "breakout:daily",
@@ -147,12 +149,17 @@ async function main() {
     }
   }
 
+
+  checks.push(createCheck("前端", "側邊功能選單已改為 V2.0 顯示", indexSource.includes("V2.0 AI 多因子"), "index.html"));
+  checks.push(createCheck("前端", "我的頁改讀 /v20/status", appSource.includes('fetchJson("/v20/status"') && !appSource.includes('正在讀取 /health 與 /v14/status'), "/v20/status"));
+  checks.push(createCheck("前端", "不再顯示 V1.4 系統狀態", !appSource.includes("V1.4 系統狀態") && !appSource.includes("V1.4 功能完成度") && !appSource.includes("重新檢查 V1.4"), "V2.0 status copy"));
+
   const failCount = checks.filter((check) => check.status === "fail").length;
   const warnCount = checks.filter((check) => check.status === "warn").length;
   const passCount = checks.filter((check) => check.status === "pass").length;
 
   console.log("====================================");
-  console.log("Stock Radar V2.0 靜態 / API 驗收檢查");
+  console.log("Stock Radar V2.0.1 UI 狀態修正驗收檢查");
   console.log("====================================");
 
   for (const check of checks) {

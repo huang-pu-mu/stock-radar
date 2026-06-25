@@ -92,7 +92,7 @@ async function main() {
   fs.mkdirSync(logDir, { recursive: true });
 
   const startedAt = new Date();
-  const logFile = path.join(logDir, `v20-acceptance-${formatDateTime(startedAt)}.log`);
+  const logFile = path.join(logDir, `v201-acceptance-${formatDateTime(startedAt)}.log`);
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
   const apiBaseUrl = getArg("api");
   const tradeDate = getArg("date");
@@ -101,7 +101,7 @@ async function main() {
   const warnings = [];
 
   appendLine(logStream, "====================================");
-  appendLine(logStream, "Stock Radar V2.0 自動驗收測試");
+  appendLine(logStream, "Stock Radar V2.0.1 UI 狀態修正自動驗收測試");
   appendLine(logStream, "====================================");
   appendLine(logStream, `工作目錄：${apiDir}`);
   appendLine(logStream, `Log 檔案：${logFile}`);
@@ -119,7 +119,7 @@ async function main() {
     tasks.push({ title: "產生AI 多因子選股訊號", command: "npm", args: ["run", "ai-selection:generate", ...(tradeDate ? ["--", tradeDate] : [])], cwd: apiDir });
   }
 
-  tasks.push({ title: "V2.0 靜態 / API 驗收", command: "npm", args: ["run", "v20:check", ...(apiBaseUrl ? ["--", `--api=${apiBaseUrl}`] : [])], cwd: apiDir });
+  tasks.push({ title: "V2.0.1 靜態 / API 驗收", command: "npm", args: ["run", "v201:check", ...(apiBaseUrl ? ["--", `--api=${apiBaseUrl}`] : [])], cwd: apiDir });
 
   for (const task of tasks) {
     try {
